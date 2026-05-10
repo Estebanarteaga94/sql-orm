@@ -3165,6 +3165,24 @@ mod tests {
         assert_eq!(registry.entry_count(), 1);
     }
 
+    #[tokio::test]
+    async fn mark_unchanged_on_added_entry_discards_pending_insert_before_validation() {
+        let dbset = DbSet::<CompositeKeyEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = dbset.add_tracked(CompositeKeyEntity);
+
+        tracked.mark_unchanged();
+        let saved = dbset.save_tracked_added().await.unwrap();
+
+        assert_eq!(saved, 0);
+        assert_eq!(tracked.state(), crate::EntityState::Unchanged);
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(
+            registry.registrations()[0].state,
+            crate::EntityState::Unchanged
+        );
+    }
+
     #[test]
     fn dbset_remove_tracked_marks_loaded_entity_as_deleted() {
         let dbset = DbSet::<TestEntity>::disconnected();
