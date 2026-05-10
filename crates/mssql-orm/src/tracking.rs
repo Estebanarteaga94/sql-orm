@@ -224,12 +224,15 @@ impl<T> Tracked<T> {
 
     /// Explicitly marks this tracked value as `Deleted`.
     ///
-    /// This is a state transition only; it does not execute SQL. Prefer
-    /// `DbSet::remove_tracked(...)` when the wrapper is still attached to a
-    /// context, because that API also cancels pending `Added` inserts by
-    /// detaching them from the tracker.
+    /// This is a state transition only; it does not execute SQL. Calling it
+    /// for an `Added` wrapper cancels the pending local insert by detaching the
+    /// wrapper from the tracker.
     pub fn mark_deleted(&mut self) {
+        let was_added = self.inner.state == EntityState::Added;
         self.inner.state = EntityState::Deleted;
+        if was_added {
+            self.detach_registry();
+        }
     }
 
     /// Explicitly accepts the current in-memory value as unchanged.
@@ -1048,6 +1051,18 @@ mod tests {
 
         assert_eq!(tracked.state(), EntityState::Deleted);
         assert_eq!(registry.registrations()[0].state, EntityState::Deleted);
+    }
+
+    #[test]
+    fn mark_deleted_on_added_registered_entry_cancels_pending_insert() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_added(DummyEntity);
+        tracked.attach_registry_added(Arc::clone(&registry));
+
+        tracked.mark_deleted();
+
+        assert_eq!(tracked.state(), EntityState::Deleted);
+        assert_eq!(registry.entry_count(), 0);
     }
 
     #[test]
