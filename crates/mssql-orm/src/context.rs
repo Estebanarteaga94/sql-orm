@@ -3182,6 +3182,24 @@ mod tests {
         );
     }
 
+    #[test]
+    fn dbset_remove_tracked_marks_modified_entity_as_deleted_without_detaching() {
+        let dbset = DbSet::<TestEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(TestEntity);
+        tracked.attach_registry(registry.clone());
+        tracked.current_mut();
+
+        dbset.remove_tracked(&mut tracked);
+
+        assert_eq!(tracked.state(), crate::EntityState::Deleted);
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(
+            registry.registrations()[0].state,
+            crate::EntityState::Deleted
+        );
+    }
+
     #[tokio::test]
     async fn save_tracked_deleted_rejects_composite_primary_keys_before_sql() {
         let dbset = DbSet::<CompositeKeyEntity>::disconnected();
