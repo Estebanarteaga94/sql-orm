@@ -36,7 +36,7 @@ Pay special attention to:
 
 - SQL Server is the only supported database backend.
 - Raw SQL is an explicit escape hatch and does not automatically apply tenant or soft-delete filters.
-- Runtime audit-field auto-fill is not implemented.
+- Runtime audit-field auto-fill is implemented for audited insert/update paths, but raw SQL and semantic soft-delete deletes remain explicit escape hatches.
 - Pooled transactions remain blocked until one physical connection can be pinned for the full transaction closure.
 
 ## Guidance for Contributors

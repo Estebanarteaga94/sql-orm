@@ -168,8 +168,8 @@ Initial code-first ORM release for Rust and SQL Server, built on top of Tiberius
 - The release introduces the `Entity Policies` concept.
 - `#[derive(AuditFields)]` defines reusable audit columns.
 - `#[orm(audit = Audit)]` expands audit columns into `EntityMetadata.columns`.
-- `AuditEntity::audit_policy()` exposes audit-owned columns for audited entities without changing snapshots, diffs, or DDL.
-- Audit columns participate as normal metadata/schema columns in snapshots, diffs, and DDL.
+- `AuditEntity::audit_policy()` exposes the subset of audit-owned columns for audited entities without adding a second snapshot, diff, or DDL path.
+- Audit columns still participate as normal metadata/schema columns in `EntityMetadata.columns`, snapshots, diffs, and DDL.
 - `#[derive(SoftDeleteFields)]` and `#[orm(soft_delete = SoftDelete)]` add runtime soft-delete behavior, default read visibility, and schema columns through the normal column pipeline.
 - `#[derive(SoftDeleteFields)]` also implements `SoftDeleteValues`, enabling typed request values through `with_soft_delete_values(SoftDelete { ... })` on `SharedConnection` and derived `DbContext`s.
 - `#[derive(TenantContext)]` and `#[orm(tenant = CurrentTenant)]` add opt-in tenant scoping with mandatory filters on the root entity and tenant insert auto-fill/validation.

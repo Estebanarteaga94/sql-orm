@@ -151,7 +151,7 @@ The macro:
 
 Audit columns are metadata/schema columns in the current release. They do not become visible Rust fields and do not generate symbols such as `Todo::created_at`. `FromRow` for the entity materializes only real Rust fields.
 
-`#[derive(Entity)]` also implements `AuditEntity` for every entity. For entities declaring `#[orm(audit = Audit)]`, `audit_policy()` returns `Some(EntityPolicyMetadata)` with only the audit-owned columns. Entities without `audit` return `None`. This contract is runtime metadata only; it does not change snapshots, diffs, DDL, row mapping, or the flattened `EntityMetadata.columns` shape.
+`#[derive(Entity)]` also implements `AuditEntity` for every entity. For entities declaring `#[orm(audit = Audit)]`, `audit_policy()` returns `Some(EntityPolicyMetadata)` with only the audit-owned columns. Entities without `audit` return `None`. This hook is runtime metadata over the already-expanded audit columns; it does not add a second snapshot, diff, DDL, row-mapping, or `EntityMetadata.columns` pipeline.
 
 ## Soft Delete
 
