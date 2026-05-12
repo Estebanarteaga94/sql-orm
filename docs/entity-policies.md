@@ -91,6 +91,12 @@ The contract exposes a stable name, a static column-name slice for compile-time 
 
 `#[derive(AuditFields)]` implements `EntityPolicy` for a user-defined struct. Its fields become reusable audit columns.
 
+Audit fields do not have to use the predefined semantic markers. The markers
+`created_at`, `created_by`, `updated_at`, and `updated_by` are optional metadata
+for common audit roles, not column-name inference rules. Applications can add
+custom audit columns by declaring normal fields and, when needed, mapping them
+to physical names with `#[orm(column = "...")]`.
+
 Supported field attributes include:
 
 - `column`
@@ -126,6 +132,37 @@ The derive validates:
 - column names must not be empty;
 - duplicate columns are rejected;
 - unsupported attributes produce compile-time errors.
+
+Example with application-specific audit columns:
+
+```rust
+#[derive(AuditFields)]
+struct Audit {
+    #[orm(column = "audit_created_stamp")]
+    #[orm(updatable = false)]
+    created_stamp: DateTime<Utc>,
+
+    #[orm(column = "audit_created_actor")]
+    #[orm(updatable = false)]
+    created_actor: String,
+
+    #[orm(column = "audit_modified_stamp")]
+    #[orm(nullable)]
+    modified_stamp: Option<DateTime<Utc>>,
+
+    #[orm(column = "audit_modified_actor")]
+    #[orm(nullable)]
+    modified_actor: Option<String>,
+
+    #[orm(column = "audit_source")]
+    #[orm(length = 80)]
+    source: String,
+}
+```
+
+`insertable` and `updatable` decide whether a runtime value is valid for
+`AuditOperation::Insert` or `AuditOperation::Update`. The ORM does not decide
+that from field names such as `created_*` or `modified_*`.
 
 ## `#[orm(audit = Audit)]`
 
@@ -369,6 +406,14 @@ fn with_audit_values<V: AuditValues>(&self, values: V) -> Self;
 
 Internally this helper converts the typed struct into the existing `AuditRequestValues` path. It does not replace `AuditProvider`, and it does not move request context into `core`, `query`, `sqlserver`, or `tiberius`.
 
+`with_audit_values(...)` always converts the whole `AuditFields` value into
+column values. It does not inspect the current operation and omit fields for
+you. If the struct contains creation-only columns marked `updatable = false`,
+passing the same full struct to an update path can fail validation because those
+columns are not updatable. For operation-specific audit values, prefer
+`AuditProvider` or low-level `AuditRequestValues`, where the caller can return
+only the columns that apply to the current operation.
+
 The semantic markers are explicit metadata, not name inference:
 
 - `#[orm(created_at)]` marks the creation timestamp value.
@@ -383,8 +428,44 @@ Rules:
 - The user supplies concrete values by passing an instance of that same struct to `with_audit_values(...)`.
 - No audit role is mandatory; a policy may contain only the fields required by the application.
 - Insert and update still filter by `AuditOperation` plus `insertable`/`updatable` metadata.
+- `with_audit_values(...)` is best suited when all provided fields are valid for the write path being executed.
 - Explicit mutation values keep highest precedence; typed audit values map to request values and therefore precede provider values.
 - The low-level `AuditProvider` and `AuditRequestValues` remain available.
+
+For example, this is valid for an insert when the creation columns are
+insertable:
+
+```rust
+let db = db.with_audit_values(Audit {
+    created_stamp: Utc::now(),
+    created_actor: current_user_id.clone(),
+    modified_stamp: None,
+    modified_actor: None,
+    source: "api".to_string(),
+});
+```
+
+For updates with separate modified columns, use an operation-aware provider:
+
+```rust
+struct AppAuditProvider {
+    user_id: String,
+}
+
+impl AuditProvider for AppAuditProvider {
+    fn values(&self, context: AuditContext<'_>) -> Result<Vec<ColumnValue>, OrmError> {
+        match context.operation {
+            AuditOperation::Insert => Ok(vec![
+                ColumnValue::new("audit_created_actor", SqlValue::String(self.user_id.clone())),
+                ColumnValue::new("audit_source", SqlValue::String("api".to_string())),
+            ]),
+            AuditOperation::Update => Ok(vec![
+                ColumnValue::new("audit_modified_actor", SqlValue::String(self.user_id.clone())),
+            ]),
+        }
+    }
+}
+```
 
 The implemented runtime contracts include:
 
