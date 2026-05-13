@@ -1130,6 +1130,30 @@ mod tests {
     }
 
     #[test]
+    fn duplicate_loaded_identity_error_leaves_rejected_wrapper_detached() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut first = Tracked::from_loaded(DummyEntity);
+
+        first
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        {
+            let mut duplicate = Tracked::from_loaded(DummyEntity);
+            let error = duplicate
+                .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+                .unwrap_err();
+
+            assert!(error.message().contains("already tracked"));
+            assert_eq!(duplicate.state(), EntityState::Unchanged);
+            assert_eq!(registry.entry_count(), 1);
+        }
+
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(registry.registrations()[0].state, EntityState::Unchanged);
+    }
+
+    #[test]
     fn tracking_registry_scopes_loaded_identity_by_rust_type() {
         let registry = Arc::new(TrackingRegistry::default());
         let mut first = Tracked::from_loaded(DummyEntity);
