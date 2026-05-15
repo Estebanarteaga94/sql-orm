@@ -32,7 +32,7 @@ The current implementation intentionally does not support:
 
 ## Wrapper Types
 
-Navigation fields use wrapper types from `mssql_orm::prelude`:
+Navigation fields use wrapper types from `sql_orm::prelude`:
 
 - `Navigation<T>`: eager single navigation value, empty until loaded.
 - `Collection<T>`: eager collection navigation value, empty until loaded.
@@ -49,7 +49,7 @@ Use `belongs_to` on the dependent entity. The same entity must also declare a
 structured foreign key field.
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone)]
 #[orm(table = "users", schema = "todo")]
@@ -186,7 +186,7 @@ Metadata records:
 - target columns.
 - associated foreign key name when available.
 
-This metadata is neutral. It lives in `mssql-orm-core`, does not depend on
+This metadata is neutral. It lives in `sql-orm-core`, does not depend on
 Tiberius, and does not generate SQL by itself.
 
 ## Navigation Joins
@@ -408,7 +408,7 @@ let rows = db
     .try_inner_join_navigation_as::<User>("user", "user")?
     .select((
         Post::id,
-        SelectProjection::expr_as(mssql_orm::query::Expr::from(User::name.aliased("user")), "author_name"),
+        SelectProjection::expr_as(sql_orm::query::Expr::from(User::name.aliased("user")), "author_name"),
     ))
     .all_as::<PostSummary>()
     .await?;
@@ -478,27 +478,27 @@ Navigation runtime behavior is covered by:
 - SQL snapshots for includes, aliases, repeated joins, self-joins, tenant,
   soft delete and parameter order;
 - optional SQL Server integration test
-  `crates/mssql-orm/tests/stage20_navigation_runtime.rs`.
+  `crates/sql-orm/tests/stage20_navigation_runtime.rs`.
 
 Run the focused runtime test with:
 
 ```bash
-MSSQL_ORM_TEST_CONNECTION_STRING='<connection-string>' \
-  cargo test -p mssql-orm --test stage20_navigation_runtime -- --nocapture --test-threads=1
+SQL_ORM_TEST_CONNECTION_STRING='<connection-string>' \
+  cargo test -p sql-orm --test stage20_navigation_runtime -- --nocapture --test-threads=1
 ```
 
 To keep the test tables for manual inspection:
 
 ```bash
-KEEP_TEST_TABLES=1 MSSQL_ORM_TEST_CONNECTION_STRING='<connection-string>' \
-  cargo test -p mssql-orm --test stage20_navigation_runtime -- --nocapture --test-threads=1
+KEEP_TEST_TABLES=1 SQL_ORM_TEST_CONNECTION_STRING='<connection-string>' \
+  cargo test -p sql-orm --test stage20_navigation_runtime -- --nocapture --test-threads=1
 ```
 
 The runtime test creates tables named:
 
-- `dbo.mssql_orm_nav_users`
-- `dbo.mssql_orm_nav_profiles`
-- `dbo.mssql_orm_nav_posts`
+- `dbo.sql_orm_nav_users`
+- `dbo.sql_orm_nav_profiles`
+- `dbo.sql_orm_nav_posts`
 
 Without `KEEP_TEST_TABLES=1`, the test drops those tables after it finishes.
 

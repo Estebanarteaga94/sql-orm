@@ -1,0 +1,7 @@
+---
+source: crates/sql-orm-sqlserver/tests/migration_snapshots.rs
+expression: render_statements(&sql)
+---
+ALTER TABLE [audit].[soft_deleted_entities] ADD [deleted_at] datetime2 NULL
+GO
+ALTER TABLE [audit].[soft_deleted_entities] ADD [deleted_by] nvarchar(120) NULL

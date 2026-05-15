@@ -1,4 +1,4 @@
--- mssql-orm database update
+-- sql-orm database update
 
 SET ANSI_NULLS ON;
 
@@ -14,9 +14,9 @@ SET QUOTED_IDENTIFIER ON;
 
 SET NUMERIC_ROUNDABORT OFF;
 
-IF OBJECT_ID(N'dbo.__mssql_orm_migrations', N'U') IS NULL
+IF OBJECT_ID(N'dbo.__sql_orm_migrations', N'U') IS NULL
 BEGIN
-    CREATE TABLE [dbo].[__mssql_orm_migrations] (
+    CREATE TABLE [dbo].[__sql_orm_migrations] (
         [id] nvarchar(150) NOT NULL PRIMARY KEY,
         [name] nvarchar(255) NOT NULL,
         [applied_at] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),
@@ -25,12 +25,12 @@ BEGIN
     );
 END
 
-IF EXISTS (SELECT 1 FROM [dbo].[__mssql_orm_migrations] WHERE [id] = N'1777037241551380209_createtodoschema' AND [checksum] <> N'05186f7e590c6ba5')
+IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'1777037241551380209_createtodoschema' AND [checksum] <> N'05186f7e590c6ba5')
 BEGIN
-    THROW 50001, N'mssql-orm migration checksum mismatch for 1777037241551380209_createtodoschema', 1;
+    THROW 50001, N'sql-orm migration checksum mismatch for 1777037241551380209_createtodoschema', 1;
 END
 
-IF NOT EXISTS (SELECT 1 FROM [dbo].[__mssql_orm_migrations] WHERE [id] = N'1777037241551380209_createtodoschema')
+IF NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'1777037241551380209_createtodoschema')
 BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
@@ -72,7 +72,7 @@ BEGIN
     EXEC(N'CREATE INDEX [ix_todo_lists_owner_title] ON [todo].[todo_lists] ([owner_user_id] ASC, [title] ASC);');
     EXEC(N'ALTER TABLE [todo].[todo_lists] ADD CONSTRAINT [fk_todo_lists_owner_user_id_users] FOREIGN KEY ([owner_user_id]) REFERENCES [todo].[users] ([id]) ON DELETE CASCADE ON UPDATE NO ACTION;');
     EXEC(N'CREATE UNIQUE INDEX [ux_users_email] ON [todo].[users] ([email] ASC);');
-        INSERT INTO [dbo].[__mssql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'1777037241551380209_createtodoschema', N'createtodoschema', N'05186f7e590c6ba5', N'0.1.0');
+        INSERT INTO [dbo].[__sql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'1777037241551380209_createtodoschema', N'createtodoschema', N'05186f7e590c6ba5', N'0.1.0');
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
@@ -82,16 +82,16 @@ BEGIN
     END CATCH
 END
 
-IF EXISTS (SELECT 1 FROM [dbo].[__mssql_orm_migrations] WHERE [id] = N'1777037241765419900_verifytodoschemanoop' AND [checksum] <> N'b4f0235ecab4bbb2')
+IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'1777037241765419900_verifytodoschemanoop' AND [checksum] <> N'b4f0235ecab4bbb2')
 BEGIN
-    THROW 50001, N'mssql-orm migration checksum mismatch for 1777037241765419900_verifytodoschemanoop', 1;
+    THROW 50001, N'sql-orm migration checksum mismatch for 1777037241765419900_verifytodoschemanoop', 1;
 END
 
-IF NOT EXISTS (SELECT 1 FROM [dbo].[__mssql_orm_migrations] WHERE [id] = N'1777037241765419900_verifytodoschemanoop')
+IF NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'1777037241765419900_verifytodoschemanoop')
 BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
-        INSERT INTO [dbo].[__mssql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'1777037241765419900_verifytodoschemanoop', N'verifytodoschemanoop', N'b4f0235ecab4bbb2', N'0.1.0');
+        INSERT INTO [dbo].[__sql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'1777037241765419900_verifytodoschemanoop', N'verifytodoschemanoop', N'b4f0235ecab4bbb2', N'0.1.0');
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH
@@ -101,17 +101,17 @@ BEGIN
     END CATCH
 END
 
-IF EXISTS (SELECT 1 FROM [dbo].[__mssql_orm_migrations] WHERE [id] = N'1777038734516571446_addtodolistdescription' AND [checksum] <> N'c924fbfe5e5dcba9')
+IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'1777038734516571446_addtodolistdescription' AND [checksum] <> N'c924fbfe5e5dcba9')
 BEGIN
-    THROW 50001, N'mssql-orm migration checksum mismatch for 1777038734516571446_addtodolistdescription', 1;
+    THROW 50001, N'sql-orm migration checksum mismatch for 1777038734516571446_addtodolistdescription', 1;
 END
 
-IF NOT EXISTS (SELECT 1 FROM [dbo].[__mssql_orm_migrations] WHERE [id] = N'1777038734516571446_addtodolistdescription')
+IF NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'1777038734516571446_addtodolistdescription')
 BEGIN
     BEGIN TRY
         BEGIN TRANSACTION;
     EXEC(N'ALTER TABLE [todo].[todo_lists] ADD [description] nvarchar(500) NULL;');
-        INSERT INTO [dbo].[__mssql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'1777038734516571446_addtodolistdescription', N'addtodolistdescription', N'c924fbfe5e5dcba9', N'0.1.0');
+        INSERT INTO [dbo].[__sql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'1777038734516571446_addtodolistdescription', N'addtodolistdescription', N'c924fbfe5e5dcba9', N'0.1.0');
         COMMIT TRANSACTION;
     END TRY
     BEGIN CATCH

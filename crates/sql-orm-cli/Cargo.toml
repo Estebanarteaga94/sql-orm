@@ -1,0 +1,23 @@
+[package]
+name = "sql-orm-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Command-line tooling for sql-orm."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/sql-orm-cli"
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sql-orm-migrate.workspace = true
+sql-orm-query.workspace = true
+sql-orm-sqlserver.workspace = true
+sql-orm-tiberius.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread"] }
+
+[dev-dependencies]
+sql-orm-core.workspace = true

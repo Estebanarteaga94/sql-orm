@@ -1,0 +1,11 @@
+---
+source: crates/sql-orm-sqlserver/tests/compiler_snapshots.rs
+assertion_line: 243
+expression: render_snapshot(&compiled)
+---
+SQL: SELECT [sales].[customers].[id] AS [id], [sales].[customers].[email] AS [email] FROM [sales].[customers] WHERE (([sales].[customers].[active] = @P1) AND ([sales].[customers].[email] LIKE @P2)) ORDER BY [sales].[customers].[created_at] DESC OFFSET @P3 ROWS FETCH NEXT @P4 ROWS ONLY
+Params:
+1: Bool(true)
+2: String("%@example.com")
+3: I64(20)
+4: I64(20)

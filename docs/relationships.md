@@ -1,6 +1,6 @@
 # Relationships and Joins
 
-In `mssql-orm`, a relationship declared with `foreign_key` produces relational metadata, migration snapshots, diffs, and SQL Server DDL. Queries remain explicit: declaring a foreign key does not make joins implicit, and navigation loading must be requested through the public query APIs.
+In `sql-orm`, a relationship declared with `foreign_key` produces relational metadata, migration snapshots, diffs, and SQL Server DDL. Queries remain explicit: declaring a foreign key does not make joins implicit, and navigation loading must be requested through the public query APIs.
 
 See also [Core concepts](core-concepts.md) and
 [Navigation properties](navigation.md).
@@ -410,9 +410,9 @@ The minimum implementation guardrails are:
 - define attach/detach behavior before exposing graph tracking as stable;
 - ensure included entities loaded through different aliases still resolve to
   one canonical instance when their identity key is equal;
-- keep query compilation in `mssql-orm-sqlserver` and execution in
-  `mssql-orm-tiberius`; the identity map belongs in the public/runtime
-  `mssql-orm` layer.
+- keep query compilation in `sql-orm-sqlserver` and execution in
+  `sql-orm-tiberius`; the identity map belongs in the public/runtime
+  `sql-orm` layer.
 
 ### Opt-In Lazy Loading
 
@@ -465,7 +465,7 @@ This keeps the I/O boundary visible in Rust syntax: `await` appears where the qu
 Rust async and ownership make transparent lazy loading a poor default for this ORM:
 
 - `async` work cannot run inside a normal `Deref` or field accessor, so implicit loading would require blocking, hidden runtimes, or surprising APIs.
-- Storing context or connection handles inside every entity would blur the current architecture where execution stays in `mssql-orm-tiberius` and public entity values remain plain data.
+- Storing context or connection handles inside every entity would blur the current architecture where execution stays in `sql-orm-tiberius` and public entity values remain plain data.
 - Entity clones would need clear rules for whether they share lazy state, cached values, and connection capability.
 - Long-lived entities holding context references would introduce lifetime constraints that are hard to compose with web handlers, transactions and pools.
 - Hidden per-row loads create N+1 query regressions that are hard to see in review and telemetry.
@@ -501,10 +501,10 @@ Navigation loading must preserve existing safety behavior:
 
 Navigation support depends on earlier internal work:
 
-- navigation metadata in `mssql-orm-core`;
+- navigation metadata in `sql-orm-core`;
 - macro validation for navigation fields that are not columns;
-- table aliases in `mssql-orm-query`;
-- SQL Server alias compilation in `mssql-orm-sqlserver`;
+- table aliases in `sql-orm-query`;
+- SQL Server alias compilation in `sql-orm-sqlserver`;
 - explicit navigation join inference in `DbSetQuery`;
 - materialization that can separate root columns from included-entity columns;
 - grouping by root primary key for `has_many` collection includes;

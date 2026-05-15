@@ -1,8 +1,0 @@
-[package]
-name = "mssql-orm-query"
-version.workspace = true
-edition.workspace = true
-description = "Query AST and builder primitives for mssql-orm."
-
-[dependencies]
-mssql-orm-core.workspace = true

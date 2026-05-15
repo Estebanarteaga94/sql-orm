@@ -1,5 +1,5 @@
 use crate::domain::{AuditEvent, TodoItem, TodoList, User};
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(DbContext, Debug, Clone)]
 pub struct TodoAppDbContext {

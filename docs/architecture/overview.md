@@ -7,57 +7,57 @@ The project builds a code-first ORM for SQL Server. The architecture is split in
 ## Expected Flow
 
 1. The user defines entities and a context in Rust.
-2. `mssql-orm-macros` generates static metadata and auxiliary contracts.
-3. `mssql-orm-query` builds a typed SQL-free AST.
-4. `mssql-orm-sqlserver` compiles that AST to parameterized SQL Server SQL.
-5. `mssql-orm-tiberius` executes the query and adapts rows and errors.
-6. `mssql-orm-migrate` uses metadata for snapshots and migrations.
-7. `mssql-orm` exposes the supported public surface.
+2. `sql-orm-macros` generates static metadata and auxiliary contracts.
+3. `sql-orm-query` builds a typed SQL-free AST.
+4. `sql-orm-sqlserver` compiles that AST to parameterized SQL Server SQL.
+5. `sql-orm-tiberius` executes the query and adapts rows and errors.
+6. `sql-orm-migrate` uses metadata for snapshots and migrations.
+7. `sql-orm` exposes the supported public surface.
 
 ## Crate Boundaries
 
-### `mssql-orm-core`
+### `sql-orm-core`
 
 - Defines stable shared contracts.
 - Owns metadata, common types, and errors.
 - Does not know Tiberius or execution details.
 
-### `mssql-orm-macros`
+### `sql-orm-macros`
 
 - Implements derives and `#[orm(...)]` parsing.
 - Generates metadata and compile-time auxiliary code.
 - Must not assume SQL generation or network access.
 
-### `mssql-orm-query`
+### `sql-orm-query`
 
 - Represents the AST and typed query builder.
 - Models selection, filtering, ordering, pagination, and composition.
 - Does not emit SQL directly.
 
-### `mssql-orm-sqlserver`
+### `sql-orm-sqlserver`
 
 - Converts the AST into parameterized SQL Server SQL.
 - Centralizes identifier quoting, `@P1..@Pn` placeholders, and dialect decisions.
 - Does not open connections or execute queries.
 
-### `mssql-orm-tiberius`
+### `sql-orm-tiberius`
 
 - Encapsulates connections, execution, rows, and transactions.
 - Translates driver errors into ORM errors.
 - Does not define metadata or compile ASTs into SQL.
 
-### `mssql-orm-migrate`
+### `sql-orm-migrate`
 
 - Computes model snapshots and diffs.
 - Produces migration operations and SQL Server migration SQL.
 - Depends on model metadata and the SQL compiler, not on the public query builder.
 
-### `mssql-orm-cli`
+### `sql-orm-cli`
 
 - Orchestrates migration commands and operational tasks.
 - Must rely on internal crates rather than duplicating domain logic.
 
-### `mssql-orm`
+### `sql-orm`
 
 - Provides the consolidated public surface.
 - Reexports supported types, derives, and modules for consumers.

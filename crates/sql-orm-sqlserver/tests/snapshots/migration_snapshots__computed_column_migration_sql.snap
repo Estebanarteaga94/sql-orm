@@ -1,0 +1,8 @@
+---
+source: crates/sql-orm-sqlserver/tests/migration_snapshots.rs
+assertion_line: 64
+expression: render_statements(&sql)
+---
+ALTER TABLE [sales].[order_lines] ADD [line_total] AS ([unit_price] * [quantity])
+GO
+ALTER TABLE [sales].[order_lines] DROP COLUMN [line_total]

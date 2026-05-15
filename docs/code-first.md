@@ -1,13 +1,13 @@
 # Code-First Guide
 
-`mssql-orm` treats Rust code as the source of truth for the model. Entities, policies, relationships, and contexts are declared in Rust and expanded into static metadata by proc macros.
+`sql-orm` treats Rust code as the source of truth for the model. Entities, policies, relationships, and contexts are declared in Rust and expanded into static metadata by proc macros.
 
 See also [Core concepts](core-concepts.md).
 
 ## Entity
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone)]
 #[orm(table = "users", schema = "dbo")]

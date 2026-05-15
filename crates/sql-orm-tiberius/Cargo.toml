@@ -1,0 +1,35 @@
+[package]
+name = "sql-orm-tiberius"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Tiberius execution adapter for sql-orm."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/sql-orm-tiberius"
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+pool-bb8 = ["dep:bb8"]
+
+[dependencies]
+async-trait = "0.1"
+bb8 = { version = "0.8", optional = true }
+chrono = "0.4"
+futures-io = "0.3"
+sql-orm-core.workspace = true
+sql-orm-query.workspace = true
+sql-orm-sqlserver.workspace = true
+rust_decimal = "1"
+tiberius = { version = "0.12.3", default-features = false, features = ["chrono", "rust_decimal", "rustls", "tds73", "tokio", "tokio-util"] }
+tokio = { version = "1", features = ["net", "time"] }
+tokio-util = { version = "0.7", features = ["compat"] }
+tracing = "0.1"
+uuid = "1"
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

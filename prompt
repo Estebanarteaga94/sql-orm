@@ -32,14 +32,14 @@ No devuelvas solo recomendaciones. Debes ejecutar trabajo real en el proyecto.
 Este repositorio busca construir un ORM `code-first` en Rust para SQL Server usando Tiberius como driver de bajo nivel.
 
 La arquitectura objetivo ya está definida y debe respetarse:
-- `mssql-orm-core`: contratos, metadata, tipos, errores y abstracciones base.
-- `mssql-orm-macros`: derives y generación de metadata.
-- `mssql-orm-query`: AST y query builder, sin generar SQL directo.
-- `mssql-orm-sqlserver`: compilación de AST a SQL Server.
-- `mssql-orm-tiberius`: ejecución, conexión, filas, transacciones y adaptación a Tiberius.
-- `mssql-orm-migrate`: migraciones code-first.
-- `mssql-orm-cli`: comandos de línea de comandos.
-- `mssql-orm`: crate pública que reexporta la API.
+- `sql-orm-core`: contratos, metadata, tipos, errores y abstracciones base.
+- `sql-orm-macros`: derives y generación de metadata.
+- `sql-orm-query`: AST y query builder, sin generar SQL directo.
+- `sql-orm-sqlserver`: compilación de AST a SQL Server.
+- `sql-orm-tiberius`: ejecución, conexión, filas, transacciones y adaptación a Tiberius.
+- `sql-orm-migrate`: migraciones code-first.
+- `sql-orm-cli`: comandos de línea de comandos.
+- `sql-orm`: crate pública que reexporta la API.
 
 La estrategia de trabajo ya fue traducida a backlog en `docs/tasks.md`. Debes usar ese backlog y avanzar por etapas. La prioridad actual es continuar desde las primeras tareas de la Etapa 0, salvo que `docs/tasks.md` indique otra cosa.
 

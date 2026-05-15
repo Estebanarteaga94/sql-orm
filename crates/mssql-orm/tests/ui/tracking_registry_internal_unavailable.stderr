@@ -1,5 +1,0 @@
-error[E0599]: no method named `attach_registry` found for struct `mssql_orm::Tracked<User>` in the current scope
-  --> tests/ui/tracking_registry_internal_unavailable.rs:20:13
-   |
-20 |     tracked.attach_registry(());
-   |             ^^^^^^^^^^^^^^^ method not found in `mssql_orm::Tracked<User>`

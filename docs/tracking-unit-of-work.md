@@ -92,7 +92,7 @@ As of 2026-05-07, the first registry slice is implemented:
   may share the same physical table/key without being treated as duplicate
   tracked identities.
 - public `trybuild` coverage now includes `Tracked<T>::save(&db)` and
-  `Tracked<T>::delete(&db)` from `mssql_orm::prelude`, context-level
+  `Tracked<T>::delete(&db)` from `sql_orm::prelude`, context-level
   `find_tracked(...)`, `remove_tracked(...)`, `save_changes()` and ownership
   operations `clone`, `into_current()` and repeated `detach()`, and rejects
   direct access to internal registry attachment helpers.
@@ -209,7 +209,7 @@ define explicit graph update semantics for:
 The future implementation must still route persistence through the existing
 `DbSet` insert, update and delete paths so tenant, audit, soft-delete,
 rowversion and SQL Server execution boundaries remain centralized. It must not
-move SQL generation into `mssql-orm-query` or execution into tracking.
+move SQL generation into `sql-orm-query` or execution into tracking.
 
 ## Goal
 
@@ -223,8 +223,8 @@ The stable unit of work must:
 - keep pending operations after a `Tracked<T>` wrapper is dropped,
 - avoid duplicate tracked rows for the same persisted identity,
 - preserve existing `DbSet` insert/update/delete policy pipelines,
-- and leave SQL compilation in `mssql-orm-sqlserver` and execution in
-  `mssql-orm-tiberius`.
+- and leave SQL compilation in `sql-orm-sqlserver` and execution in
+  `sql-orm-tiberius`.
 
 ## Current Baseline
 
@@ -373,9 +373,9 @@ Before removing the experimental label, `has_persisted_changes(...)` must skip
 updates when persisted columns did not change, ignoring navigation wrappers,
 identity, computed, rowversion and non-updatable columns.
 
-Generated comparison belongs in `mssql-orm-macros` and public traits in
-`mssql-orm`. It must not be placed in `mssql-orm-query`,
-`mssql-orm-sqlserver` or `mssql-orm-tiberius`.
+Generated comparison belongs in `sql-orm-macros` and public traits in
+`sql-orm`. It must not be placed in `sql-orm-query`,
+`sql-orm-sqlserver` or `sql-orm-tiberius`.
 
 The current implementation uses `EntityPersist::has_persisted_changes(...)`,
 whose default compares `original.update_changes()` with
@@ -401,7 +401,7 @@ Per entity type:
 
 The current implementation keeps the phase order `Added -> Modified ->
 Deleted`, but no longer relies on raw context field order inside each phase.
-`#[derive(DbContext)]` asks `mssql-orm` for a metadata-based operation plan.
+`#[derive(DbContext)]` asks `sql-orm` for a metadata-based operation plan.
 For simple foreign keys between entities present in the same context, inserts
 and updates run parent tables before child tables and deletes run child tables
 before parent tables. Ties are resolved by the original context field order.
@@ -446,7 +446,7 @@ stabilization:
 - `DbContext::clear_tracker()`,
 - `DbContext::tracked_entries()` or a read-only equivalent for diagnostics.
 
-These APIs must be exposed from `mssql_orm::prelude` only after they have tests
+These APIs must be exposed from `sql_orm::prelude` only after they have tests
 and rustdoc. Until then, tracking remains experimental.
 
 ## Migration Steps

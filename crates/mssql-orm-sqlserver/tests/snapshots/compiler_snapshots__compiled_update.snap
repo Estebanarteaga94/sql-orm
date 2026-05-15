@@ -1,9 +1,0 @@
----
-source: crates/mssql-orm-sqlserver/tests/compiler_snapshots.rs
-expression: render_snapshot(&compiled)
----
-SQL: UPDATE [sales].[customers] SET [email] = @P1, [active] = @P2 OUTPUT INSERTED.* WHERE ([sales].[customers].[id] = @P3)
-Params:
-1: String("ana.maria@example.com")
-2: Bool(false)
-3: I64(7)

@@ -1,0 +1,16 @@
+[package]
+name = "sql-orm-query"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Query AST and builder primitives for sql-orm."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/sql-orm-query"
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sql-orm-core.workspace = true

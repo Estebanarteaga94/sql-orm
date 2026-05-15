@@ -2,13 +2,13 @@ use axum::extract::State;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Router, routing::get};
-use mssql_orm::prelude::{
+use sql_orm::prelude::{
     DbContext, MssqlConnectionConfig, MssqlHealthCheckOptions, MssqlHealthCheckQuery,
     MssqlOperationalOptions, MssqlParameterLogMode, MssqlPoolOptions, MssqlRetryOptions,
     MssqlSlowQueryOptions, MssqlTimeoutOptions, MssqlTracingOptions, OrmError,
 };
 #[cfg(feature = "pool-bb8")]
-use mssql_orm::{MssqlPool, MssqlPoolBuilder};
+use sql_orm::{MssqlPool, MssqlPoolBuilder};
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::time::Duration;
@@ -30,22 +30,22 @@ pub use queries::{
 };
 
 const DEFAULT_APP_ADDR: &str = "127.0.0.1:3000";
-const DEFAULT_RUST_LOG: &str = "info,todo_app=debug,mssql_orm=debug";
+const DEFAULT_RUST_LOG: &str = "info,todo_app=debug,sql_orm=debug";
 
 #[derive(Debug, Clone, Default)]
 pub struct PendingTodoAppDbContext;
 
 impl DbContext for PendingTodoAppDbContext {
-    fn from_shared_connection(_connection: mssql_orm::SharedConnection) -> Self {
+    fn from_shared_connection(_connection: sql_orm::SharedConnection) -> Self {
         Self
     }
 
-    fn shared_connection(&self) -> mssql_orm::SharedConnection {
+    fn shared_connection(&self) -> sql_orm::SharedConnection {
         panic!("pending todo_app db context does not expose a shared connection yet")
     }
 
-    fn tracking_registry(&self) -> mssql_orm::TrackingRegistryHandle {
-        std::sync::Arc::new(mssql_orm::TrackingRegistry::default())
+    fn tracking_registry(&self) -> sql_orm::TrackingRegistryHandle {
+        std::sync::Arc::new(sql_orm::TrackingRegistry::default())
     }
 
     fn health_check(&self) -> impl std::future::Future<Output = Result<(), OrmError>> + Send {
@@ -61,7 +61,7 @@ impl TodoAppApi for PendingTodoAppDbContext {
     fn list_user_lists(
         &self,
         _user_id: i64,
-        _page: mssql_orm::PageRequest,
+        _page: sql_orm::PageRequest,
     ) -> impl http::FutureResult<Vec<TodoList>> {
         async { Err(OrmError::new("todo_app pool wiring is still pending")) }
     }
@@ -248,8 +248,8 @@ mod tests {
     use axum::extract::State;
     use axum::http::StatusCode;
     use axum::response::IntoResponse;
-    use mssql_orm::prelude::OrmError;
-    use mssql_orm::{DbContext, SharedConnection, TrackingRegistry, TrackingRegistryHandle};
+    use sql_orm::prelude::OrmError;
+    use sql_orm::{DbContext, SharedConnection, TrackingRegistry, TrackingRegistryHandle};
     use std::collections::HashMap;
     use std::future;
     use std::net::SocketAddr;
@@ -313,7 +313,7 @@ mod tests {
         fn list_user_lists(
             &self,
             user_id: i64,
-            page: mssql_orm::PageRequest,
+            page: sql_orm::PageRequest,
         ) -> impl http::FutureResult<Vec<TodoList>> {
             let pagination = page.to_pagination();
             let start = pagination.offset as usize;

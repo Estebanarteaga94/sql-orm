@@ -1,8 +1,0 @@
----
-source: crates/mssql-orm/src/dbset_query.rs
-expression: render_compiled_query(&compiled)
----
-SQL: SELECT [sales].[tenant_navigation_targets].[id] AS [id], [sales].[tenant_navigation_targets].[owner_id] AS [owner_id], [owner].[id] AS [owner__id], [owner].[tenant_id] AS [owner__tenant_id] FROM [sales].[tenant_navigation_targets] LEFT JOIN [sales].[tenant_navigation_roots] AS [owner] ON (([sales].[tenant_navigation_targets].[owner_id] = [owner].[id]) AND ([owner].[tenant_id] = @P1)) WHERE ([sales].[tenant_navigation_targets].[id] > @P2)
-Params:
-1: I64(42)
-2: I64(100)

@@ -1,6 +1,6 @@
 # Entity Policies
 
-This document describes the public concept, architectural boundaries, implemented behavior, and deferred work for `Entity Policies` in `mssql-orm`.
+This document describes the public concept, architectural boundaries, implemented behavior, and deferred work for `Entity Policies` in `sql-orm`.
 
 The initial MVP implemented audit as metadata/schema through `#[derive(AuditFields)]` and `#[orm(audit = Audit)]`. Later cuts added runtime behavior for `soft_delete`, mandatory tenant filters for `tenant`, and the public runtime contract for `AuditProvider`. Audit metadata ownership, context transport, and insert/update auto-fill are implemented on the main persistence paths.
 
@@ -13,7 +13,7 @@ An `Entity Policy` is a reusable code-first model component that an entity can d
 The feature avoids repeating the same structural fields in many entities, for example audit columns, soft-delete columns, or tenant columns. A policy does not replace the entity model; it extends it declaratively.
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(AuditFields)]
 struct Audit {
@@ -46,14 +46,14 @@ This prevents a second schema pipeline. The rest of the system continues to use 
 
 - `ModelSnapshot::from_entities(...)` reads columns from `EntityMetadata`.
 - The diff engine compares `ColumnSnapshot` values without caring whether a column came from an entity field or from a policy.
-- `mssql-orm-sqlserver` compiles DDL from normal snapshots and operations.
+- `sql-orm-sqlserver` compiles DDL from normal snapshots and operations.
 - `DbContext` and the migration CLI consume normal entity metadata.
 
 Policy-specific metadata can exist for validation and ergonomics, but it must not become a parallel path for snapshots, diffs, or DDL.
 
 ## Metadata Contract
 
-The neutral contract lives in `mssql-orm-core` and does not know Tiberius, executable SQL, or migrations:
+The neutral contract lives in `sql-orm-core` and does not know Tiberius, executable SQL, or migrations:
 
 ```rust
 pub struct EntityPolicyMetadata {
@@ -73,7 +73,7 @@ pub trait EntityPolicy: Sized + Send + Sync + 'static {
 }
 ```
 
-The contract exposes a stable name, a static column-name slice for compile-time validation, and a static `ColumnMetadata` slice. Expansion into an entity remains the responsibility of `mssql-orm-macros`.
+The contract exposes a stable name, a static column-name slice for compile-time validation, and a static `ColumnMetadata` slice. Expansion into an entity remains the responsibility of `sql-orm-macros`.
 
 `EntityMetadata` does not currently keep a separate list of policies. The data that must flow through snapshots, diffs, and DDL is the resulting column.
 
@@ -247,7 +247,7 @@ Implemented shape:
 
 ```rust
 use chrono::{DateTime, Utc};
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(SoftDeleteFields)]
 struct SoftDelete {
@@ -365,7 +365,7 @@ Implemented shape:
 
 ```rust
 use chrono::{DateTime, Utc};
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(AuditFields)]
 struct Audit {
@@ -490,7 +490,7 @@ The implemented direction for writes is:
 
 - `audit = Audit` remains the compile-time source of columns;
 - `AuditProvider` supplies runtime values such as `now`, user id, or request values;
-- mutation happens in the public `mssql-orm` crate over normalized `Vec<ColumnValue>`;
+- mutation happens in the public `sql-orm` crate over normalized `Vec<ColumnValue>`;
 - `core`, `query`, `sqlserver`, and `tiberius` do not learn request context;
 - values are not inferred globally from column names.
 - `DbSet::insert`, Active Record insert, and `save_changes()` for `Added` converge through the same normalized insert path.

@@ -1,5 +1,0 @@
----
-source: crates/mssql-orm-sqlserver/tests/migration_snapshots.rs
-expression: render_statements(&sql)
----
-EXEC sp_rename N'[sales].[customers]', N'clients', N'OBJECT'

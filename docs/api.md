@@ -1,11 +1,11 @@
 # Public API
 
-This document is a compact inventory of the current public surface exposed by the root crate `mssql-orm`.
+This document is a compact inventory of the current public surface exposed by the root crate `sql-orm`.
 
 For consumer code, the recommended entry point is:
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 ```
 
 The root crate concentrates the user API and reexports selected internals for tests, tooling, and advanced cases. Responsibilities remain separated by crate: `query` builds ASTs, `sqlserver` compiles SQL, `tiberius` executes, `migrate` manages snapshots/diffs/migrations, and `core` defines shared contracts.
@@ -29,7 +29,7 @@ The following derives are available from the public crate:
 Basic example:
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone)]
 #[orm(table = "users", schema = "dbo")]
@@ -214,7 +214,7 @@ Common query methods:
 - `all_as::<T>().await`
 - `first_as::<T>().await`
 
-The query builder produces AST values. SQL generation belongs to `mssql-orm-sqlserver`.
+The query builder produces AST values. SQL generation belongs to `sql-orm-sqlserver`.
 
 `include::<T>(...)` and `include_as::<T>(...)` load one `belongs_to` /
 `has_one` navigation. `include_many::<T>(...)` and `include_many_as::<T>(...)`
@@ -261,7 +261,7 @@ joins for DTO projections, or raw SQL for fully manual result shapes.
 Projection DTOs can derive `FromRow`:
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Debug, FromRow)]
 struct UserSummary {
@@ -275,7 +275,7 @@ let summaries = db
     .query()
     .select((
         User::id,
-        SelectProjection::expr_as(mssql_orm::query::Expr::from(User::email), "email_address"),
+        SelectProjection::expr_as(sql_orm::query::Expr::from(User::email), "email_address"),
     ))
     .all_as::<UserSummary>()
     .await?;
@@ -371,12 +371,12 @@ The public crate reexports Tiberius adapter configuration types such as:
 
 The root crate also reexports selected internal crates:
 
-- `mssql_orm::core`
-- `mssql_orm::query`
-- `mssql_orm::sqlserver`
-- `mssql_orm::tiberius`
-- `mssql_orm::migrate`
-- `mssql_orm::macros`
+- `sql_orm::core`
+- `sql_orm::query`
+- `sql_orm::sqlserver`
+- `sql_orm::tiberius`
+- `sql_orm::migrate`
+- `sql_orm::macros`
 
 These are useful for tests, tooling, snapshots, and advanced diagnostics. Normal application code should prefer the prelude.
 

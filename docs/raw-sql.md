@@ -4,8 +4,8 @@ Typed raw SQL is an explicit escape hatch for queries and commands that do not f
 
 This API does not change the architecture:
 
-- `mssql-orm-query` remains an AST crate and does not parse raw SQL.
-- `mssql-orm-sqlserver` remains the normal compiler for ORM queries.
+- `sql-orm-query` remains an AST crate and does not parse raw SQL.
+- `sql-orm-sqlserver` remains the normal compiler for ORM queries.
 - raw SQL execution still goes through the public root crate and the Tiberius adapter.
 
 See also [Core concepts](core-concepts.md).
@@ -159,4 +159,4 @@ Coverage includes:
 - raw parameter unit tests;
 - repeated `@P1` behavior;
 - continuous placeholder validation;
-- public real SQL Server tests behind `MSSQL_ORM_TEST_CONNECTION_STRING`.
+- public real SQL Server tests behind `SQL_ORM_TEST_CONNECTION_STRING`.

@@ -539,99 +539,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mssql-orm"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "insta",
- "mssql-orm-core",
- "mssql-orm-macros",
- "mssql-orm-migrate",
- "mssql-orm-query",
- "mssql-orm-sqlserver",
- "mssql-orm-tiberius",
- "rust_decimal",
- "tokio",
- "trybuild",
- "uuid",
-]
-
-[[package]]
-name = "mssql-orm-cli"
-version = "0.1.0"
-dependencies = [
- "mssql-orm-core",
- "mssql-orm-migrate",
- "mssql-orm-query",
- "mssql-orm-sqlserver",
- "mssql-orm-tiberius",
- "tokio",
-]
-
-[[package]]
-name = "mssql-orm-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rust_decimal",
- "uuid",
-]
-
-[[package]]
-name = "mssql-orm-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "mssql-orm-migrate"
-version = "0.1.0"
-dependencies = [
- "mssql-orm-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "mssql-orm-query"
-version = "0.1.0"
-dependencies = [
- "mssql-orm-core",
-]
-
-[[package]]
-name = "mssql-orm-sqlserver"
-version = "0.1.0"
-dependencies = [
- "insta",
- "mssql-orm-core",
- "mssql-orm-migrate",
- "mssql-orm-query",
-]
-
-[[package]]
-name = "mssql-orm-tiberius"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bb8",
- "chrono",
- "futures-io",
- "mssql-orm-core",
- "mssql-orm-query",
- "mssql-orm-sqlserver",
- "rust_decimal",
- "tiberius",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1085,6 +992,99 @@ checksum = "3a766e1110788c36f4fa1c2b71b387a7815aa65f88ce0229841826633d93723e"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
+]
+
+[[package]]
+name = "sql-orm"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "insta",
+ "rust_decimal",
+ "sql-orm-core",
+ "sql-orm-macros",
+ "sql-orm-migrate",
+ "sql-orm-query",
+ "sql-orm-sqlserver",
+ "sql-orm-tiberius",
+ "tokio",
+ "trybuild",
+ "uuid",
+]
+
+[[package]]
+name = "sql-orm-cli"
+version = "0.1.0"
+dependencies = [
+ "sql-orm-core",
+ "sql-orm-migrate",
+ "sql-orm-query",
+ "sql-orm-sqlserver",
+ "sql-orm-tiberius",
+ "tokio",
+]
+
+[[package]]
+name = "sql-orm-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rust_decimal",
+ "uuid",
+]
+
+[[package]]
+name = "sql-orm-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "sql-orm-migrate"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sql-orm-core",
+]
+
+[[package]]
+name = "sql-orm-query"
+version = "0.1.0"
+dependencies = [
+ "sql-orm-core",
+]
+
+[[package]]
+name = "sql-orm-sqlserver"
+version = "0.1.0"
+dependencies = [
+ "insta",
+ "sql-orm-core",
+ "sql-orm-migrate",
+ "sql-orm-query",
+]
+
+[[package]]
+name = "sql-orm-tiberius"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bb8",
+ "chrono",
+ "futures-io",
+ "rust_decimal",
+ "sql-orm-core",
+ "sql-orm-query",
+ "sql-orm-sqlserver",
+ "tiberius",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
 ]
 
 [[package]]

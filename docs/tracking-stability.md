@@ -141,7 +141,7 @@ Preferred requirement:
   detection.
 
 If structural comparison requires generated code, it belongs in
-`mssql-orm-macros` and public traits exposed by `mssql-orm`, not in `query`,
+`sql-orm-macros` and public traits exposed by `sql-orm`, not in `query`,
 `sqlserver` or `tiberius`.
 
 ## Operation Ordering
@@ -271,14 +271,14 @@ The stabilization work is not complete until the following pass:
   saves and cancellation of `Added`,
 - tests for deterministic save ordering,
 - tests for all stable error cases,
-- public `trybuild` fixtures from `mssql_orm::prelude`,
+- public `trybuild` fixtures from `sql_orm::prelude`,
 - optional SQL Server runtime tests for insert, update, delete, soft delete,
   tenant, audit, rowversion and transactions,
 - `cargo fmt --all --check`,
 - `cargo check --workspace`,
 - `cargo test --workspace`,
 - `cargo clippy --workspace --all-targets --all-features`,
-- `RUSTDOCFLAGS='-D warnings' cargo doc -p mssql-orm --no-deps --all-features`.
+- `RUSTDOCFLAGS='-D warnings' cargo doc -p sql-orm --no-deps --all-features`.
 
 When real SQL Server is not available, optional runtime tests may skip, but the
 worklog must record that the stable claim still needs a real connection string

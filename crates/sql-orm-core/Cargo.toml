@@ -1,0 +1,18 @@
+[package]
+name = "sql-orm-core"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Core contracts and shared types for the sql-orm workspace."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/sql-orm-core"
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+rust_decimal = { version = "1", default-features = false, features = ["std"] }
+uuid = { version = "1", default-features = false, features = ["std"] }

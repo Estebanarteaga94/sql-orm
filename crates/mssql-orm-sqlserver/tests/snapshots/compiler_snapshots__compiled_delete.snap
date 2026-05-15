@@ -1,7 +1,0 @@
----
-source: crates/mssql-orm-sqlserver/tests/compiler_snapshots.rs
-expression: render_snapshot(&compiled)
----
-SQL: DELETE FROM [sales].[customers] WHERE ([sales].[customers].[id] = @P1)
-Params:
-1: I64(7)

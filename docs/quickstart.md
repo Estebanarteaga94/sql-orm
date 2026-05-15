@@ -1,13 +1,13 @@
 # Quickstart
 
-This guide shows the minimum path for connecting `mssql-orm`, defining a model, using `DbContext`, running basic CRUD, and executing a public query-builder query.
+This guide shows the minimum path for connecting `sql-orm`, defining a model, using `DbContext`, running basic CRUD, and executing a public query-builder query.
 
 It is written against the current repository state:
 
 - SQL Server is the only database target.
-- The normal user API is `mssql_orm::prelude::*`.
+- The normal user API is `sql_orm::prelude::*`.
 - `#[derive(Entity)]`, `#[derive(Insertable)]`, `#[derive(Changeset)]`, and `#[derive(DbContext)]` are available.
-- SQL is compiled by `mssql-orm-sqlserver` and executed by the Tiberius adapter.
+- SQL is compiled by `sql-orm-sqlserver` and executed by the Tiberius adapter.
 
 See also [Core concepts](core-concepts.md).
 
@@ -17,20 +17,20 @@ From an external project, use the root crate:
 
 ```toml
 [dependencies]
-mssql-orm = { git = "https://github.com/Estebanarteaga94/mssql-orm.git", package = "mssql-orm" }
+sql-orm = "0.1.0"
 ```
 
 If you want optional pooling:
 
 ```toml
 [dependencies]
-mssql-orm = { git = "https://github.com/Estebanarteaga94/mssql-orm.git", package = "mssql-orm", features = ["pool-bb8"] }
+sql-orm = { version = "0.1.0", features = ["pool-bb8"] }
 ```
 
 ## 2. Import the Prelude
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 ```
 
 The prelude contains the public derives, `DbContext`, `DbSet`, query extensions, errors, metadata contracts, and common SQL values.
@@ -38,7 +38,7 @@ The prelude contains the public derives, `DbContext`, `DbSet`, query extensions,
 ## 3. Define an Entity, Write Models, and Context
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone, PartialEq)]
 #[orm(table = "customers", schema = "sales")]
@@ -91,7 +91,7 @@ let db = AppDb::connect(
 ).await?;
 ```
 
-For examples and integration tests, prefer environment variables such as `DATABASE_URL` or `MSSQL_ORM_TEST_CONNECTION_STRING`.
+For examples and integration tests, prefer environment variables such as `DATABASE_URL` or `SQL_ORM_TEST_CONNECTION_STRING`.
 
 ## 5. Insert and Find
 
@@ -140,7 +140,7 @@ let customers = db
     .await?;
 ```
 
-The public query builder produces an AST. SQL Server SQL is generated only by `mssql-orm-sqlserver`.
+The public query builder produces an AST. SQL Server SQL is generated only by `sql-orm-sqlserver`.
 
 ## 8. Next Reading
 

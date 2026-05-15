@@ -1,8 +1,0 @@
----
-source: crates/mssql-orm-sqlserver/tests/migration_snapshots.rs
-assertion_line: 62
-expression: render_statements(&sql)
----
-ALTER TABLE [sales].[order_allocations] ADD CONSTRAINT [fk_order_allocations_customer_branch_customers] FOREIGN KEY ([customer_id], [branch_id]) REFERENCES [sales].[customers] ([id], [branch_id]) ON DELETE SET DEFAULT ON UPDATE CASCADE
-GO
-ALTER TABLE [sales].[order_allocations] DROP CONSTRAINT [fk_order_allocations_customer_branch_customers]

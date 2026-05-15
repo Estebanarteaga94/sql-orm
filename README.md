@@ -1,4 +1,4 @@
-# mssql-orm
+# sql-orm
 
 <p align="center">
   <strong>A code-first ORM for Rust and Microsoft SQL Server</strong>
@@ -10,7 +10,7 @@
 
 <p align="center">
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
-  <img alt="Rust" src="https://img.shields.io/badge/rust-1.75%2B-blue">
+  <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-blue">
   <img alt="Database" src="https://img.shields.io/badge/database-SQL%20Server-red">
   <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-purple">
   <img alt="License" src="https://img.shields.io/badge/license-see%20LICENSE-lightgrey">
@@ -18,9 +18,9 @@
 
 ---
 
-## What is `mssql-orm`?
+## What is `sql-orm`?
 
-`mssql-orm` is a code-first ORM for Rust applications that use Microsoft SQL Server.
+`sql-orm` is a code-first ORM for Rust applications that use Microsoft SQL Server.
 
 It lets you define your database model using Rust structs, derive metadata from those structs, build typed queries, generate SQL Server-specific SQL, run migrations, and execute everything through Tiberius.
 
@@ -78,7 +78,7 @@ The goal is to keep application code strongly typed, expressive, and close to yo
 
 ## When Should You Use It?
 
-Use `mssql-orm` if you want:
+Use `sql-orm` if you want:
 
 - A Rust-first development experience for SQL Server.
 - Code-first schema metadata.
@@ -101,20 +101,20 @@ Use the public root crate:
 
 ```toml
 [dependencies]
-mssql-orm = { git = "https://github.com/Estebanarteaga94/mssql-orm.git", package = "mssql-orm" }
+sql-orm = "0.1.0"
 ```
 
 With optional `bb8` pooling support:
 
 ```toml
 [dependencies]
-mssql-orm = { git = "https://github.com/Estebanarteaga94/mssql-orm.git", package = "mssql-orm", features = ["pool-bb8"] }
+sql-orm = { version = "0.1.0", features = ["pool-bb8"] }
 ```
 
 Import the prelude:
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 ```
 
 <details>
@@ -140,7 +140,7 @@ The prelude exposes the normal user-facing API:
 ### 1. Define an entity
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone)]
 #[orm(table = "users", schema = "dbo")]
@@ -238,7 +238,7 @@ let active_users = db
     .await?;
 ```
 
-The query builder produces a neutral AST. SQL Server SQL is generated only by `mssql-orm-sqlserver`.
+The query builder produces a neutral AST. SQL Server SQL is generated only by `sql-orm-sqlserver`.
 
 ```mermaid
 flowchart LR
@@ -256,7 +256,7 @@ flowchart LR
 Use DTO projections when you do not need full entities.
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Debug, FromRow)]
 struct UserSummary {
@@ -272,7 +272,7 @@ let summaries = db
     .select((
         User::id,
         SelectProjection::expr_as(
-            mssql_orm::query::Expr::from(User::email),
+            sql_orm::query::Expr::from(User::email),
             "email_address",
         ),
     ))
@@ -300,7 +300,7 @@ DTO projections can use:
 Relationships are explicit and metadata-driven.
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone)]
 #[orm(table = "users", schema = "dbo")]
@@ -380,7 +380,7 @@ flowchart TD
 
 ```rust
 use chrono::{DateTime, Utc};
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(AuditFields)]
 pub struct Audit {
@@ -487,7 +487,7 @@ sequenceDiagram
 Create a migration:
 
 ```bash
-mssql-orm-cli migration add CreateUsers \
+sql-orm-cli migration add CreateUsers \
   --manifest-path path/to/Cargo.toml \
   --snapshot-bin model_snapshot
 ```
@@ -495,7 +495,7 @@ mssql-orm-cli migration add CreateUsers \
 Apply pending migrations:
 
 ```bash
-mssql-orm-cli database update --execute \
+sql-orm-cli database update --execute \
   --connection-string "$DATABASE_URL"
 ```
 
@@ -540,24 +540,24 @@ The workspace is split by responsibility.
 
 | Crate | Responsibility |
 |---|---|
-| `mssql-orm-core` | Contracts, metadata, SQL values, errors, and neutral rows |
-| `mssql-orm-macros` | Derives and metadata generation |
-| `mssql-orm-query` | Query AST and query-builder primitives |
-| `mssql-orm-sqlserver` | SQL Server query and DDL compilation |
-| `mssql-orm-tiberius` | Connections, execution, transactions, rows, and pooling |
-| `mssql-orm-migrate` | Snapshots, diffs, operations, and migration helpers |
-| `mssql-orm-cli` | Migration and database commands |
-| `mssql-orm` | Public facade for applications |
+| `sql-orm-core` | Contracts, metadata, SQL values, errors, and neutral rows |
+| `sql-orm-macros` | Derives and metadata generation |
+| `sql-orm-query` | Query AST and query-builder primitives |
+| `sql-orm-sqlserver` | SQL Server query and DDL compilation |
+| `sql-orm-tiberius` | Connections, execution, transactions, rows, and pooling |
+| `sql-orm-migrate` | Snapshots, diffs, operations, and migration helpers |
+| `sql-orm-cli` | Migration and database commands |
+| `sql-orm` | Public facade for applications |
 
 ```mermaid
 flowchart TB
-    A[mssql-orm] --> B[mssql-orm-core]
-    A --> C[mssql-orm-macros]
-    A --> D[mssql-orm-query]
-    D --> E[mssql-orm-sqlserver]
-    E --> F[mssql-orm-tiberius]
-    B --> G[mssql-orm-migrate]
-    G --> H[mssql-orm-cli]
+    A[sql-orm] --> B[sql-orm-core]
+    A --> C[sql-orm-macros]
+    A --> D[sql-orm-query]
+    D --> E[sql-orm-sqlserver]
+    E --> F[sql-orm-tiberius]
+    B --> G[sql-orm-migrate]
+    G --> H[sql-orm-cli]
 ```
 
 This separation keeps each layer focused:
@@ -568,7 +568,7 @@ query     -> AST only
 sqlserver -> SQL generation
 tiberius  -> execution
 migrate   -> schema evolution
-mssql-orm -> public API
+sql-orm -> public API
 ```
 
 ---
@@ -612,7 +612,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | [Migrations](docs/migrations.md) | Snapshots, diffs, `migration add`, and `database update` |
 | [Entity policies](docs/entity-policies.md) | Audit, soft delete, tenant, and limits |
 | [Tracking stability](docs/tracking-stability.md) | Stabilization criteria for tracking APIs |
-| [Use without manual download](docs/use-without-downloading.md) | Use from another project via Git dependency |
+| [Use from another project](docs/use-without-downloading.md) | Use from crates.io or directly from Git |
 
 ---
 
@@ -622,7 +622,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 - [Todo app example](examples/todo-app/README.md)
 
 > [!NOTE]
-> Historical validation of the `todo-app` against a real SQL Server instance is documented in [docs/worklog.md](docs/worklog.md). It should be rerun with a current real connection string before presenting it as fresh validation evidence.
+> Real SQL Server validation depends on a current `SQL_ORM_TEST_CONNECTION_STRING` or `DATABASE_URL`; rerun the integration tests and smoke flow before treating a release candidate as freshly validated.
 
 ---
 
@@ -640,7 +640,7 @@ cargo clippy --workspace --all-targets --all-features
 Tests against a real SQL Server instance require:
 
 ```bash
-export MSSQL_ORM_TEST_CONNECTION_STRING="Server=localhost;Database=tempdb;User Id=sa;Password=Password123;TrustServerCertificate=True;Encrypt=False"
+export SQL_ORM_TEST_CONNECTION_STRING="Server=localhost;Database=tempdb;User Id=sa;Password=Password123;TrustServerCertificate=True;Encrypt=False"
 ```
 
 ---

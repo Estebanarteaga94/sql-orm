@@ -1,0 +1,11 @@
+---
+source: crates/sql-orm-sqlserver/tests/migration_snapshots.rs
+expression: render_statements(&sql)
+---
+ALTER TABLE [audit].[audited_entities] ADD [created_at] datetime2 NOT NULL DEFAULT SYSUTCDATETIME()
+GO
+ALTER TABLE [audit].[audited_entities] ADD [created_by_user_id] bigint NULL
+GO
+ALTER TABLE [audit].[audited_entities] ADD [updated_at] datetime2 NULL DEFAULT SYSUTCDATETIME()
+GO
+ALTER TABLE [audit].[audited_entities] ADD [updated_by] nvarchar(120) NULL

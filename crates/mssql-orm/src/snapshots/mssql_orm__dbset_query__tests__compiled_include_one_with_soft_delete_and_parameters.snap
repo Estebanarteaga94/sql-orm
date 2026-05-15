@@ -1,9 +1,0 @@
----
-source: crates/mssql-orm/src/dbset_query.rs
-expression: render_compiled_query(&compiled)
----
-SQL: SELECT [sales].[navigation_targets].[id] AS [id], [sales].[navigation_targets].[owner_id] AS [owner_id], [owner].[id] AS [owner__id] FROM [sales].[navigation_targets] LEFT JOIN [dbo].[navigation_roots] AS [owner] ON (([sales].[navigation_targets].[owner_id] = [owner].[id]) AND ([owner].[deleted_at] IS NULL)) WHERE ([owner].[id] > @P1) ORDER BY [owner].[id] DESC OFFSET @P2 ROWS FETCH NEXT @P3 ROWS ONLY
-Params:
-1: I64(7)
-2: I64(10)
-3: I64(10)

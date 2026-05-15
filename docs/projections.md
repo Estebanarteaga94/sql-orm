@@ -17,7 +17,7 @@ The projection surface is available on `DbSetQuery<E>`:
 ## Basic Example
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Debug, PartialEq, FromRow)]
 struct UserSummary {
@@ -40,7 +40,7 @@ let users = db
 Projection aliases are the contract between SQL Server results and DTO fields.
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Debug, PartialEq, FromRow)]
 struct UserCard {
@@ -55,8 +55,8 @@ let cards = db
     .query()
     .select((
         User::id,
-        SelectProjection::expr_as(mssql_orm::query::Expr::from(User::email), "email_address"),
-        SelectProjection::expr_as(mssql_orm::query::Expr::from(User::email), "display_name"),
+        SelectProjection::expr_as(sql_orm::query::Expr::from(User::email), "email_address"),
+        SelectProjection::expr_as(sql_orm::query::Expr::from(User::email), "display_name"),
     ))
     .all_as::<UserCard>()
     .await?;
@@ -83,7 +83,7 @@ Rules:
 
 ## SQL Compilation
 
-`mssql-orm-sqlserver` renders projected values with explicit aliases:
+`sql-orm-sqlserver` renders projected values with explicit aliases:
 
 ```sql
 SELECT [dbo].[users].[id] AS [id], [dbo].[users].[email] AS [email]
@@ -97,8 +97,8 @@ The alias is part of the contract with `FromRow`: the DTO reads `"id"` and `"ema
 Expressions need explicit aliases:
 
 ```rust
-use mssql_orm::prelude::*;
-use mssql_orm::query::SelectProjection;
+use sql_orm::prelude::*;
+use sql_orm::query::SelectProjection;
 
 #[derive(Debug, PartialEq, FromRow)]
 struct UserEmailProjection {
@@ -196,11 +196,11 @@ Manual `impl FromRow` is still available for DTOs that need custom decoding logi
 
 Coverage lives in:
 
-- `crates/mssql-orm/tests/stage18_public_projections.rs`
-- `crates/mssql-orm/tests/stage18_from_row_derive.rs`
-- `crates/mssql-orm/tests/ui/query_projection_public_valid.rs`
-- `crates/mssql-orm/tests/ui/from_row_projection_public_valid.rs`
-- `crates/mssql-orm/tests/ui/from_row_tuple_struct.rs`
-- `crates/mssql-orm/tests/ui/from_row_unit_struct.rs`
-- `crates/mssql-orm/tests/ui/from_row_unsupported_attr.rs`
-- SQL compiler snapshot tests in `crates/mssql-orm-sqlserver`
+- `crates/sql-orm/tests/stage18_public_projections.rs`
+- `crates/sql-orm/tests/stage18_from_row_derive.rs`
+- `crates/sql-orm/tests/ui/query_projection_public_valid.rs`
+- `crates/sql-orm/tests/ui/from_row_projection_public_valid.rs`
+- `crates/sql-orm/tests/ui/from_row_tuple_struct.rs`
+- `crates/sql-orm/tests/ui/from_row_unit_struct.rs`
+- `crates/sql-orm/tests/ui/from_row_unsupported_attr.rs`
+- SQL compiler snapshot tests in `crates/sql-orm-sqlserver`

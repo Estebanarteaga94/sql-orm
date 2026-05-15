@@ -29,12 +29,12 @@ See also [Core concepts](core-concepts.md).
 A consumer project can expose a binary that prints the current snapshot:
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 fn main() {
     print!(
         "{}",
-        mssql_orm::model_snapshot_json_from_source::<AppDbContext>()
+        sql_orm::model_snapshot_json_from_source::<AppDbContext>()
             .expect("snapshot should serialize")
     );
 }
@@ -43,7 +43,7 @@ fn main() {
 Then create a migration:
 
 ```bash
-mssql-orm-cli migration add CreateCustomers \
+sql-orm-cli migration add CreateCustomers \
   --manifest-path path/to/Cargo.toml \
   --snapshot-bin model_snapshot
 ```
@@ -90,7 +90,7 @@ Operations such as `DropTable`, `DropColumn`, `DropIndex`, and `DropForeignKey` 
 ## Listing Migrations
 
 ```bash
-mssql-orm-cli migration list
+sql-orm-cli migration list
 ```
 
 The output lists each local migration directory and its artifacts.
@@ -100,19 +100,19 @@ The output lists each local migration directory and its artifacts.
 By default, `database update` prints the accumulated SQL script:
 
 ```bash
-mssql-orm-cli database update
+sql-orm-cli database update
 ```
 
 You can archive or inspect the script before applying it:
 
 ```bash
-mssql-orm-cli database update > database_update.sql
+sql-orm-cli database update > database_update.sql
 ```
 
 To execute directly:
 
 ```bash
-mssql-orm-cli database update --execute \
+sql-orm-cli database update --execute \
   --connection-string "$DATABASE_URL"
 ```
 
@@ -120,11 +120,11 @@ Connection-string resolution order for `--execute`:
 
 1. `--connection-string`
 2. `DATABASE_URL`
-3. `MSSQL_ORM_TEST_CONNECTION_STRING`
+3. `SQL_ORM_TEST_CONNECTION_STRING`
 
 ## Migration History
 
-The generated script uses a `__mssql_orm_migrations` history table. It records migration identity and checksum. Editing an already-applied migration is treated as drift and should fail intentionally.
+The generated script uses a `__sql_orm_migrations` history table. It records migration identity and checksum. Editing an already-applied migration is treated as drift and should fail intentionally.
 
 ## Recreating the Todo App Migration Flow
 

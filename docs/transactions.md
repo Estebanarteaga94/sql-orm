@@ -65,4 +65,4 @@ Transaction commands are instrumented through the Tiberius adapter and tracing c
 
 ## Validation
 
-Integration tests for commit and rollback require `MSSQL_ORM_TEST_CONNECTION_STRING`.
+Integration tests for commit and rollback require `SQL_ORM_TEST_CONNECTION_STRING`.

@@ -620,23 +620,23 @@ dependencies = [
 ]
 
 [[package]]
-name = "mssql-orm"
+name = "sql-orm"
 version = "0.1.0"
 dependencies = [
  "chrono",
- "mssql-orm-core",
- "mssql-orm-macros",
- "mssql-orm-migrate",
- "mssql-orm-query",
- "mssql-orm-sqlserver",
- "mssql-orm-tiberius",
+ "sql-orm-core",
+ "sql-orm-macros",
+ "sql-orm-migrate",
+ "sql-orm-query",
+ "sql-orm-sqlserver",
+ "sql-orm-tiberius",
  "rust_decimal",
  "tokio",
  "uuid",
 ]
 
 [[package]]
-name = "mssql-orm-core"
+name = "sql-orm-core"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -645,7 +645,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "mssql-orm-macros"
+name = "sql-orm-macros"
 version = "0.1.0"
 dependencies = [
  "proc-macro2",
@@ -654,41 +654,41 @@ dependencies = [
 ]
 
 [[package]]
-name = "mssql-orm-migrate"
+name = "sql-orm-migrate"
 version = "0.1.0"
 dependencies = [
- "mssql-orm-core",
+ "sql-orm-core",
  "serde",
  "serde_json",
 ]
 
 [[package]]
-name = "mssql-orm-query"
+name = "sql-orm-query"
 version = "0.1.0"
 dependencies = [
- "mssql-orm-core",
+ "sql-orm-core",
 ]
 
 [[package]]
-name = "mssql-orm-sqlserver"
+name = "sql-orm-sqlserver"
 version = "0.1.0"
 dependencies = [
- "mssql-orm-core",
- "mssql-orm-migrate",
- "mssql-orm-query",
+ "sql-orm-core",
+ "sql-orm-migrate",
+ "sql-orm-query",
 ]
 
 [[package]]
-name = "mssql-orm-tiberius"
+name = "sql-orm-tiberius"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "bb8",
  "chrono",
  "futures-io",
- "mssql-orm-core",
- "mssql-orm-query",
- "mssql-orm-sqlserver",
+ "sql-orm-core",
+ "sql-orm-query",
+ "sql-orm-sqlserver",
  "rust_decimal",
  "tiberius",
  "tokio",
@@ -1286,7 +1286,7 @@ name = "todo-app"
 version = "0.1.0"
 dependencies = [
  "axum",
- "mssql-orm",
+ "sql-orm",
  "serde",
  "tokio",
  "tracing-subscriber",

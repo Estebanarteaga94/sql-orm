@@ -1,0 +1,11 @@
+---
+source: crates/sql-orm-sqlserver/tests/compiler_snapshots.rs
+assertion_line: 305
+expression: render_snapshot(&compiled)
+---
+SQL: SELECT [c].[email] AS [email], [created_orders].[total_cents] AS [total_cents] FROM [sales].[customers] AS [c] INNER JOIN [sales].[orders] AS [created_orders] ON ([c].[id] = [created_orders].[customer_id]) LEFT JOIN [sales].[orders] AS [completed_orders] ON ([completed_orders].[total_cents] >= @P1) WHERE ([created_orders].[total_cents] > @P2) ORDER BY [completed_orders].[total_cents] DESC OFFSET @P3 ROWS FETCH NEXT @P4 ROWS ONLY
+Params:
+1: I64(5000)
+2: I64(1000)
+3: I64(0)
+4: I64(10)

@@ -1,6 +1,6 @@
 # Security Policy
 
-`mssql-orm` is an early-stage ORM for Microsoft SQL Server. Security reports should focus on issues that can affect data isolation, SQL execution, migration safety, connection handling, or runtime behavior.
+`sql-orm` is an early-stage ORM for Microsoft SQL Server. Security reports should focus on issues that can affect data isolation, SQL execution, migration safety, connection handling, or runtime behavior.
 
 ## Supported Versions
 

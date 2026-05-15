@@ -1,0 +1,10 @@
+---
+source: crates/sql-orm/tests/stage6_public_query_builder_snapshots.rs
+assertion_line: 63
+expression: render_snapshot(&compiled)
+---
+SQL: SELECT * FROM [dbo].[snapshot_users] INNER JOIN [dbo].[snapshot_orders] ON ([dbo].[snapshot_users].[id] = [dbo].[snapshot_orders].[user_id]) WHERE ([dbo].[snapshot_orders].[total_cents] >= @P1) ORDER BY [dbo].[snapshot_orders].[total_cents] DESC OFFSET @P2 ROWS FETCH NEXT @P3 ROWS ONLY
+Params:
+1: I64(1000)
+2: I64(10)
+3: I64(10)

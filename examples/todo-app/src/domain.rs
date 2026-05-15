@@ -1,4 +1,4 @@
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(AuditFields)]
 pub struct TodoAudit {

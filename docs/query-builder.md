@@ -1,6 +1,6 @@
 # Query Builder
 
-The public query builder does not build SQL directly from the root crate. It produces a `mssql-orm-query` AST. SQL Server parameterized SQL is compiled by `mssql-orm-sqlserver`, and execution happens in the Tiberius adapter.
+The public query builder does not build SQL directly from the root crate. It produces a `sql-orm-query` AST. SQL Server parameterized SQL is compiled by `sql-orm-sqlserver`, and execution happens in the Tiberius adapter.
 
 See also [Core concepts](core-concepts.md) and
 [Navigation properties](navigation.md).
@@ -235,7 +235,7 @@ escape hatch and does not infer navigation metadata or attach navigation
 wrappers.
 
 ```rust
-use mssql_orm::prelude::*;
+use sql_orm::prelude::*;
 
 #[derive(Debug, FromRow)]
 struct UserSummary {
@@ -249,7 +249,7 @@ let summaries = db
     .query()
     .select((
         User::id,
-        SelectProjection::expr_as(mssql_orm::query::Expr::from(User::email), "email_address"),
+        SelectProjection::expr_as(sql_orm::query::Expr::from(User::email), "email_address"),
     ))
     .all_as::<UserSummary>()
     .await?;

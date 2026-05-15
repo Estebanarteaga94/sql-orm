@@ -1,26 +1,34 @@
 [workspace]
 members = [
-    "crates/mssql-orm",
-    "crates/mssql-orm-cli",
-    "crates/mssql-orm-core",
-    "crates/mssql-orm-macros",
-    "crates/mssql-orm-migrate",
-    "crates/mssql-orm-query",
-    "crates/mssql-orm-sqlserver",
-    "crates/mssql-orm-tiberius",
+    "crates/sql-orm",
+    "crates/sql-orm-cli",
+    "crates/sql-orm-core",
+    "crates/sql-orm-macros",
+    "crates/sql-orm-migrate",
+    "crates/sql-orm-query",
+    "crates/sql-orm-sqlserver",
+    "crates/sql-orm-tiberius",
 ]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
+rust-version = "1.85"
+license = "MIT"
+repository = "https://github.com/Estebanarteaga94/sql-orm"
+homepage = "https://github.com/Estebanarteaga94/sql-orm"
+documentation = "https://docs.rs/sql-orm"
+readme = "README.md"
+keywords = ["mssql", "sqlserver", "orm", "tiberius", "database"]
+categories = ["database", "asynchronous"]
 
 [workspace.dependencies]
-mssql-orm = { path = "crates/mssql-orm" }
-mssql-orm-core = { path = "crates/mssql-orm-core" }
-mssql-orm-macros = { path = "crates/mssql-orm-macros" }
-mssql-orm-query = { path = "crates/mssql-orm-query" }
-mssql-orm-sqlserver = { path = "crates/mssql-orm-sqlserver" }
-mssql-orm-tiberius = { path = "crates/mssql-orm-tiberius" }
-mssql-orm-migrate = { path = "crates/mssql-orm-migrate" }
-mssql-orm-cli = { path = "crates/mssql-orm-cli" }
+sql-orm = { path = "crates/sql-orm", version = "0.1.0" }
+sql-orm-core = { path = "crates/sql-orm-core", version = "0.1.0" }
+sql-orm-macros = { path = "crates/sql-orm-macros", version = "0.1.0" }
+sql-orm-query = { path = "crates/sql-orm-query", version = "0.1.0" }
+sql-orm-sqlserver = { path = "crates/sql-orm-sqlserver", version = "0.1.0" }
+sql-orm-tiberius = { path = "crates/sql-orm-tiberius", version = "0.1.0" }
+sql-orm-migrate = { path = "crates/sql-orm-migrate", version = "0.1.0" }
+sql-orm-cli = { path = "crates/sql-orm-cli", version = "0.1.0" }

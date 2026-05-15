@@ -4,14 +4,14 @@ This repository is a Rust workspace for a SQL Server-first, code-first ORM built
 
 ## Architecture Rules
 
-- `mssql-orm-core` owns contracts, metadata, shared types, and errors.
-- `mssql-orm-macros` owns derives and generated metadata.
-- `mssql-orm-query` owns the query AST and must not generate SQL.
-- `mssql-orm-sqlserver` owns SQL Server query and DDL compilation.
-- `mssql-orm-tiberius` owns execution, connections, rows, transactions, and Tiberius adaptation.
-- `mssql-orm-migrate` owns migration snapshots, diffs, operations, and filesystem helpers.
-- `mssql-orm-cli` owns command-line workflows.
-- `mssql-orm` owns the public user-facing API and prelude.
+- `sql-orm-core` owns contracts, metadata, shared types, and errors.
+- `sql-orm-macros` owns derives and generated metadata.
+- `sql-orm-query` owns the query AST and must not generate SQL.
+- `sql-orm-sqlserver` owns SQL Server query and DDL compilation.
+- `sql-orm-tiberius` owns execution, connections, rows, transactions, and Tiberius adaptation.
+- `sql-orm-migrate` owns migration snapshots, diffs, operations, and filesystem helpers.
+- `sql-orm-cli` owns command-line workflows.
+- `sql-orm` owns the public user-facing API and prelude.
 
 Do not introduce multi-database abstractions in this phase. SQL Server is the only target.
 
@@ -52,7 +52,7 @@ cargo clippy --workspace --all-targets --all-features
 
 For targeted changes, run focused tests first. For public API, macros, migrations, or query compilation, prefer adding or updating focused unit tests, snapshot tests, and `trybuild` fixtures.
 
-Real SQL Server tests require `MSSQL_ORM_TEST_CONNECTION_STRING`.
+Real SQL Server tests require `SQL_ORM_TEST_CONNECTION_STRING`.
 
 ## Documentation
 

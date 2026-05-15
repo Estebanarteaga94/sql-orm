@@ -1,7 +1,0 @@
----
-source: crates/mssql-orm/src/dbset_query.rs
-expression: render_compiled_query(&compiled)
----
-SQL: SELECT [dbo].[navigation_roots].[id] AS [id], [orders].[id] AS [orders__id], [orders].[owner_id] AS [orders__owner_id] FROM [dbo].[navigation_roots] LEFT JOIN [sales].[navigation_targets] AS [orders] ON ([dbo].[navigation_roots].[id] = [orders].[owner_id]) WHERE (([orders].[owner_id] >= @P1) AND ([dbo].[navigation_roots].[deleted_at] IS NULL)) ORDER BY [orders].[id] ASC
-Params:
-1: I64(7)

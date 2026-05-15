@@ -1,10 +1,10 @@
 use crate::db::TodoAppDbContext;
 use crate::domain::{TodoItem, TodoList, User};
-use mssql_orm::prelude::*;
-use mssql_orm::query::{Expr, Predicate};
+use sql_orm::prelude::*;
+use sql_orm::query::{Expr, Predicate};
 
 #[cfg(test)]
-use mssql_orm::query::SelectQuery;
+use sql_orm::query::SelectQuery;
 
 pub fn user_lists_page_query(
     db: &TodoAppDbContext,
@@ -113,7 +113,7 @@ fn open_items_select_query(list_id: i64) -> SelectQuery {
 }
 
 #[cfg(test)]
-use mssql_orm::query::CountQuery;
+use sql_orm::query::CountQuery;
 
 #[cfg(test)]
 fn open_items_count_ast(list_id: i64) -> CountQuery {
@@ -131,11 +131,11 @@ mod tests {
         user_lists_select_query,
     };
     use crate::domain::{TodoItem, TodoList};
-    use mssql_orm::prelude::*;
-    use mssql_orm::query::{
+    use sql_orm::prelude::*;
+    use sql_orm::query::{
         Expr, JoinType, OrderBy, Pagination, Predicate, SelectQuery, SortDirection, TableRef,
     };
-    use mssql_orm::sqlserver::SqlServerCompiler;
+    use sql_orm::sqlserver::SqlServerCompiler;
 
     #[test]
     fn user_lists_select_query_builds_expected_ast() {
@@ -196,7 +196,7 @@ mod tests {
 
     #[test]
     fn open_items_select_query_supports_preview_and_count_shapes() {
-        let preview = open_items_select_query(5).paginate(mssql_orm::query::Pagination::new(0, 3));
+        let preview = open_items_select_query(5).paginate(sql_orm::query::Pagination::new(0, 3));
         let count = open_items_select_query(11);
 
         assert_eq!(

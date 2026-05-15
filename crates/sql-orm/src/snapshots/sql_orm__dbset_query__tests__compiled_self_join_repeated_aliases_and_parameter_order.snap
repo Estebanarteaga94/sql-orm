@@ -1,0 +1,11 @@
+---
+source: crates/sql-orm/src/dbset_query.rs
+assertion_line: 2596
+expression: render_compiled_query(&compiled)
+---
+SQL: SELECT [root].[id] AS [root_id], [parent].[name] AS [parent_name], [child].[name] AS [child_name] FROM [dbo].[test_entities] AS [root] INNER JOIN [dbo].[test_entities] AS [parent] ON ([root].[id] = [parent].[id]) LEFT JOIN [dbo].[test_entities] AS [child] ON ([root].[id] = [child].[id]) WHERE (([parent].[name] LIKE @P1) AND ([child].[id] >= @P2)) ORDER BY [child].[name] ASC OFFSET @P3 ROWS FETCH NEXT @P4 ROWS ONLY
+Params:
+1: String("%admin%")
+2: I64(10)
+3: I64(20)
+4: I64(10)

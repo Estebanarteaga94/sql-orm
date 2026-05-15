@@ -55,7 +55,7 @@ connection string and records the evidence.
 
 Public rustdoc already marks the same stability boundaries:
 
-- `crates/mssql-orm/src/tracking.rs` names the tracking module as
+- `crates/sql-orm/src/tracking.rs` names the tracking module as
   experimental and lists its runtime limits.
 - `DbContext::transaction(...)` documents the pool-backed transaction block.
 - `DbSetQueryIncludeMany::split_query()` documents that execution is not

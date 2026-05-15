@@ -8,20 +8,20 @@ The master plan requested as `plan_orm_sqlserver_tiberius_code_first.md` is not 
 
 The workspace currently contains all target crates defined by the architecture:
 
-- `mssql-orm-core`: core contracts, metadata, SQL Server type mapping, neutral row/value abstractions and shared errors.
-- `mssql-orm-macros`: procedural derives for entities, contexts, persistence models and entity policies.
-- `mssql-orm-query`: query AST and builder primitives. This crate carries query structure and does not emit SQL strings.
-- `mssql-orm-sqlserver`: SQL Server-specific quoting, query compilation and migration DDL generation.
-- `mssql-orm-tiberius`: Tiberius connection, execution, row adaptation, transactions, operational options and optional `bb8` pooling.
-- `mssql-orm-migrate`: model snapshots, diff operations, migration filesystem helpers and update script assembly.
-- `mssql-orm-cli`: command-line tooling for `migration add`, `migration list` and `database update`.
-- `mssql-orm`: public facade crate that reexports the consumer API and selected advanced internals.
+- `sql-orm-core`: core contracts, metadata, SQL Server type mapping, neutral row/value abstractions and shared errors.
+- `sql-orm-macros`: procedural derives for entities, contexts, persistence models and entity policies.
+- `sql-orm-query`: query AST and builder primitives. This crate carries query structure and does not emit SQL strings.
+- `sql-orm-sqlserver`: SQL Server-specific quoting, query compilation and migration DDL generation.
+- `sql-orm-tiberius`: Tiberius connection, execution, row adaptation, transactions, operational options and optional `bb8` pooling.
+- `sql-orm-migrate`: model snapshots, diff operations, migration filesystem helpers and update script assembly.
+- `sql-orm-cli`: command-line tooling for `migration add`, `migration list` and `database update`.
+- `sql-orm`: public facade crate that reexports the consumer API and selected advanced internals.
 
 The separation still matches the intended boundaries: `core` does not depend on Tiberius, `query` does not generate SQL, SQL emission belongs to `sqlserver`, execution belongs to `tiberius`, and the normal consumer entry point is the root crate.
 
 ## Public API Verified In Code
 
-The root crate exposes the normal consumer surface through `mssql_orm::prelude::*`.
+The root crate exposes the normal consumer surface through `sql_orm::prelude::*`.
 
 Verified public derives:
 
@@ -62,12 +62,12 @@ Verified runtime/query API in the root crate:
 
 Verified advanced module exports:
 
-- `mssql_orm::core`
-- `mssql_orm::query`
-- `mssql_orm::sqlserver`
-- `mssql_orm::tiberius`
-- `mssql_orm::migrate`
-- `mssql_orm::macros`
+- `sql_orm::core`
+- `sql_orm::query`
+- `sql_orm::sqlserver`
+- `sql_orm::tiberius`
+- `sql_orm::migrate`
+- `sql_orm::macros`
 
 ## Implemented Features
 
@@ -146,4 +146,4 @@ The public README can safely link to this audit and to `docs/core-concepts.md` o
 - `sed -n ... Cargo.toml crates/*/Cargo.toml`
 - `rg -n "^pub (use|trait|struct|enum|fn|mod)|^pub\\([^)]+\\)" crates/...`
 - `rg -n "TODO|todo!|unimplemented!|placeholder|Pending verification|deferred|planned|future|not supported|unsupported" README.md docs crates examples --glob '!target'`
-- `rg -n "raw\\(|raw_exec|all_as|first_as|transaction\\(|save_changes|with_tenant|soft_delete|health_check|from_pool|MigrationModelSource|model_snapshot" crates/mssql-orm/src crates/mssql-orm/tests docs README.md`
+- `rg -n "raw\\(|raw_exec|all_as|first_as|transaction\\(|save_changes|with_tenant|soft_delete|health_check|from_pool|MigrationModelSource|model_snapshot" crates/sql-orm/src crates/sql-orm/tests docs README.md`

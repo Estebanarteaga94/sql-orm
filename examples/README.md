@@ -1,6 +1,6 @@
 # Examples
 
-This directory contains runnable examples for `mssql-orm`.
+This directory contains runnable examples for `sql-orm`.
 
 ## Available Examples
 

@@ -1,8 +1,0 @@
-error[E0599]: no associated item named `__mssql_orm_fk_owner_id` found for struct `TodoList` in the current scope
-  --> tests/ui/entity_navigation_inverse_missing_foreign_key.rs:9:44
-   |
- 9 |     #[orm(has_many(TodoList, foreign_key = owner_id))]
-   |                                            ^^^^^^^^ associated item not found in `TodoList`
-...
-15 | pub struct TodoList {
-   | ------------------- associated item `__mssql_orm_fk_owner_id` not found for this struct

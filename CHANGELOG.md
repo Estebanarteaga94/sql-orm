@@ -1,6 +1,6 @@
 # Changelog
 
-All relevant `mssql-orm` changes are documented in this file.
+All relevant `sql-orm` changes are documented in this file.
 
 The project follows an incremental release strategy. This changelog describes the API surface available in the initial `0.1.0` workspace release and its explicit exclusions.
 
@@ -72,7 +72,7 @@ blocked surfaces and adding typed aggregations. These items are tracked in
 
 ### Etapa 23: Migration Downgrade
 
-- Add a safe `mssql-orm-cli database downgrade` workflow using existing `down.sql`, migration history and checksums, with explicit targets and clear errors for non-reversible migrations.
+- Add a safe `sql-orm-cli database downgrade` workflow using existing `down.sql`, migration history and checksums, with explicit targets and clear errors for non-reversible migrations.
 - Require an explicit target, validate checksums, run downgrade scripts in reverse migration order, and execute inside transactions.
 - Support script generation first and optional `database downgrade --execute` through the Tiberius adapter.
 - Fail clearly when `down.sql` is missing, checksum validation fails, migrations are missing, or a migration has no reversible payload.
@@ -82,25 +82,25 @@ blocked surfaces and adding typed aggregations. These items are tracked in
 
 - Add typed aggregation APIs for `exists` / `any`, `sum`, `avg`, `min`, and `max`.
 - Add grouped aggregate queries with `group_by`, explicit aliases, DTO materialization through `FromRow`, and SQL Server `GROUP BY` / basic `HAVING` support.
-- Preserve current query boundaries: aggregation structure belongs in `mssql-orm-query`, SQL generation belongs in `mssql-orm-sqlserver`, and execution remains in `mssql-orm-tiberius`.
+- Preserve current query boundaries: aggregation structure belongs in `sql-orm-query`, SQL generation belongs in `sql-orm-sqlserver`, and execution remains in `sql-orm-tiberius`.
 - Validate aggregation behavior with SQL snapshots, public `trybuild` fixtures, optional real SQL Server tests, and documentation updates.
 
-## [0.1.0] - Unreleased
+## [0.1.0] - 2026-05-15
 
-Initial code-first ORM release for Rust and SQL Server, built on top of Tiberius.
+Initial experimental code-first ORM release for Rust and SQL Server, built on top of Tiberius.
 
 ### Available
 
 - Modular workspace with separate crates:
-  - `mssql-orm-core`
-  - `mssql-orm-macros`
-  - `mssql-orm-query`
-  - `mssql-orm-sqlserver`
-  - `mssql-orm-tiberius`
-  - `mssql-orm-migrate`
-  - `mssql-orm-cli`
-  - `mssql-orm`
-- Public `mssql-orm` crate with a `prelude` and selected advanced reexports.
+  - `sql-orm-core`
+  - `sql-orm-macros`
+  - `sql-orm-query`
+  - `sql-orm-sqlserver`
+  - `sql-orm-tiberius`
+  - `sql-orm-migrate`
+  - `sql-orm-cli`
+  - `sql-orm`
+- Public `sql-orm` crate with a `prelude` and selected advanced reexports.
 - `#[derive(Entity)]` with static metadata, generated `FromRow`, and column symbols.
 - Code-first attributes for tables, schemas, columns, primary keys, identity columns, SQL Server types, length, precision, scale, nullability, defaults, computed columns, rowversion, indexes, foreign keys, and explicit rename hints.
 - `#[derive(Insertable)]` and `#[derive(Changeset)]` for write payloads.
@@ -125,8 +125,8 @@ Initial code-first ORM release for Rust and SQL Server, built on top of Tiberius
   - aliased joins and aliased column references for repeated joins and self-joins
 - Public typed projections on `DbSetQuery` with `select(...)`, `all_as::<T>()`, and `first_as::<T>()` for DTOs that implement `FromRow`.
 - Typed raw SQL with `DbContext::raw<T>(...)`, `DbContext::raw_exec(...)`, `@P1..@Pn` parameters, `FromRow` materialization, and command execution.
-- AST in `mssql-orm-query` without direct SQL generation.
-- SQL Server compiler in `mssql-orm-sqlserver` for queries and migration DDL, using `@P1..@Pn` parameters.
+- AST in `sql-orm-query` without direct SQL generation.
+- SQL Server compiler in `sql-orm-sqlserver` for queries and migration DDL, using `@P1..@Pn` parameters.
 - Tiberius adapter with connection handling, execution, row mapping, transactions, timeouts, tracing, slow query logs, bounded retries, health checks, and optional pooling behind the `pool-bb8` feature.
 - Basic Active Record:
   - `Entity::query(&db)`
@@ -144,7 +144,7 @@ Initial code-first ORM release for Rust and SQL Server, built on top of Tiberius
   - generated `down.sql` when the full plan is reversible with the available payload
   - destructive-change blocking by default in `migration add`
   - idempotent `database update` script with migration history, checksums, and one transaction per migration
-- `mssql-orm-cli` commands:
+- `sql-orm-cli` commands:
   - `migration add`
   - `migration list`
   - `database update`
@@ -199,7 +199,7 @@ Initial code-first ORM release for Rust and SQL Server, built on top of Tiberius
 - The workspace has local validation and CI for formatting, compilation, tests, and clippy.
 - `trybuild` covers public derives and macro errors.
 - SQL snapshots cover compiled queries and migrations.
-- Real SQL Server tests depend on `MSSQL_ORM_TEST_CONNECTION_STRING`.
+- Real SQL Server tests depend on `SQL_ORM_TEST_CONNECTION_STRING`.
 - The `todo-app` example has a reproducible smoke flow using `DATABASE_URL`.
 
 ### Reference Documentation

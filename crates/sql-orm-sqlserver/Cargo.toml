@@ -1,0 +1,21 @@
+[package]
+name = "sql-orm-sqlserver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "SQL Server query compilation for sql-orm."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/sql-orm-sqlserver"
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+sql-orm-core.workspace = true
+sql-orm-migrate.workspace = true
+sql-orm-query.workspace = true
+
+[dev-dependencies]
+insta = "1"

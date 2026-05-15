@@ -6,7 +6,7 @@ use axum::Json;
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
-use mssql_orm::prelude::{DbContext, OrmError, PageRequest};
+use sql_orm::prelude::{DbContext, OrmError, PageRequest};
 use serde::{Deserialize, Serialize};
 
 pub trait TodoAppApi: DbContext + Clone + Send + Sync + 'static {

@@ -1,0 +1,34 @@
+[package]
+name = "sql-orm"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+description = "Public API crate for the sql-orm workspace."
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+documentation = "https://docs.rs/sql-orm"
+readme.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+pool-bb8 = ["sql-orm-tiberius/pool-bb8"]
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+sql-orm-core.workspace = true
+sql-orm-macros.workspace = true
+sql-orm-query.workspace = true
+sql-orm-sqlserver.workspace = true
+sql-orm-tiberius.workspace = true
+sql-orm-migrate.workspace = true
+rust_decimal = { version = "1", default-features = false, features = ["std"] }
+tokio = { version = "1", features = ["sync"] }
+uuid = { version = "1", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+insta = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+trybuild = "1"

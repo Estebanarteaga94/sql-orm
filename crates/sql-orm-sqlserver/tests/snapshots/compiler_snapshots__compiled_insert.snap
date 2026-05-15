@@ -1,0 +1,8 @@
+---
+source: crates/sql-orm-sqlserver/tests/compiler_snapshots.rs
+expression: render_snapshot(&compiled)
+---
+SQL: INSERT INTO [sales].[customers] ([email], [active]) OUTPUT INSERTED.* VALUES (@P1, @P2)
+Params:
+1: String("ana@example.com")
+2: Bool(true)

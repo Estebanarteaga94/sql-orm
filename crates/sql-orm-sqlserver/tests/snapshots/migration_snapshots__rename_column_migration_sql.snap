@@ -1,0 +1,6 @@
+---
+source: crates/sql-orm-sqlserver/tests/migration_snapshots.rs
+assertion_line: 109
+expression: render_statements(&sql)
+---
+EXEC sp_rename N'[sales].[customers].[email]', N'email_address', N'COLUMN'
