@@ -1,6 +1,6 @@
 # Use From Another Project
 
-You can consume `sql-orm` from another Rust project through crates.io or directly from Git. You do not need to manually clone this repository into the consuming project.
+You can consume `sql-orm` from another Rust project through crates.io. You do not need to manually clone this repository into the consuming project.
 
 ## crates.io
 
@@ -16,33 +16,21 @@ With optional pooling:
 sql-orm = { version = "0.1.0", features = ["pool-bb8"] }
 ```
 
-## Git Dependency
+Published package: <https://crates.io/crates/sql-orm>
 
-Use this form when you need an unreleased branch or a specific commit:
+API documentation: <https://docs.rs/sql-orm>
 
-```toml
-[dependencies]
-sql-orm = { git = "https://github.com/Estebanarteaga94/sql-orm.git", package = "sql-orm" }
+## CLI
+
+Install the migration CLI from crates.io:
+
+```bash
+cargo install sql-orm-cli
 ```
 
-To pin a branch, tag, or revision:
+Published package: <https://crates.io/crates/sql-orm-cli>
 
-```toml
-[dependencies]
-sql-orm = { git = "https://github.com/Estebanarteaga94/sql-orm.git", package = "sql-orm", branch = "main" }
-```
-
-```toml
-[dependencies]
-sql-orm = { git = "https://github.com/Estebanarteaga94/sql-orm.git", package = "sql-orm", rev = "<commit-sha>" }
-```
-
-## Optional Pooling
-
-```toml
-[dependencies]
-sql-orm = { git = "https://github.com/Estebanarteaga94/sql-orm.git", package = "sql-orm", features = ["pool-bb8"] }
-```
+API documentation: <https://docs.rs/sql-orm-cli>
 
 ## Basic Consumer Code
 
@@ -92,7 +80,7 @@ sql-orm-cli migration add CreateSchema \
 
 ## Notes
 
-- Cargo downloads Git dependencies into its own cache.
-- Prefer pinning a revision for reproducible builds.
+- Cargo downloads crates.io dependencies into its own cache.
+- Use `Cargo.lock` in applications for reproducible builds.
 - Do not commit connection strings or credentials.
 - The root public API is `sql_orm::prelude::*`.

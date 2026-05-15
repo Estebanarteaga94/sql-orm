@@ -12,8 +12,9 @@
   <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-blue">
   <img alt="Database" src="https://img.shields.io/badge/database-SQL%20Server-red">
-  <img alt="Version" src="https://img.shields.io/badge/version-0.1.0-purple">
-  <img alt="License" src="https://img.shields.io/badge/license-see%20LICENSE-lightgrey">
+  <a href="https://crates.io/crates/sql-orm"><img alt="Crates.io" src="https://img.shields.io/crates/v/sql-orm"></a>
+  <a href="https://docs.rs/sql-orm"><img alt="Docs.rs" src="https://img.shields.io/docsrs/sql-orm"></a>
+  <a href="https://crates.io/crates/sql-orm"><img alt="License" src="https://img.shields.io/crates/l/sql-orm"></a>
 </p>
 
 ---
@@ -47,6 +48,7 @@ The goal is to keep application code strongly typed, expressive, and close to yo
 - [Highlights](#highlights)
 - [When Should You Use It?](#when-should-you-use-it)
 - [Installation](#installation)
+- [Published Crates](#published-crates)
 - [Quick Example](#quick-example)
 - [Query Builder](#query-builder)
 - [DTO Projections](#dto-projections)
@@ -97,7 +99,7 @@ Use `sql-orm` if you want:
 
 ## Installation
 
-Use the public root crate:
+Use the public root crate from crates.io:
 
 ```toml
 [dependencies]
@@ -117,6 +119,12 @@ Import the prelude:
 use sql_orm::prelude::*;
 ```
 
+Install the migration CLI from crates.io when you need migration commands:
+
+```bash
+cargo install sql-orm-cli
+```
+
 <details>
 <summary>What does the prelude include?</summary>
 
@@ -132,6 +140,23 @@ The prelude exposes the normal user-facing API:
 - Mapping traits
 
 </details>
+
+---
+
+## Published Crates
+
+All workspace crates are published on crates.io. Application code should normally depend only on `sql-orm`; the other crates are documented for advanced use and architecture visibility.
+
+| Crate | crates.io | API docs | Purpose |
+|---|---|---|---|
+| `sql-orm` | [package](https://crates.io/crates/sql-orm) | [docs](https://docs.rs/sql-orm) | Public facade for applications |
+| `sql-orm-cli` | [package](https://crates.io/crates/sql-orm-cli) | [docs](https://docs.rs/sql-orm-cli) | Migration and database commands |
+| `sql-orm-core` | [package](https://crates.io/crates/sql-orm-core) | [docs](https://docs.rs/sql-orm-core) | Contracts, metadata, SQL values, errors, and neutral rows |
+| `sql-orm-macros` | [package](https://crates.io/crates/sql-orm-macros) | [docs](https://docs.rs/sql-orm-macros) | Derives and metadata generation |
+| `sql-orm-query` | [package](https://crates.io/crates/sql-orm-query) | [docs](https://docs.rs/sql-orm-query) | Query AST and query-builder primitives |
+| `sql-orm-sqlserver` | [package](https://crates.io/crates/sql-orm-sqlserver) | [docs](https://docs.rs/sql-orm-sqlserver) | SQL Server query and DDL compilation |
+| `sql-orm-tiberius` | [package](https://crates.io/crates/sql-orm-tiberius) | [docs](https://docs.rs/sql-orm-tiberius) | Connections, execution, transactions, rows, and pooling |
+| `sql-orm-migrate` | [package](https://crates.io/crates/sql-orm-migrate) | [docs](https://docs.rs/sql-orm-migrate) | Snapshots, diffs, operations, and migration helpers |
 
 ---
 
@@ -540,14 +565,14 @@ The workspace is split by responsibility.
 
 | Crate | Responsibility |
 |---|---|
-| `sql-orm-core` | Contracts, metadata, SQL values, errors, and neutral rows |
-| `sql-orm-macros` | Derives and metadata generation |
-| `sql-orm-query` | Query AST and query-builder primitives |
-| `sql-orm-sqlserver` | SQL Server query and DDL compilation |
-| `sql-orm-tiberius` | Connections, execution, transactions, rows, and pooling |
-| `sql-orm-migrate` | Snapshots, diffs, operations, and migration helpers |
-| `sql-orm-cli` | Migration and database commands |
-| `sql-orm` | Public facade for applications |
+| [`sql-orm-core`](https://docs.rs/sql-orm-core) | Contracts, metadata, SQL values, errors, and neutral rows |
+| [`sql-orm-macros`](https://docs.rs/sql-orm-macros) | Derives and metadata generation |
+| [`sql-orm-query`](https://docs.rs/sql-orm-query) | Query AST and query-builder primitives |
+| [`sql-orm-sqlserver`](https://docs.rs/sql-orm-sqlserver) | SQL Server query and DDL compilation |
+| [`sql-orm-tiberius`](https://docs.rs/sql-orm-tiberius) | Connections, execution, transactions, rows, and pooling |
+| [`sql-orm-migrate`](https://docs.rs/sql-orm-migrate) | Snapshots, diffs, operations, and migration helpers |
+| [`sql-orm-cli`](https://docs.rs/sql-orm-cli) | Migration and database commands |
+| [`sql-orm`](https://docs.rs/sql-orm) | Public facade for applications |
 
 ```mermaid
 flowchart TB
@@ -597,22 +622,25 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 
 ## Documentation
 
-| Guide | Description |
+| Resource | Description |
 |---|---|
-| [Core concepts](docs/core-concepts.md) | Mental model and end-to-end flow |
-| [Quickstart](docs/quickstart.md) | Connection, CRUD, and query builder |
-| [Code-first guide](docs/code-first.md) | Entities, derives, `DbContext`, and metadata |
-| [Public API](docs/api.md) | Public surface exported from the root crate |
-| [Query builder](docs/query-builder.md) | Filters, ordering, pagination, joins, includes, and projections |
-| [Navigation properties](docs/navigation.md) | `belongs_to`, `has_one`, `has_many`, includes, and limits |
-| [Typed projections](docs/projections.md) | `select(...)`, `all_as::<T>()`, aliases, and DTOs |
-| [Typed raw SQL](docs/raw-sql.md) | `raw<T>()`, `raw_exec()`, parameters, and security |
-| [Relationships](docs/relationships.md) | Foreign keys, joins, navigation, and loading |
-| [Transactions](docs/transactions.md) | Runtime behavior and pool limits |
-| [Migrations](docs/migrations.md) | Snapshots, diffs, `migration add`, and `database update` |
-| [Entity policies](docs/entity-policies.md) | Audit, soft delete, tenant, and limits |
-| [Tracking stability](docs/tracking-stability.md) | Stabilization criteria for tracking APIs |
-| [Use from another project](docs/use-without-downloading.md) | Use from crates.io or directly from Git |
+| [Published API docs](https://docs.rs/sql-orm) | Rustdoc for the root public crate |
+| [crates.io package](https://crates.io/crates/sql-orm) | Published package metadata and install snippet |
+| [CLI package](https://crates.io/crates/sql-orm-cli) | Installable migration and database command-line tool |
+| [Core concepts](docs/core-concepts.md) | Repository guide for the mental model and end-to-end flow |
+| [Quickstart](docs/quickstart.md) | Repository guide for connection, CRUD, and query builder |
+| [Code-first guide](docs/code-first.md) | Repository guide for entities, derives, `DbContext`, and metadata |
+| [Public API](docs/api.md) | Repository guide for the public surface exported from the root crate |
+| [Query builder](docs/query-builder.md) | Repository guide for filters, ordering, pagination, joins, includes, and projections |
+| [Navigation properties](docs/navigation.md) | Repository guide for `belongs_to`, `has_one`, `has_many`, includes, and limits |
+| [Typed projections](docs/projections.md) | Repository guide for `select(...)`, `all_as::<T>()`, aliases, and DTOs |
+| [Typed raw SQL](docs/raw-sql.md) | Repository guide for `raw<T>()`, `raw_exec()`, parameters, and security |
+| [Relationships](docs/relationships.md) | Repository guide for foreign keys, joins, navigation, and loading |
+| [Transactions](docs/transactions.md) | Repository guide for runtime behavior and pool limits |
+| [Migrations](docs/migrations.md) | Repository guide for snapshots, diffs, `migration add`, and `database update` |
+| [Entity policies](docs/entity-policies.md) | Repository guide for audit, soft delete, tenant, and limits |
+| [Tracking stability](docs/tracking-stability.md) | Repository guide for stabilization criteria for tracking APIs |
+| [Use from another project](docs/use-without-downloading.md) | Repository guide for using the published crates |
 
 ---
 
