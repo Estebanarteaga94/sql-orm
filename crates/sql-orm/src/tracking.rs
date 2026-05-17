@@ -1038,6 +1038,11 @@ mod tests {
         name: String,
     }
 
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct SnapshotEntityAlias {
+        name: String,
+    }
+
     static DUMMY_ENTITY_METADATA: EntityMetadata = EntityMetadata {
         rust_name: "DummyEntity",
         schema: "dbo",
@@ -1181,6 +1186,12 @@ mod tests {
     }
 
     impl Entity for SnapshotEntity {
+        fn metadata() -> &'static EntityMetadata {
+            &DUMMY_ENTITY_METADATA
+        }
+    }
+
+    impl Entity for SnapshotEntityAlias {
         fn metadata() -> &'static EntityMetadata {
             &DUMMY_ENTITY_METADATA
         }
@@ -1714,6 +1725,29 @@ mod tests {
         assert_eq!(snapshot.name, "changed through wrapper");
         assert_eq!(tracked.state(), EntityState::Modified);
         assert_eq!(registry.registrations()[0].state, EntityState::Modified);
+    }
+
+    #[test]
+    fn current_snapshot_for_key_scopes_lookup_by_rust_type() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(SnapshotEntity {
+            name: "loaded".to_string(),
+        });
+        tracked
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        assert_eq!(
+            registry.current_snapshot_for_key::<SnapshotEntityAlias>(SqlValue::I64(7)),
+            None
+        );
+        assert_eq!(
+            registry
+                .current_snapshot_for_key::<SnapshotEntity>(SqlValue::I64(7))
+                .expect("tracked identity should have a snapshot")
+                .name,
+            "loaded"
+        );
     }
 
     #[test]
