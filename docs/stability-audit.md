@@ -40,7 +40,7 @@ These surfaces are documented as unavailable or blocked, not experimental:
 | Automatic lazy loading | Not available; lazy wrappers are state containers and never issue SQL by themselves. | Future explicit async loader design |
 | Navigation graph tracking and relationship persistence | Not stable; includes and explicit loads do not register related entities automatically, and `save_changes()` does not persist relationship mutations. | Etapa 21 |
 | High-level typed aggregations and `group_by` | Not implemented as public query builder APIs. | Etapa 24 |
-| `database downgrade` | CLI command does not exist yet; `down.sql` artifacts exist when reversible but are not executed automatically. | Etapa 23 |
+| `database downgrade` | Implemented in Etapa 23 as explicit-target script generation plus opt-in `--execute`; requires local `up.sql` checksum validation and executable `down.sql`. | Available with limits |
 | `migration.rs` | Deferred from the migration MVP; current artifacts are `up.sql`, `down.sql`, and `model_snapshot.json`. | Future migrations stage |
 | Composite primary key persistence | Metadata supports composite PKs, but public CRUD, Active Record, and tracking persistence remain centered on simple primary keys. | Future persistence hardening |
 | Automatic policy filters over manually joined entities | Not available; `soft_delete` and `tenant` automatic filters apply to root entities and selected include predicates, not arbitrary manual joins. | Future policy/query design |

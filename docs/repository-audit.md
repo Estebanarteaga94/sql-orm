@@ -14,7 +14,7 @@ The workspace currently contains all target crates defined by the architecture:
 - `sql-orm-sqlserver`: SQL Server-specific quoting, query compilation and migration DDL generation.
 - `sql-orm-tiberius`: Tiberius connection, execution, row adaptation, transactions, operational options and optional `bb8` pooling.
 - `sql-orm-migrate`: model snapshots, diff operations, migration filesystem helpers and update script assembly.
-- `sql-orm-cli`: command-line tooling for `migration add`, `migration list` and `database update`.
+- `sql-orm-cli`: command-line tooling for `migration add`, `migration list`, `database update` and explicit-target `database downgrade`.
 - `sql-orm`: public facade crate that reexports the consumer API and selected advanced internals.
 
 The separation still matches the intended boundaries: `core` does not depend on Tiberius, `query` does not generate SQL, SQL emission belongs to `sqlserver`, execution belongs to `tiberius`, and the normal consumer entry point is the root crate.

@@ -524,12 +524,30 @@ sql-orm-cli database update --execute \
   --connection-string "$DATABASE_URL"
 ```
 
+Generate a downgrade script to keep a known target migration applied:
+
+```bash
+sql-orm-cli database downgrade --target <MigrationId> > database_downgrade.sql
+```
+
+Execute that same rollback flow directly:
+
+```bash
+sql-orm-cli database downgrade --target <MigrationId> --execute \
+  --connection-string "$DATABASE_URL"
+```
+
+Use `--target 0` only when you explicitly want to roll back all local
+migrations. Downgrade requires local `up.sql` for checksum validation and an
+executable `down.sql` for every migration being rolled back; it does not infer
+reverse SQL from snapshots.
+
 Generated artifacts:
 
 | File | Purpose |
 |---|---|
 | `up.sql` | SQL applied when migrating forward |
-| `down.sql` | SQL used to manually review rollback intent |
+| `down.sql` | SQL used by `database downgrade` for reviewed or executed rollback |
 | `model_snapshot.json` | Captured model metadata after the migration |
 
 > [!NOTE]
@@ -620,7 +638,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | Lazy loading | No automatic I/O from field access |
 | `include_many(...).split_query()` | API exists, execution returns not implemented |
 | Raw SQL filters | Tenant and soft-delete filters must be written manually |
-| `database downgrade` | Not implemented yet |
+| `database downgrade` | Available through explicit `--target`; requires local checksums and executable `down.sql` |
 | `migration.rs` | Deferred |
 | Pooled transactions | Supported with `pool-bb8`; one physical connection is pinned for the closure |
 
@@ -643,7 +661,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | [Typed raw SQL](docs/raw-sql.md) | Repository guide for `raw<T>()`, `raw_exec()`, parameters, and security |
 | [Relationships](docs/relationships.md) | Repository guide for foreign keys, joins, navigation, and loading |
 | [Transactions](docs/transactions.md) | Repository guide for runtime behavior and pooled transactions |
-| [Migrations](docs/migrations.md) | Repository guide for snapshots, diffs, `migration add`, and `database update` |
+| [Migrations](docs/migrations.md) | Repository guide for snapshots, diffs, `migration add`, `database update`, and `database downgrade` |
 | [Entity policies](docs/entity-policies.md) | Repository guide for audit, soft delete, tenant, and limits |
 | [Tracking stability](docs/tracking-stability.md) | Repository guide for stabilization criteria for tracking APIs |
 | [Use from another project](docs/use-without-downloading.md) | Repository guide for using the published crates |

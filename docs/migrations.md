@@ -129,7 +129,7 @@ The generated script uses a `__sql_orm_migrations` history table. It records mig
 
 ## Database Downgrade
 
-`database downgrade` is being implemented in Etapa 23 and is built on the artifacts that already exist today:
+`database downgrade` rolls back applied migrations using the artifacts that already exist today:
 
 - local migration directories under `migrations/`;
 - `down.sql` for rollback SQL;
@@ -137,7 +137,7 @@ The generated script uses a `__sql_orm_migrations` history table. It records mig
 - `model_snapshot.json` for local ordering and identity;
 - the existing `[dbo].[__sql_orm_migrations]` history table.
 
-The command shape should stay script-first, matching `database update`:
+The command is script-first, matching `database update`:
 
 ```bash
 sql-orm-cli database downgrade --target <MigrationId>
@@ -156,7 +156,7 @@ sql-orm-cli database downgrade --target <MigrationId> --execute \
   --connection-string "$DATABASE_URL"
 ```
 
-The target is the last migration that should remain applied after the downgrade. Rolling back everything should require an explicit sentinel target such as `0`; there should be no implicit "previous migration" default.
+The target is the last migration that should remain applied after the downgrade. Rolling back everything requires the explicit sentinel target `0`; there is no implicit "previous migration" default.
 
 The script generation flow is:
 
@@ -169,7 +169,7 @@ The script generation flow is:
 7. Execute the local `down.sql` inside a transaction.
 8. Delete the migration row from `[dbo].[__sql_orm_migrations]` only after `down.sql` succeeds.
 
-The first implementation should not introduce `migration.rs`. Hand-authored rollback logic belongs in `down.sql` for this phase.
+This implementation does not introduce `migration.rs`. Hand-authored rollback logic belongs in `down.sql` for this phase.
 
 Connection-string resolution order for `--execute` matches `database update`:
 
@@ -190,7 +190,7 @@ Safety requirements:
 
 ### Downgrade Safety Rules
 
-The first implementation must treat downgrade as a potentially destructive operation and fail closed. These rules are implementation requirements, not optional documentation guidance.
+`database downgrade` treats rollback as a potentially destructive operation and fails closed. These rules are implementation requirements, not optional documentation guidance.
 
 Target rules:
 
@@ -200,7 +200,7 @@ Target rules:
 - A target newer than or equal to the latest applied migration is a no-op script, not an error.
 - A target that exists locally but is not present in the applied history is ambiguous and must fail instead of guessing how far to rollback.
 - A target that is not local and is not `0` must fail before reading or executing `down.sql`.
-- The command must not support an implicit "previous" target in the first implementation.
+- The command does not support an implicit "previous" target.
 
 History and checksum rules:
 
@@ -252,7 +252,7 @@ The script generates an initial migration from the current example model, a no-o
 
 ## Limits
 
-- `database downgrade --execute` is available but still needs optional real SQL Server coverage in Etapa 23.
+- `database downgrade --execute` is available and has optional real SQL Server coverage through `sql-orm-cli` tests when `SQL_ORM_TEST_CONNECTION_STRING` is configured.
 - `migration.rs` is outside the current MVP.
 - Composite foreign-key derivation from public attributes is not part of the current derive surface.
 - Review SQL carefully for computed columns, foreign keys, indexes, and explicit renames.

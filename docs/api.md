@@ -380,6 +380,18 @@ Migration-related public helpers include:
 
 Advanced migration types are reexported through the `migrate` module for tooling.
 
+The CLI migration surface is documented in [Migrations](migrations.md). The
+current command set includes `migration add`, `migration list`, script-first
+`database update`, `database update --execute`, script-first
+`database downgrade --target <MigrationId|0>`, and
+`database downgrade --target <MigrationId|0> --execute`.
+
+`database downgrade` uses local migration directories, local `up.sql`
+checksums, executable `down.sql` payloads, and the existing
+`[dbo].[__sql_orm_migrations]` history table. The target is explicit and
+inclusive; `0` is the explicit empty-database sentinel. Rollback execution is
+opt-in and uses the same generated script body that can be reviewed first.
+
 ## Operational Types
 
 The public crate reexports Tiberius adapter configuration types such as:
@@ -417,4 +429,7 @@ These are useful for tests, tooling, snapshots, and advanced diagnostics. Normal
 - Lazy wrappers are implemented as opt-in state containers, but they never query by themselves. There is no automatic single-navigation lazy loader yet.
 - High-level typed aggregations are not available.
 - Composite primary-key persistence is not complete across public CRUD and Active Record.
+- `database downgrade` does not infer reverse SQL from snapshots and does not
+  read `migration.rs`; migrations without executable `down.sql` are treated as
+  non-reversible.
 - `migration.rs` is not generated.

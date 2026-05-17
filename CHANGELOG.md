@@ -74,11 +74,12 @@ blocked surfaces and adding typed aggregations. These items are tracked in
 
 ### Etapa 23: Migration Downgrade
 
-- Add a safe `sql-orm-cli database downgrade` workflow using existing `down.sql`, migration history and checksums, with explicit targets and clear errors for non-reversible migrations.
-- Require an explicit target, validate checksums, run downgrade scripts in reverse migration order, and execute inside transactions.
-- Support script generation first and optional `database downgrade --execute` through the Tiberius adapter.
-- Fail clearly when `down.sql` is missing, checksum validation fails, migrations are missing, or a migration has no reversible payload.
-- Cover filesystem/CLI behavior with unit tests and optional real SQL Server downgrade validation.
+- Safe `sql-orm-cli database downgrade` workflow is implemented using existing `down.sql`, migration history and checksums, with explicit targets and clear errors for non-reversible migrations.
+- `database downgrade --target <MigrationId|0>` generates a reviewable SQL script by default.
+- `database downgrade --target <MigrationId|0> --execute` applies the same generated script through the Tiberius adapter.
+- Downgrade requires an explicit inclusive target, validates local `up.sql` checksums against history, runs rollback migrations in reverse order, and executes each rollback inside its own transaction before deleting the history row.
+- Downgrade fails clearly when `down.sql` is missing, `up.sql` is missing, checksum validation fails, migrations are missing locally, or a migration has no executable reversible payload.
+- Filesystem/CLI behavior is covered by unit tests, and the opt-in SQL Server test validates the real `database update --execute` to `database downgrade --execute` roundtrip when `SQL_ORM_TEST_CONNECTION_STRING` is configured.
 
 ### Etapa 24: Typed Aggregations
 
@@ -146,11 +147,14 @@ Initial experimental code-first ORM release for Rust and SQL Server, built on to
   - generated `down.sql` when the full plan is reversible with the available payload
   - destructive-change blocking by default in `migration add`
   - idempotent `database update` script with migration history, checksums, and one transaction per migration
+  - idempotent `database downgrade --target <MigrationId|0>` script using local `down.sql`, migration history, checksums, and one transaction per rollback migration
 - `sql-orm-cli` commands:
   - `migration add`
   - `migration list`
   - `database update`
   - `database update --execute`
+  - `database downgrade --target <MigrationId|0>`
+  - `database downgrade --target <MigrationId|0> --execute`
   - `--model-snapshot`
   - `--snapshot-bin`
 - `examples/todo-app` with a relational domain, public query builder usage, minimal HTTP endpoints, health check, optional pooling, and a reproducible smoke flow against real SQL Server.
@@ -192,8 +196,8 @@ Initial experimental code-first ORM release for Rust and SQL Server, built on to
 - `audit = Audit` does not add visible Rust fields or entity column symbols.
 - `timestamps` and automatic `soft_delete`/`tenant` filters over manually joined entities remain deferred.
 - `raw<T>()` and `raw_exec()` do not automatically apply ORM `tenant` or `soft_delete` filters.
-- `down.sql` is not executed automatically.
-- `database downgrade` does not exist.
+- `down.sql` is executed only by explicit `database downgrade --target ... --execute`; there is no implicit rollback command.
+- `database downgrade` requires local migration directories, local `up.sql` for checksum validation, and executable `down.sql`; it does not infer reverse SQL from `model_snapshot.json`.
 - `migration.rs` is outside the current MVP.
 
 ### Known Validation
@@ -201,7 +205,7 @@ Initial experimental code-first ORM release for Rust and SQL Server, built on to
 - The workspace has local validation and CI for formatting, compilation, tests, and clippy.
 - `trybuild` covers public derives and macro errors.
 - SQL snapshots cover compiled queries and migrations.
-- Real SQL Server tests depend on `SQL_ORM_TEST_CONNECTION_STRING`.
+- Real SQL Server tests depend on `SQL_ORM_TEST_CONNECTION_STRING`, including the opt-in `database downgrade --execute` roundtrip.
 - The `todo-app` example has a reproducible smoke flow using `DATABASE_URL`;
   the latest recorded local SQL Server validation passed on 2026-05-17.
 
