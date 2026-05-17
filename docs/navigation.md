@@ -28,7 +28,8 @@ The current implementation intentionally does not support:
 - automatic nested include chains.
 - split-query execution for `include_many(...)`.
 - automatic relationship persistence from navigation wrapper mutations.
-- stable graph tracking or identity map behavior.
+- stable graph tracking or relationship identity semantics beyond reusing
+  already tracked related snapshots during navigation materialization.
 
 ## Wrapper Types
 
@@ -330,6 +331,10 @@ The tracked variant attaches the collection without marking the root as
 that related identity. Related entities that are not already tracked are not
 registered automatically.
 
+The ordinary `load_collection(...)` path also reuses the registry-owned current
+snapshot for already tracked related rows in the same context. It does not
+track newly materialized related rows.
+
 The current explicit loading cut supports `has_many` navigations where the root
 has a simple primary key and the navigation local column is that primary key.
 
@@ -452,19 +457,23 @@ Current rules:
 - `include(...)` and `include_many(...)` return ordinary entity values.
 - included roots and related entities are not automatically registered in the
   tracking registry.
+- included related entities reuse registry-owned current snapshots when the
+  same simple primary key is already tracked in the context.
 - single navigation values assigned through the include contract on a
   `Tracked<T>` root do not mark the root as `Modified` and do not register the
   related entity.
 - `load_collection_tracked(...)` attaches a collection to the tracked root
   without changing the root state to `Modified`.
-- related entities loaded into wrappers are not automatically tracked.
+- related entities loaded into wrappers are not automatically tracked, although
+  already tracked related identities are replaced with their registry-owned
+  current snapshots.
 - mutating navigation wrappers does not cause `save_changes()` to insert,
   delete or update relationship rows.
 
-The planned stable direction is a context-owned identity map shared by roots,
-includes and explicit loads. That remains future tracking stabilization work
-because canonical instance reuse across roots, includes and explicit loads is
-not implemented yet.
+The current identity-map slice is limited to canonical snapshot reuse for
+related entities that are already tracked. It does not register loaded graphs,
+does not preserve object identity for untracked roots, and does not make
+relationship persistence graph-aware.
 
 Relationship persistence is also future work. Removing an item from a loaded
 collection, assigning a different parent navigation, or filling a navigation

@@ -541,6 +541,7 @@ impl<E: Entity> DbSet<E> {
             self.connection.as_ref().cloned(),
             SelectQuery::from_entity::<E>(),
         )
+        .with_tracking_registry(Arc::clone(&self.tracking_registry))
     }
 
     /// Starts a query from a caller-provided `SelectQuery`.
@@ -550,10 +551,13 @@ impl<E: Entity> DbSet<E> {
     /// be applied before SQL compilation.
     pub fn query_with(&self, select_query: SelectQuery) -> DbSetQuery<E> {
         DbSetQuery::new(self.connection.as_ref().cloned(), select_query)
+            .with_tracking_registry(Arc::clone(&self.tracking_registry))
     }
 
     fn query_with_internal_visibility(&self, select_query: SelectQuery) -> DbSetQuery<E> {
-        DbSetQuery::new(self.connection.as_ref().cloned(), select_query).with_deleted()
+        DbSetQuery::new(self.connection.as_ref().cloned(), select_query)
+            .with_tracking_registry(Arc::clone(&self.tracking_registry))
+            .with_deleted()
     }
 
     /// Finds one entity by its single-column primary key.
@@ -994,12 +998,20 @@ impl<E: Entity> DbSet<E> {
     ) -> Result<(), OrmError>
     where
         E: EntityPrimaryKey + IncludeCollection<J>,
-        J: FromRow + Send + SoftDeleteEntity + TenantScopedEntity,
+        J: Clone
+            + EntityPrimaryKey
+            + FromRow
+            + Send
+            + SoftDeleteEntity
+            + Sync
+            + TenantScopedEntity
+            + 'static,
     {
         let related = self
             .explicit_collection_query::<J>(entity, navigation)?
             .all()
             .await?;
+        let related = self.identity_mapped_navigation_values(related)?;
         entity.set_included_collection(navigation, related)
     }
 
@@ -1143,6 +1155,7 @@ impl<E: Entity> DbSet<E> {
                 Expr::Value(key),
             )),
         ))
+        .map(|query| query.with_tracking_registry(Arc::clone(&self.tracking_registry)))
     }
 }
 

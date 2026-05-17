@@ -1,7 +1,10 @@
 use crate::context::{ActiveTenant, SharedConnection};
 use crate::page_request::PageRequest;
 use crate::query_projection::SelectProjections;
-use crate::{IncludeCollection, IncludeNavigation, SoftDeleteEntity, TenantScopedEntity};
+use crate::{
+    IncludeCollection, IncludeNavigation, SoftDeleteEntity, TenantScopedEntity,
+    TrackingRegistryHandle,
+};
 use sql_orm_core::{
     ColumnMetadata, Entity, EntityMetadata, FromRow, NavigationKind, OrmError, Row, SqlServerType,
     SqlValue,
@@ -22,6 +25,7 @@ use sql_orm_sqlserver::SqlServerCompiler;
 pub struct DbSetQuery<E: Entity> {
     connection: Option<SharedConnection>,
     active_tenant: Option<ActiveTenant>,
+    tracking_registry: Option<TrackingRegistryHandle>,
     select_query: SelectQuery,
     visibility: SoftDeleteVisibility,
     _entity: core::marker::PhantomData<fn() -> E>,
@@ -57,10 +61,19 @@ impl<E: Entity> DbSetQuery<E> {
         Self {
             connection,
             active_tenant,
+            tracking_registry: None,
             select_query,
             visibility: SoftDeleteVisibility::Default,
             _entity: core::marker::PhantomData,
         }
+    }
+
+    pub(crate) fn with_tracking_registry(
+        mut self,
+        tracking_registry: TrackingRegistryHandle,
+    ) -> Self {
+        self.tracking_registry = Some(tracking_registry);
+        self
     }
 
     #[cfg(test)]
@@ -554,16 +567,17 @@ impl<E: Entity, J: Entity> DbSetQueryIncludeOne<E, J> {
     pub async fn all(self) -> Result<Vec<E>, OrmError>
     where
         E: FromRow + IncludeNavigation<J> + Send + SoftDeleteEntity + TenantScopedEntity,
-        J: FromRow + Send + SoftDeleteEntity + TenantScopedEntity,
+        J: Clone + FromRow + Send + SoftDeleteEntity + Sync + TenantScopedEntity + 'static,
     {
         let navigation = self.navigation;
         let alias = self.alias;
+        let tracking_registry = self.query.tracking_registry.clone();
         let compiled = SqlServerCompiler::compile_select(&self.effective_select_query()?)?;
         let shared_connection = self.query.require_connection()?;
         let mut connection = shared_connection.lock().await?;
         connection
             .fetch_all_with(compiled, move |row| {
-                materialize_include_one::<E, J>(&row, navigation, alias)
+                materialize_include_one::<E, J>(&row, navigation, alias, tracking_registry.as_ref())
             })
             .await
     }
@@ -573,16 +587,17 @@ impl<E: Entity, J: Entity> DbSetQueryIncludeOne<E, J> {
     pub async fn first(self) -> Result<Option<E>, OrmError>
     where
         E: FromRow + IncludeNavigation<J> + Send + SoftDeleteEntity + TenantScopedEntity,
-        J: FromRow + Send + SoftDeleteEntity + TenantScopedEntity,
+        J: Clone + FromRow + Send + SoftDeleteEntity + Sync + TenantScopedEntity + 'static,
     {
         let navigation = self.navigation;
         let alias = self.alias;
+        let tracking_registry = self.query.tracking_registry.clone();
         let compiled = SqlServerCompiler::compile_select(&self.effective_select_query()?)?;
         let shared_connection = self.query.require_connection()?;
         let mut connection = shared_connection.lock().await?;
         connection
             .fetch_one_with(compiled, move |row| {
-                materialize_include_one::<E, J>(&row, navigation, alias)
+                materialize_include_one::<E, J>(&row, navigation, alias, tracking_registry.as_ref())
             })
             .await
     }
@@ -711,7 +726,7 @@ impl<E: Entity, J: Entity> DbSetQueryIncludeMany<E, J> {
     pub async fn all(self) -> Result<Vec<E>, OrmError>
     where
         E: FromRow + IncludeCollection<J> + Send + SoftDeleteEntity + TenantScopedEntity,
-        J: FromRow + Send + SoftDeleteEntity + TenantScopedEntity,
+        J: Clone + FromRow + Send + SoftDeleteEntity + Sync + TenantScopedEntity + 'static,
     {
         if self.strategy == CollectionIncludeStrategy::SplitQuery {
             return Err(OrmError::new(
@@ -721,6 +736,7 @@ impl<E: Entity, J: Entity> DbSetQueryIncludeMany<E, J> {
 
         let navigation = self.navigation;
         let alias = self.alias;
+        let tracking_registry = self.query.tracking_registry.clone();
         let compiled = SqlServerCompiler::compile_select(&self.effective_select_query()?)?;
         let shared_connection = self.query.require_connection()?;
         let mut connection = shared_connection.lock().await?;
@@ -731,7 +747,7 @@ impl<E: Entity, J: Entity> DbSetQueryIncludeMany<E, J> {
             .await?;
 
         enforce_include_many_join_row_limit(rows.len(), self.join_row_limit)?;
-        group_include_many_rows::<E, J>(rows, navigation)
+        group_include_many_rows::<E, J>(rows, navigation, tracking_registry.as_ref())
     }
 
     #[cfg(test)]
@@ -936,13 +952,17 @@ fn materialize_include_one<E, J>(
     row: &impl Row,
     navigation: &'static str,
     alias: &'static str,
+    tracking_registry: Option<&TrackingRegistryHandle>,
 ) -> Result<E, OrmError>
 where
     E: FromRow + IncludeNavigation<J>,
-    J: Entity + FromRow,
+    J: Clone + Entity + FromRow + Send + Sync + 'static,
 {
     let mut entity = E::from_row(row)?;
     let related = materialize_prefixed_entity::<J>(row, alias)?;
+    let related_key = prefixed_primary_key_value::<J>(row, alias)?;
+    let related =
+        identity_mapped_optional_navigation_value(tracking_registry, related_key, related);
     entity.set_included_navigation(navigation, related)?;
     Ok(entity)
 }
@@ -974,6 +994,7 @@ fn materialize_prefixed_entity<J: Entity + FromRow>(
 struct IncludeManyRow<E, J> {
     root_key: Vec<SqlValue>,
     root: E,
+    related_key: Option<SqlValue>,
     related: Option<J>,
 }
 
@@ -988,8 +1009,23 @@ where
     Ok(IncludeManyRow {
         root_key: root_primary_key_values::<E>(row)?,
         root: E::from_row(row)?,
+        related_key: prefixed_primary_key_value::<J>(row, alias)?,
         related: materialize_prefixed_entity::<J>(row, alias)?,
     })
+}
+
+fn prefixed_primary_key_value<J: Entity>(
+    row: &impl Row,
+    alias: &'static str,
+) -> Result<Option<SqlValue>, OrmError> {
+    let metadata = J::metadata();
+    if metadata.primary_key.columns.len() != 1 {
+        return Ok(None);
+    }
+
+    let prefix = include_prefix(alias);
+    let column = prefixed_column_name(&prefix, metadata.primary_key.columns[0]);
+    row.try_get(&column)
 }
 
 fn root_primary_key_values<E: Entity>(row: &impl Row) -> Result<Vec<SqlValue>, OrmError> {
@@ -1012,24 +1048,31 @@ fn root_primary_key_values<E: Entity>(row: &impl Row) -> Result<Vec<SqlValue>, O
 fn group_include_many_rows<E, J>(
     rows: Vec<IncludeManyRow<E, J>>,
     navigation: &'static str,
+    tracking_registry: Option<&TrackingRegistryHandle>,
 ) -> Result<Vec<E>, OrmError>
 where
     E: IncludeCollection<J>,
+    J: Clone + Entity + Send + Sync + 'static,
 {
     let mut grouped: Vec<(Vec<SqlValue>, E, Vec<J>)> = Vec::new();
 
     for row in rows {
+        let related = identity_mapped_optional_navigation_value(
+            tracking_registry,
+            row.related_key,
+            row.related,
+        );
         if let Some((_, _, related_values)) = grouped
             .iter_mut()
             .find(|(root_key, _, _)| *root_key == row.root_key)
         {
-            if let Some(related) = row.related {
+            if let Some(related) = related {
                 related_values.push(related);
             }
             continue;
         }
 
-        let related_values = row.related.into_iter().collect();
+        let related_values = related.into_iter().collect();
         grouped.push((row.root_key, row.root, related_values));
     }
 
@@ -1040,6 +1083,35 @@ where
             Ok(root)
         })
         .collect()
+}
+
+fn identity_mapped_optional_navigation_value<J>(
+    tracking_registry: Option<&TrackingRegistryHandle>,
+    key: Option<SqlValue>,
+    value: Option<J>,
+) -> Option<J>
+where
+    J: Clone + Entity + Send + Sync + 'static,
+{
+    value.map(|value| identity_mapped_navigation_value(tracking_registry, key, value))
+}
+
+fn identity_mapped_navigation_value<J>(
+    tracking_registry: Option<&TrackingRegistryHandle>,
+    key: Option<SqlValue>,
+    value: J,
+) -> J
+where
+    J: Clone + Entity + Send + Sync + 'static,
+{
+    let Some(registry) = tracking_registry else {
+        return value;
+    };
+    let Some(key) = key else {
+        return value;
+    };
+
+    registry.current_snapshot_for_key::<J>(key).unwrap_or(value)
 }
 
 fn enforce_include_many_join_row_limit(
@@ -1157,11 +1229,14 @@ impl FromRow for CountRow {
 #[cfg(test)]
 mod tests {
     use super::{
-        DbSetQuery, enforce_include_many_join_row_limit, tenant_value_matches_column_type,
+        DbSetQuery, enforce_include_many_join_row_limit, identity_mapped_navigation_value,
+        tenant_value_matches_column_type,
     };
     use crate::context::{ActiveTenant, DbSet};
     use crate::page_request::PageRequest;
-    use crate::{IncludeCollection, SoftDeleteEntity, TenantScopedEntity};
+    use crate::{
+        IncludeCollection, SoftDeleteEntity, TenantScopedEntity, Tracked, TrackingRegistry,
+    };
     use insta::assert_snapshot;
     use sql_orm_core::{
         ColumnMetadata, Entity, EntityColumn, EntityMetadata, EntityPolicyMetadata, FromRow,
@@ -1178,8 +1253,11 @@ mod tests {
     struct JoinedEntity;
     #[derive(Debug)]
     struct NavigationRoot;
-    #[derive(Debug)]
-    struct NavigationTarget;
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct NavigationTarget {
+        id: i64,
+        owner_id: i64,
+    }
     struct TenantNavigationRoot;
     struct TenantNavigationTarget;
     struct SoftDeleteEntityUnderTest;
@@ -1360,8 +1438,20 @@ mod tests {
     }
 
     impl FromRow for NavigationTarget {
-        fn from_row<R: Row>(_row: &R) -> Result<Self, OrmError> {
-            Ok(Self)
+        fn from_row<R: Row>(row: &R) -> Result<Self, OrmError> {
+            Ok(Self {
+                id: required_i64(row, "id")?,
+                owner_id: required_i64(row, "owner_id")?,
+            })
+        }
+    }
+
+    fn required_i64<R: Row>(row: &R, column: &str) -> Result<i64, OrmError> {
+        match row.get_required(column)? {
+            SqlValue::I64(value) => Ok(value),
+            value => Err(OrmError::new(format!(
+                "expected `{column}` as i64, got {value:?}"
+            ))),
         }
     }
 
@@ -2549,6 +2639,31 @@ mod tests {
     #[test]
     fn include_many_join_row_limit_allows_explicit_unbounded_join() {
         enforce_include_many_join_row_limit(usize::MAX, None).unwrap();
+    }
+
+    #[test]
+    fn include_navigation_identity_map_helper_reuses_tracked_snapshot_without_registering() {
+        let registry = std::sync::Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(NavigationTarget { id: 7, owner_id: 1 });
+        tracked
+            .attach_registry_loaded(std::sync::Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+        tracked.current_mut().owner_id = 99;
+
+        let materialized = NavigationTarget { id: 7, owner_id: 1 };
+        let mapped =
+            identity_mapped_navigation_value(Some(&registry), Some(SqlValue::I64(7)), materialized);
+
+        assert_eq!(mapped.owner_id, 99);
+        assert_eq!(registry.tracked_for::<NavigationTarget>().len(), 1);
+
+        let ordinary = identity_mapped_navigation_value(
+            Some(&registry),
+            Some(SqlValue::I64(8)),
+            NavigationTarget { id: 8, owner_id: 2 },
+        );
+        assert_eq!(ordinary.owner_id, 2);
+        assert_eq!(registry.tracked_for::<NavigationTarget>().len(), 1);
     }
 
     #[test]

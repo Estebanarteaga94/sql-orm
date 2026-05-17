@@ -242,6 +242,9 @@ tracking registry, `load_collection_tracked(...)` attaches the registry-owned
 current snapshot for that related identity instead of the freshly materialized
 row. Related rows that are not already tracked remain ordinary values and are
 not registered automatically.
+The ordinary `load_collection(...)` path uses the same replacement rule for
+related rows that are already tracked in the same context, while still leaving
+newly materialized related rows untracked.
 
 Navigation graph tracking remains intentionally narrow. Includes return
 ordinary entity values and do not register included graphs automatically.
@@ -258,9 +261,12 @@ loads a persisted identity whose previous wrapper was dropped but whose entry
 remains in the context registry, the returned wrapper reattaches to the
 registry-owned snapshot instead of creating a duplicate. Multiple live wrappers
 for the same persisted identity still return an error. `load_collection_tracked(...)`
-also consults those snapshots for already tracked related rows. Sharing
-canonical instances with `include`, `include_many` and ordinary
-`load_collection(...)` remains future work.
+also consults those snapshots for already tracked related rows. `include(...)`,
+`include_many(...)` and ordinary `load_collection(...)` now reuse those
+registry-owned related snapshots when a related entity with the same simple
+primary key is already tracked in the context. This is snapshot replacement,
+not graph tracking: newly materialized related rows are not registered
+automatically.
 
 Navigation includes are not projection builders. After `include(...)` or
 `include_many(...)`, the returned builder does not expose `select(...)`,

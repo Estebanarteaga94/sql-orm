@@ -112,6 +112,10 @@ As of 2026-05-07, the first registry slice is implemented:
   that are already tracked and attaches their registry-owned current snapshots
   to the navigation collection, without registering newly materialized related
   rows automatically.
+- `include(...)`, `include_many(...)` and ordinary `load_collection(...)` now
+  use the same registry lookup for related entities that are already tracked in
+  the context, without turning navigation materialization into implicit graph
+  tracking.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current
@@ -216,10 +220,15 @@ Current rules:
 
 - `include(...)` and `include_many(...)` materialize ordinary entity values;
   they do not automatically register roots or related rows in the tracker.
+- already tracked related rows materialized by `include(...)` and
+  `include_many(...)` are replaced with registry-owned current snapshots when
+  the target has a simple primary key present in the registry.
 - `load_collection_tracked(...)` attaches a collection to an already tracked
   root without changing the root state to `Modified`; already tracked related
   rows are attached from registry-owned current snapshots when their identity
   is present.
+- ordinary `load_collection(...)` uses the same related-snapshot replacement
+  rule while keeping the root and newly materialized related rows untracked.
 - The same no-modification rule applies to single navigation assignment through
   the generated `IncludeNavigation<T>` contract.
 - Related entities assigned into `Navigation<T>`, `LazyNavigation<T>`,
@@ -228,12 +237,12 @@ Current rules:
   insert dependents, delete dependents, update foreign keys or persist direct
   many-to-many changes.
 
-The future identity map must be context-owned and shared by tracked roots,
-included entities and explicit loads. Registry-owned pending snapshots remove
-the immediate wrapper-lifetime blocker, and `load_collection_tracked(...)` now
-reuses already tracked related snapshots. `include(...)`, `include_many(...)`
-and ordinary `load_collection(...)` still need canonical instance semantics
-before graph materialization can be called complete.
+The current identity-map slice is context-owned for tracked entries and shared
+with navigation materialization only as related-entity snapshot replacement.
+Registry-owned pending snapshots remove the immediate wrapper-lifetime blocker,
+and `include(...)`, `include_many(...)`, ordinary `load_collection(...)` and
+`load_collection_tracked(...)` now reuse already tracked related snapshots.
+Root materialization and untracked related rows remain ordinary values.
 
 ## Future Relationship Persistence
 
