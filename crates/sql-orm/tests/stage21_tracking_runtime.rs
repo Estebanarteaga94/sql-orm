@@ -1,7 +1,14 @@
 use sql_orm::prelude::*;
 use sql_orm::query::CompiledQuery;
 use sql_orm::tiberius::MssqlConnection;
+#[cfg(feature = "pool-bb8")]
+use sql_orm::{
+    MssqlConnectionConfig, MssqlOperationalOptions, MssqlPool, MssqlRetryOptions,
+    MssqlTimeoutOptions, MssqlTracingOptions,
+};
 use std::sync::OnceLock;
+#[cfg(feature = "pool-bb8")]
+use std::time::Duration;
 use tokio::sync::{Mutex, MutexGuard};
 
 const TEST_CONNECTION_ENV: &str = "SQL_ORM_TEST_CONNECTION_STRING";
@@ -28,12 +35,21 @@ struct RuntimeAudit {
     updated_by: Option<String>,
 }
 
+#[derive(SoftDeleteFields)]
+#[allow(dead_code)]
+struct RuntimeSoftDelete {
+    #[orm(deleted_at)]
+    #[orm(sql_type = "datetime2")]
+    deleted_at: Option<String>,
+}
+
 #[derive(Entity, Debug, Clone, PartialEq)]
 #[orm(
     table = "sql_orm_tracking_runtime",
     schema = "dbo",
     tenant = RuntimeTenant,
-    audit = RuntimeAudit
+    audit = RuntimeAudit,
+    soft_delete = RuntimeSoftDelete
 )]
 struct TrackedPolicyUser {
     #[orm(primary_key)]
@@ -54,6 +70,7 @@ struct TrackingRuntimeRow {
     name: SqlValue,
     created_by: SqlValue,
     updated_by: SqlValue,
+    deleted_at: SqlValue,
 }
 
 impl FromRow for TrackingRuntimeRow {
@@ -63,6 +80,7 @@ impl FromRow for TrackingRuntimeRow {
             name: row.get_required("name")?,
             created_by: row.get_required("created_by")?,
             updated_by: row.get_required("updated_by")?,
+            deleted_at: row.get_required("deleted_at")?,
         })
     }
 }
@@ -153,6 +171,125 @@ async fn public_save_changes_preserves_tenant_and_audit_runtime_values() -> Resu
     result
 }
 
+#[cfg(feature = "pool-bb8")]
+#[tokio::test]
+async fn public_pool_transaction_preserves_runtime_policies_and_tracking() -> Result<(), OrmError> {
+    let Some(connection_string) = test_connection_string() else {
+        eprintln!(
+            "skipping pooled tracking policy transaction integration test because {TEST_CONNECTION_ENV} is not set"
+        );
+        return Ok(());
+    };
+
+    let _fixture_guard = tracking_runtime_fixture_lock().await;
+    let keep_tables = keep_test_tables();
+    reset_test_table(&connection_string).await?;
+
+    let result = async {
+        let options = MssqlOperationalOptions::new()
+            .with_timeouts(MssqlTimeoutOptions::new().with_query_timeout(Duration::from_secs(5)))
+            .with_tracing(MssqlTracingOptions::enabled())
+            .with_retry(MssqlRetryOptions::enabled(
+                2,
+                Duration::from_millis(10),
+                Duration::from_millis(20),
+            ));
+        let config = MssqlConnectionConfig::from_connection_string_with_options(
+            &connection_string,
+            options,
+        )?;
+        let pool = MssqlPool::builder()
+            .max_size(1)
+            .acquire_timeout(Duration::from_secs(2))
+            .connect_with_config(config)
+            .await?;
+        let db = TrackingRuntimeDb::from_pool(pool)
+            .with_tenant(RuntimeTenant { tenant_id: 42 })
+            .with_audit_request_values(AuditRequestValues::new(vec![ColumnValue::new(
+                "created_by",
+                SqlValue::String("pooled-creator".to_string()),
+            )]));
+
+        let mut tracked = db.users.add_tracked(TrackedPolicyUser {
+            id: 0,
+            name: "pooled tracked insert".to_string(),
+        });
+
+        assert_eq!(
+            db.transaction(|tx| async move { tx.save_changes().await })
+                .await?,
+            1
+        );
+        assert!(tracked.id > 0);
+        assert_eq!(tracked.state(), EntityState::Unchanged);
+
+        let inserted = raw_runtime_row(&connection_string, tracked.id)
+            .await?
+            .expect("pooled tracked insert should persist");
+        assert_eq!(inserted.tenant_id, SqlValue::I64(42));
+        assert_eq!(
+            inserted.created_by,
+            SqlValue::String("pooled-creator".to_string())
+        );
+
+        tracked.name = "pooled tracked update".to_string();
+        let db =
+            db.clear_audit_request_values()
+                .with_audit_request_values(AuditRequestValues::new(vec![ColumnValue::new(
+                    "updated_by",
+                    SqlValue::String("pooled-updater".to_string()),
+                )]));
+
+        assert_eq!(
+            db.transaction(|tx| async move { tx.save_changes().await })
+                .await?,
+            1
+        );
+        assert_eq!(tracked.state(), EntityState::Unchanged);
+
+        let updated = raw_runtime_row(&connection_string, tracked.id)
+            .await?
+            .expect("pooled tracked update should persist");
+        assert_eq!(
+            updated.name,
+            SqlValue::String("pooled tracked update".to_string())
+        );
+        assert_eq!(
+            updated.updated_by,
+            SqlValue::String("pooled-updater".to_string())
+        );
+
+        let db = db
+            .clear_audit_request_values()
+            .with_soft_delete_request_values(SoftDeleteRequestValues::new(vec![ColumnValue::new(
+                "deleted_at",
+                SqlValue::String("2026-05-17T00:00:00".to_string()),
+            )]));
+        db.users.remove_tracked(&mut tracked);
+
+        assert_eq!(
+            db.transaction(|tx| async move { tx.save_changes().await })
+                .await?,
+            1
+        );
+        assert_eq!(db.users.query().count().await?, 0);
+
+        let deleted = raw_runtime_row(&connection_string, tracked.id)
+            .await?
+            .expect("soft-deleted row should remain physically present");
+        assert_eq!(
+            deleted.deleted_at,
+            SqlValue::String("2026-05-17T00:00:00".to_string())
+        );
+
+        Ok(())
+    }
+    .await;
+
+    cleanup_test_table(&connection_string, keep_tables).await?;
+    result
+}
+
 fn test_connection_string() -> Option<String> {
     std::env::var(TEST_CONNECTION_ENV)
         .ok()
@@ -193,7 +330,8 @@ async fn reset_test_table(connection_string: &str) -> Result<(), OrmError> {
                     name NVARCHAR(120) NOT NULL,\
                     tenant_id BIGINT NOT NULL,\
                     created_by NVARCHAR(120) NOT NULL,\
-                    updated_by NVARCHAR(120) NULL\
+                    updated_by NVARCHAR(120) NULL,\
+                    deleted_at DATETIME2 NULL\
                 )"
             ),
             vec![],
@@ -229,7 +367,7 @@ async fn raw_runtime_row(
     connection
         .fetch_one::<TrackingRuntimeRow>(CompiledQuery::new(
             format!(
-                "SELECT [tenant_id], [name], [created_by], [updated_by] FROM {TEST_TABLE_NAME} WHERE [id] = @P1"
+                "SELECT [tenant_id], [name], [created_by], [updated_by], [deleted_at] FROM {TEST_TABLE_NAME} WHERE [id] = @P1"
             ),
             vec![SqlValue::I64(id)],
         ))

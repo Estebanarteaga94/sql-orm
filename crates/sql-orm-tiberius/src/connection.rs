@@ -90,6 +90,17 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> MssqlConnection<S> {
         self.config.options().retry
     }
 
+    #[doc(hidden)]
+    pub fn replace_retry_options(
+        &mut self,
+        retry: crate::config::MssqlRetryOptions,
+    ) -> crate::config::MssqlRetryOptions {
+        let previous = self.config.options().retry;
+        let options = self.config.options().clone().with_retry(retry);
+        self.config = self.config.clone().with_options(options);
+        previous
+    }
+
     pub(crate) fn health_options(&self) -> crate::config::MssqlHealthCheckOptions {
         self.config.options().health
     }

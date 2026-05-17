@@ -26,7 +26,8 @@ use sql_orm_query::{
 };
 use sql_orm_sqlserver::SqlServerCompiler;
 use sql_orm_tiberius::{
-    MssqlConnection, MssqlConnectionConfig, MssqlOperationalOptions, TokioConnectionStream,
+    MssqlConnection, MssqlConnectionConfig, MssqlOperationalOptions, MssqlRetryOptions,
+    TokioConnectionStream,
 };
 #[cfg(feature = "pool-bb8")]
 use sql_orm_tiberius::{MssqlPool, MssqlPooledConnection};
@@ -342,6 +343,7 @@ impl SharedConnection {
 
         let mut connection = self.lock().await?;
         connection.begin_transaction_scope().await?;
+        let retry_options = connection.replace_retry_options(MssqlRetryOptions::disabled());
         drop(connection);
 
         self.enter_transaction_scope();
@@ -352,6 +354,7 @@ impl SharedConnection {
             Ok(value) => {
                 let mut connection = self.lock().await?;
                 let commit_result = connection.commit_transaction().await;
+                connection.replace_retry_options(retry_options);
                 self.exit_transaction_scope();
                 commit_result?;
                 Ok(value)
@@ -359,6 +362,7 @@ impl SharedConnection {
             Err(error) => {
                 let mut connection = self.lock().await?;
                 let rollback_result = connection.rollback_transaction().await;
+                connection.replace_retry_options(retry_options);
                 self.exit_transaction_scope();
                 rollback_result?;
                 Err(error)
@@ -390,6 +394,7 @@ impl SharedConnection {
             return Err(error);
         }
 
+        let retry_options = self.disable_pinned_pool_retry().await?;
         self.enter_transaction_scope();
         let result = operation().await;
 
@@ -400,6 +405,7 @@ impl SharedConnection {
                     connection.commit_transaction().await
                 }
                 .await;
+                self.restore_pinned_pool_retry(retry_options).await?;
                 self.exit_transaction_scope();
                 self.clear_pinned_pool_connection().await;
                 commit_result?;
@@ -411,6 +417,7 @@ impl SharedConnection {
                     connection.rollback_transaction().await
                 }
                 .await;
+                self.restore_pinned_pool_retry(retry_options).await?;
                 self.exit_transaction_scope();
                 self.clear_pinned_pool_connection().await;
                 rollback_result?;
@@ -466,6 +473,30 @@ impl SharedConnection {
     async fn clear_pinned_pool_connection(&self) {
         let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
         *pinned_connection = None;
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    async fn disable_pinned_pool_retry(&self) -> Result<MssqlRetryOptions, OrmError> {
+        let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
+        let connection = pinned_connection
+            .as_mut()
+            .ok_or_else(|| OrmError::new("pinned pooled transaction connection is missing"))?;
+
+        Ok(connection.replace_retry_options(MssqlRetryOptions::disabled()))
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    async fn restore_pinned_pool_retry(
+        &self,
+        retry_options: MssqlRetryOptions,
+    ) -> Result<(), OrmError> {
+        let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
+        let connection = pinned_connection
+            .as_mut()
+            .ok_or_else(|| OrmError::new("pinned pooled transaction connection is missing"))?;
+
+        connection.replace_retry_options(retry_options);
+        Ok(())
     }
 
     #[allow(dead_code)]
