@@ -3588,6 +3588,31 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn dropping_clone_of_modified_entry_does_not_cancel_original_pending_update() {
+        let dbset = DbSet::<CompositeKeyEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(CompositeKeyEntity);
+        tracked.attach_registry(registry.clone());
+        tracked.mark_modified();
+
+        assert_eq!(tracked.state(), crate::EntityState::Modified);
+        assert_eq!(registry.entry_count(), 1);
+
+        let clone = tracked.clone();
+        assert_eq!(clone.state(), crate::EntityState::Modified);
+        drop(clone);
+
+        let error = dbset.save_tracked_modified().await.unwrap_err();
+
+        assert_eq!(tracked.state(), crate::EntityState::Modified);
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(
+            error.message(),
+            "change tracking currently supports only entities with a single primary key column"
+        );
+    }
+
+    #[tokio::test]
     async fn save_tracked_modified_skips_update_when_persisted_snapshot_is_unchanged() {
         let dbset = DbSet::<ExplicitLoadRoot>::disconnected();
         let registry = dbset.tracking_registry();
