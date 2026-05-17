@@ -6,6 +6,34 @@ use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+/// Explicit execution classification for raw SQL.
+///
+/// Raw SQL is not inspected to decide retry safety. Typed raw queries default
+/// to `RawNoRetry`; callers must opt into `ReadOnly` deliberately when the SQL
+/// is idempotent and safe to retry.
+pub enum RawSqlExecution {
+    /// Read-only SQL that may use configured read retry policy.
+    ReadOnly,
+    /// SQL with side effects.
+    Write,
+    /// Migration or schema-management SQL.
+    Migration,
+    /// Raw SQL that must not use automatic retry.
+    RawNoRetry,
+}
+
+impl RawSqlExecution {
+    const fn query_execution(self) -> sql_orm_query::QueryExecution {
+        match self {
+            Self::ReadOnly => sql_orm_query::QueryExecution::ReadOnly,
+            Self::Write => sql_orm_query::QueryExecution::Write,
+            Self::Migration => sql_orm_query::QueryExecution::Migration,
+            Self::RawNoRetry => sql_orm_query::QueryExecution::RawNoRetry,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
 /// SQL Server query hints supported by typed raw queries.
 ///
 /// Hints are rendered by the ORM at the end of the raw SQL as an
@@ -154,6 +182,7 @@ pub struct RawQuery<T> {
     sql: String,
     params: Vec<SqlValue>,
     query_hints: BTreeSet<QueryHint>,
+    execution: RawSqlExecution,
     _row: PhantomData<fn() -> T>,
 }
 
@@ -167,6 +196,7 @@ where
             sql: sql.into(),
             params: Vec::new(),
             query_hints: BTreeSet::new(),
+            execution: RawSqlExecution::RawNoRetry,
             _row: PhantomData,
         }
     }
@@ -197,6 +227,22 @@ where
         self
     }
 
+    /// Marks this raw query as read-only and eligible for configured read retry.
+    ///
+    /// Use this only for idempotent SQL that does not mutate state, acquire
+    /// non-repeatable locks, call side-effecting procedures, or depend on
+    /// per-execution side effects.
+    pub fn read_only(mut self) -> Self {
+        self.execution = RawSqlExecution::ReadOnly;
+        self
+    }
+
+    /// Forces this raw query to bypass automatic retry.
+    pub fn no_retry(mut self) -> Self {
+        self.execution = RawSqlExecution::RawNoRetry;
+        self
+    }
+
     /// Executes the query and materializes all rows.
     pub async fn all(self) -> Result<Vec<T>, OrmError> {
         let compiled = self.compiled_query()?;
@@ -212,7 +258,12 @@ where
     }
 
     fn compiled_query(&self) -> Result<CompiledQuery, OrmError> {
-        compiled_raw_query_with_hints(&self.sql, self.params.clone(), &self.query_hints)
+        compiled_raw_query_with_hints(
+            &self.sql,
+            self.params.clone(),
+            &self.query_hints,
+            self.execution,
+        )
     }
 }
 
@@ -226,6 +277,7 @@ pub struct RawCommand {
     connection: SharedConnection,
     sql: String,
     params: Vec<SqlValue>,
+    execution: RawSqlExecution,
 }
 
 impl RawCommand {
@@ -234,6 +286,7 @@ impl RawCommand {
             connection,
             sql: sql.into(),
             params: Vec::new(),
+            execution: RawSqlExecution::Write,
         }
     }
 
@@ -255,6 +308,18 @@ impl RawCommand {
         self
     }
 
+    /// Marks this raw command as migration or schema-management SQL.
+    pub fn migration(mut self) -> Self {
+        self.execution = RawSqlExecution::Migration;
+        self
+    }
+
+    /// Forces this raw command to bypass automatic retry.
+    pub fn no_retry(mut self) -> Self {
+        self.execution = RawSqlExecution::RawNoRetry;
+        self
+    }
+
     /// Executes the command and returns affected-row information.
     pub async fn execute(self) -> Result<ExecuteResult, OrmError> {
         let compiled = self.compiled_query()?;
@@ -263,24 +328,38 @@ impl RawCommand {
     }
 
     fn compiled_query(&self) -> Result<CompiledQuery, OrmError> {
-        compiled_raw_query(&self.sql, self.params.clone())
+        compiled_raw_query_with_execution(&self.sql, self.params.clone(), self.execution)
     }
 }
 
+#[cfg(test)]
 fn compiled_raw_query(sql: &str, params: Vec<SqlValue>) -> Result<CompiledQuery, OrmError> {
-    compiled_raw_query_with_hints(sql, params, &BTreeSet::new())
+    compiled_raw_query_with_execution(sql, params, RawSqlExecution::RawNoRetry)
+}
+
+fn compiled_raw_query_with_execution(
+    sql: &str,
+    params: Vec<SqlValue>,
+    execution: RawSqlExecution,
+) -> Result<CompiledQuery, OrmError> {
+    compiled_raw_query_with_hints(sql, params, &BTreeSet::new(), execution)
 }
 
 fn compiled_raw_query_with_hints(
     sql: &str,
     params: Vec<SqlValue>,
     query_hints: &BTreeSet<QueryHint>,
+    execution: RawSqlExecution,
 ) -> Result<CompiledQuery, OrmError> {
     validate_raw_sql_parameters(sql, params.len())?;
 
     let sql = render_raw_sql_with_hints(sql, query_hints)?;
 
-    Ok(CompiledQuery::new(sql, params))
+    Ok(CompiledQuery::with_execution(
+        sql,
+        params,
+        execution.query_execution(),
+    ))
 }
 
 fn render_raw_sql_with_hints(
@@ -550,13 +629,16 @@ fn is_identifier_byte(byte: u8) -> bool {
 
 #[cfg(test)]
 mod tests {
+    use super::RawSqlExecution;
     use super::{
-        QueryHint, RawParam, RawParams, compiled_raw_query, compiled_raw_query_with_hints,
-        contains_top_level_option_clause, validate_raw_sql_parameters,
+        QueryHint, RawParam, RawParams, compiled_raw_query, compiled_raw_query_with_execution,
+        compiled_raw_query_with_hints, contains_top_level_option_clause,
+        validate_raw_sql_parameters,
     };
     use chrono::NaiveDate;
     use rust_decimal::Decimal;
     use sql_orm_core::SqlValue;
+    use sql_orm_query::QueryExecution;
     use std::collections::BTreeSet;
     use uuid::Uuid;
 
@@ -782,6 +864,7 @@ mod tests {
             "SELECT * FROM users WHERE owner_id = @P1",
             vec![SqlValue::I64(42)],
             &hints,
+            RawSqlExecution::ReadOnly,
         )
         .unwrap();
 
@@ -790,12 +873,15 @@ mod tests {
             "SELECT * FROM users WHERE owner_id = @P1 OPTION (RECOMPILE)"
         );
         assert_eq!(compiled.params, vec![SqlValue::I64(42)]);
+        assert_eq!(compiled.execution, QueryExecution::ReadOnly);
     }
 
     #[test]
     fn compiled_raw_query_deduplicates_repeated_query_hints() {
         let hints = BTreeSet::from([QueryHint::Recompile, QueryHint::Recompile]);
-        let compiled = compiled_raw_query_with_hints("SELECT 1", vec![], &hints).unwrap();
+        let compiled =
+            compiled_raw_query_with_hints("SELECT 1", vec![], &hints, RawSqlExecution::ReadOnly)
+                .unwrap();
 
         assert_eq!(compiled.sql, "SELECT 1 OPTION (RECOMPILE)");
     }
@@ -803,7 +889,13 @@ mod tests {
     #[test]
     fn compiled_raw_query_places_hint_before_trailing_semicolon() {
         let hints = BTreeSet::from([QueryHint::Recompile]);
-        let compiled = compiled_raw_query_with_hints("SELECT 1;   ", vec![], &hints).unwrap();
+        let compiled = compiled_raw_query_with_hints(
+            "SELECT 1;   ",
+            vec![],
+            &hints,
+            RawSqlExecution::ReadOnly,
+        )
+        .unwrap();
 
         assert_eq!(compiled.sql, "SELECT 1 OPTION (RECOMPILE)");
     }
@@ -811,10 +903,45 @@ mod tests {
     #[test]
     fn compiled_raw_query_rejects_existing_top_level_option_clause_with_hints() {
         let hints = BTreeSet::from([QueryHint::Recompile]);
-        let error = compiled_raw_query_with_hints("SELECT 1 OPTION (MAXDOP 1)", vec![], &hints)
-            .unwrap_err();
+        let error = compiled_raw_query_with_hints(
+            "SELECT 1 OPTION (MAXDOP 1)",
+            vec![],
+            &hints,
+            RawSqlExecution::ReadOnly,
+        )
+        .unwrap_err();
 
         assert!(error.message().contains("already contains OPTION"));
+    }
+
+    #[test]
+    fn raw_query_defaults_to_no_retry_execution_classification() {
+        let compiled = compiled_raw_query("SELECT 1", vec![]).unwrap();
+
+        assert_eq!(compiled.execution, QueryExecution::RawNoRetry);
+    }
+
+    #[test]
+    fn raw_sql_execution_classification_is_explicit() {
+        let read_only =
+            compiled_raw_query_with_execution("SELECT 1", vec![], RawSqlExecution::ReadOnly)
+                .unwrap();
+        let write = compiled_raw_query_with_execution(
+            "UPDATE users SET active = 1",
+            vec![],
+            RawSqlExecution::Write,
+        )
+        .unwrap();
+        let migration = compiled_raw_query_with_execution(
+            "ALTER TABLE users ADD active bit NOT NULL DEFAULT 1",
+            vec![],
+            RawSqlExecution::Migration,
+        )
+        .unwrap();
+
+        assert_eq!(read_only.execution, QueryExecution::ReadOnly);
+        assert_eq!(write.execution, QueryExecution::Write);
+        assert_eq!(migration.execution, QueryExecution::Migration);
     }
 
     #[test]

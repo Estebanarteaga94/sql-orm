@@ -8,7 +8,7 @@ use crate::transaction::MssqlTransaction;
 use async_trait::async_trait;
 use futures_io::{AsyncRead, AsyncWrite};
 use sql_orm_core::{FromRow, OrmError};
-use sql_orm_query::CompiledQuery;
+use sql_orm_query::{CompiledQuery, QueryExecution};
 use std::time::Duration;
 use tiberius::Client;
 use tiberius::QueryStream;
@@ -540,7 +540,9 @@ where
 }
 
 fn is_retryable_read_query(query: &CompiledQuery, retry_options: MssqlRetryOptions) -> bool {
-    retry_options.enabled && retry_options.max_retries > 0 && classify_sql(&query.sql) == "select"
+    retry_options.enabled
+        && retry_options.max_retries > 0
+        && query.execution == QueryExecution::ReadOnly
 }
 
 fn retry_delay(retry_options: MssqlRetryOptions, attempt: u32) -> Duration {
@@ -562,7 +564,7 @@ mod tests {
     };
     use crate::config::{MssqlSlowQueryOptions, MssqlTracingOptions};
     use sql_orm_core::{FromRow, OrmError, Row};
-    use sql_orm_query::CompiledQuery;
+    use sql_orm_query::{CompiledQuery, QueryExecution};
     use std::time::Duration;
 
     struct TestRowModel;
@@ -602,7 +604,7 @@ mod tests {
     }
 
     #[test]
-    fn retry_policy_only_targets_select_queries() {
+    fn retry_policy_only_targets_explicit_read_only_queries() {
         let retry = crate::config::MssqlRetryOptions::enabled(
             2,
             Duration::from_millis(50),
@@ -610,11 +612,18 @@ mod tests {
         );
 
         assert!(is_retryable_read_query(
-            &CompiledQuery::new("SELECT 1", vec![]),
+            &CompiledQuery::read_only("EXEC dbo.read_only_proc", vec![]),
             retry
         ));
         assert!(!is_retryable_read_query(
-            &CompiledQuery::new("INSERT INTO [dbo].[users] DEFAULT VALUES", vec![]),
+            &CompiledQuery::write(
+                "SELECT * INTO [dbo].[users_copy] FROM [dbo].[users]",
+                vec![]
+            ),
+            retry
+        ));
+        assert!(!is_retryable_read_query(
+            &CompiledQuery::with_execution("SELECT 1", vec![], QueryExecution::RawNoRetry),
             retry
         ));
     }

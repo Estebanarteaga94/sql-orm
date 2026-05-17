@@ -30,15 +30,49 @@ pub use update::UpdateQuery;
 pub struct CompiledQuery {
     pub sql: String,
     pub params: Vec<SqlValue>,
+    pub execution: QueryExecution,
 }
 
 impl CompiledQuery {
     pub fn new(sql: impl Into<String>, params: Vec<SqlValue>) -> Self {
+        Self::with_execution(sql, params, QueryExecution::RawNoRetry)
+    }
+
+    pub fn read_only(sql: impl Into<String>, params: Vec<SqlValue>) -> Self {
+        Self::with_execution(sql, params, QueryExecution::ReadOnly)
+    }
+
+    pub fn write(sql: impl Into<String>, params: Vec<SqlValue>) -> Self {
+        Self::with_execution(sql, params, QueryExecution::Write)
+    }
+
+    pub fn migration(sql: impl Into<String>, params: Vec<SqlValue>) -> Self {
+        Self::with_execution(sql, params, QueryExecution::Migration)
+    }
+
+    pub fn raw_no_retry(sql: impl Into<String>, params: Vec<SqlValue>) -> Self {
+        Self::with_execution(sql, params, QueryExecution::RawNoRetry)
+    }
+
+    pub fn with_execution(
+        sql: impl Into<String>,
+        params: Vec<SqlValue>,
+        execution: QueryExecution,
+    ) -> Self {
         Self {
             sql: sql.into(),
             params,
+            execution,
         }
     }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum QueryExecution {
+    ReadOnly,
+    Write,
+    Migration,
+    RawNoRetry,
 }
 
 #[derive(Debug, Clone, PartialEq)]

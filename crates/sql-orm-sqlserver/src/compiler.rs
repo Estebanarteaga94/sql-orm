@@ -21,8 +21,12 @@ impl ParameterBuilder {
         format!("@P{}", self.params.len())
     }
 
-    fn finish(self, sql: String) -> CompiledQuery {
-        CompiledQuery::new(sql, self.params)
+    fn finish_read_only(self, sql: String) -> CompiledQuery {
+        CompiledQuery::read_only(sql, self.params)
+    }
+
+    fn finish_write(self, sql: String) -> CompiledQuery {
+        CompiledQuery::write(sql, self.params)
     }
 }
 
@@ -70,7 +74,7 @@ impl crate::SqlServerCompiler {
             sql.push_str(&compile_pagination(pagination, &mut parameters));
         }
 
-        Ok(parameters.finish(sql))
+        Ok(parameters.finish_read_only(sql))
     }
 
     pub fn compile_insert(query: &InsertQuery) -> Result<CompiledQuery, OrmError> {
@@ -88,7 +92,7 @@ impl crate::SqlServerCompiler {
             quote_table_ref(&query.into)?,
         );
 
-        Ok(parameters.finish(sql))
+        Ok(parameters.finish_write(sql))
     }
 
     pub fn compile_update(query: &UpdateQuery) -> Result<CompiledQuery, OrmError> {
@@ -117,7 +121,7 @@ impl crate::SqlServerCompiler {
             sql.push_str(&predicate);
         }
 
-        Ok(parameters.finish(sql))
+        Ok(parameters.finish_write(sql))
     }
 
     pub fn compile_delete(query: &DeleteQuery) -> Result<CompiledQuery, OrmError> {
@@ -136,7 +140,7 @@ impl crate::SqlServerCompiler {
             sql.push_str(&predicate);
         }
 
-        Ok(parameters.finish(sql))
+        Ok(parameters.finish_write(sql))
     }
 
     pub fn compile_count(query: &CountQuery) -> Result<CompiledQuery, OrmError> {
@@ -153,7 +157,7 @@ impl crate::SqlServerCompiler {
             sql.push_str(&predicate);
         }
 
-        Ok(parameters.finish(sql))
+        Ok(parameters.finish_read_only(sql))
     }
 
     pub fn compile_exists(query: &ExistsQuery) -> Result<CompiledQuery, OrmError> {
@@ -172,7 +176,7 @@ impl crate::SqlServerCompiler {
             quote_identifier("exists")?
         );
 
-        Ok(parameters.finish(sql))
+        Ok(parameters.finish_read_only(sql))
     }
 
     pub fn compile_aggregate(query: &AggregateQuery) -> Result<CompiledQuery, OrmError> {
@@ -224,7 +228,7 @@ impl crate::SqlServerCompiler {
             sql.push_str(&compile_pagination(pagination, &mut parameters));
         }
 
-        Ok(parameters.finish(sql))
+        Ok(parameters.finish_read_only(sql))
     }
 }
 
@@ -933,8 +937,8 @@ mod tests {
     use sql_orm_query::{
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
         BinaryOp, CountQuery, DeleteQuery, ExistsQuery, Expr, InsertQuery, OrderBy, Pagination,
-        Predicate, Query, SelectProjection, SelectQuery, SqlFunction, TableRef, UnaryOp,
-        UpdateQuery,
+        Predicate, Query, QueryExecution, SelectProjection, SelectQuery, SqlFunction, TableRef,
+        UnaryOp, UpdateQuery,
     };
 
     #[allow(dead_code)]
@@ -1800,6 +1804,7 @@ mod tests {
             "SELECT COUNT(*) AS [count] FROM [sales].[customers] WHERE ([sales].[customers].[active] = @P1)"
         );
         assert_eq!(compiled.params, vec![SqlValue::Bool(true)]);
+        assert_eq!(compiled.execution, QueryExecution::ReadOnly);
 
         let exists_query = Query::Exists(Box::new(ExistsQuery::from_entity::<Customer>().filter(
             Predicate::eq(
@@ -1813,6 +1818,7 @@ mod tests {
             "SELECT CASE WHEN EXISTS (SELECT 1 FROM [sales].[customers] WHERE ([sales].[customers].[active] = @P1)) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS [exists]"
         );
         assert_eq!(compiled_exists.params, vec![SqlValue::Bool(true)]);
+        assert_eq!(compiled_exists.execution, QueryExecution::ReadOnly);
     }
 
     #[test]

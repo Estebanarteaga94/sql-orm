@@ -50,14 +50,15 @@ pub use query_alias::{AliasedEntityColumn, EntityColumnAliasExt};
 pub use query_order::EntityColumnOrderExt;
 pub use query_predicates::EntityColumnPredicateExt;
 pub use query_projection::SelectProjections;
-pub use raw_sql::{QueryHint, RawCommand, RawParam, RawParams, RawQuery};
+pub use raw_sql::{QueryHint, RawCommand, RawParam, RawParams, RawQuery, RawSqlExecution};
 pub use soft_delete_runtime::{
     SoftDeleteContext, SoftDeleteOperation, SoftDeleteProvider, SoftDeleteRequestValues,
     SoftDeleteValues,
 };
 pub use sql_orm_core::{EntityMetadata, NavigationKind, NavigationMetadata};
 pub use sql_orm_query::{
-    AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, SqlFunction,
+    AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, QueryExecution,
+    SqlFunction,
 };
 pub use sql_orm_tiberius::{
     MssqlConnectionConfig, MssqlHealthCheckOptions, MssqlHealthCheckQuery, MssqlOperationalOptions,
@@ -386,10 +387,10 @@ pub mod prelude {
         MssqlOperationalOptions, MssqlParameterLogMode, MssqlPoolBackend, MssqlPoolOptions,
         MssqlRetryOptions, MssqlSlowQueryOptions, MssqlTimeoutOptions, MssqlTracingOptions,
         Navigation, PageRequest, PredicateCompositionExt, QueryHint, RawCommand, RawParam,
-        RawParams, RawQuery, SelectProjections, SharedConnection, SoftDeleteContext,
-        SoftDeleteEntity, SoftDeleteOperation, SoftDeleteProvider, SoftDeleteRequestValues,
-        SoftDeleteValues, TenantContext, TenantScopedEntity, Tracked, model_snapshot_from_source,
-        model_snapshot_json_from_source,
+        RawParams, RawQuery, RawSqlExecution, SelectProjections, SharedConnection,
+        SoftDeleteContext, SoftDeleteEntity, SoftDeleteOperation, SoftDeleteProvider,
+        SoftDeleteRequestValues, SoftDeleteValues, TenantContext, TenantScopedEntity, Tracked,
+        model_snapshot_from_source, model_snapshot_json_from_source,
     };
     pub use crate::{
         AuditContext, AuditOperation, AuditProvider, AuditRequestValues, AuditValues,
@@ -409,7 +410,7 @@ pub mod prelude {
     };
     pub use sql_orm_query::{
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, Join, JoinType,
-        SelectProjection, SqlFunction,
+        QueryExecution, SelectProjection, SqlFunction,
     };
 }
 
@@ -423,10 +424,10 @@ mod tests {
         IdentityMetadata, Insertable, LazyCollection, LazyNavigation, MssqlConnectionConfig,
         MssqlOperationalOptions, MssqlPoolBackend, MssqlPoolOptions, MssqlRetryOptions,
         MssqlTimeoutOptions, NavigationKind, NavigationMetadata, OrmError, PageRequest,
-        PredicateCompositionExt, PrimaryKeyMetadata, QueryHint, RawCommand, RawParam, RawParams,
-        RawQuery, SelectProjection, SelectProjections, SharedConnection, SoftDeleteEntity,
-        SoftDeleteFields, SqlServerType, SqlTypeMapping, SqlValue, TenantContext,
-        TenantScopedEntity, Tracked,
+        PredicateCompositionExt, PrimaryKeyMetadata, QueryExecution, QueryHint, RawCommand,
+        RawParam, RawParams, RawQuery, RawSqlExecution, SelectProjection, SelectProjections,
+        SharedConnection, SoftDeleteEntity, SoftDeleteFields, SqlServerType, SqlTypeMapping,
+        SqlValue, TenantContext, TenantScopedEntity, Tracked,
     };
     use sql_orm_query::{Expr, OrderBy, Predicate, SortDirection, TableRef};
     use std::time::Duration;
@@ -509,6 +510,8 @@ mod tests {
         let raw_command_type = core::any::type_name::<RawCommand>();
         let projection_type = core::any::type_name::<SelectProjection>();
         let query_hint = QueryHint::Recompile;
+        let raw_execution = RawSqlExecution::ReadOnly;
+        let query_execution = QueryExecution::ReadOnly;
         fn assert_raw_param<T: RawParam>() {}
         fn assert_raw_params<T: RawParams>() {}
         fn assert_select_projections<T: SelectProjections>() {}
@@ -521,6 +524,8 @@ mod tests {
         assert_raw_params::<(bool, i64)>();
         assert_select_projections::<(EntityColumn<PublicEntity>,)>();
         assert_eq!(query_hint, QueryHint::Recompile);
+        assert_eq!(raw_execution, RawSqlExecution::ReadOnly);
+        assert_eq!(query_execution, QueryExecution::ReadOnly);
         assert_eq!(error.message(), "public-api");
         assert_eq!(
             ColumnValue::new("email", SqlValue::String("ana@example.com".to_string())),

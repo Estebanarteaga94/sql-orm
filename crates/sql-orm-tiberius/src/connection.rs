@@ -224,7 +224,7 @@ fn resolve_health_timeout(
 fn build_health_check_query(
     health_options: crate::config::MssqlHealthCheckOptions,
 ) -> CompiledQuery {
-    CompiledQuery::new(health_options.query.sql().to_string(), vec![])
+    CompiledQuery::read_only(health_options.query.sql().to_string(), vec![])
 }
 
 pub(crate) async fn run_with_timeout<F, T>(
