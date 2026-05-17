@@ -103,6 +103,7 @@ pub struct Tracked<T> {
 #[doc(hidden)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TrackedEntityRegistration {
+    pub entry_id: usize,
     pub entity_rust_name: &'static str,
     pub state: EntityState,
 }
@@ -523,6 +524,7 @@ impl TrackingRegistry {
             .entries
             .iter()
             .map(|entry| TrackedEntityRegistration {
+                entry_id: entry.registration_id,
                 entity_rust_name: entry.entity_rust_name,
                 state: unsafe { (entry.state_reader)(entry.inner_address as *const ()) },
             })
@@ -1089,6 +1091,7 @@ mod tests {
         assert_eq!(
             registry.registrations(),
             vec![TrackedEntityRegistration {
+                entry_id: 0,
                 entity_rust_name: "DummyEntity",
                 state: EntityState::Unchanged,
             }]
@@ -1106,10 +1109,29 @@ mod tests {
         assert_eq!(
             registry.registrations(),
             vec![TrackedEntityRegistration {
+                entry_id: 0,
                 entity_rust_name: "DummyEntity",
                 state: EntityState::Added,
             }]
         );
+    }
+
+    #[test]
+    fn tracking_registry_diagnostics_expose_stable_entry_ids() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut first = Tracked::from_added(DummyEntity);
+        let mut second = Tracked::from_added(DummyEntity);
+
+        first.attach_registry_added(Arc::clone(&registry));
+        second.attach_registry_added(Arc::clone(&registry));
+
+        let registrations = registry.registrations();
+
+        assert_eq!(registrations.len(), 2);
+        assert_eq!(registrations[0].entry_id, 0);
+        assert_eq!(registrations[1].entry_id, 1);
+        assert_eq!(registrations[0].entity_rust_name, "DummyEntity");
+        assert_eq!(registrations[1].entity_rust_name, "DummyEntity");
     }
 
     #[test]

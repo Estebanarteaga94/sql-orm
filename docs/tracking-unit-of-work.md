@@ -101,6 +101,11 @@ The registry still stores pointers to live `Tracked<T>` wrappers for snapshots
 and state. Removing the wrapper-lifetime dependency remains assigned to the
 next ownership/state transition tasks.
 
+As of 2026-05-16, registry diagnostics expose a stable `entry_id` through
+`TrackedEntityRegistration`. This is the first observable step toward owned
+registry entries, but it does not change persistence behavior: state and
+snapshots are still read from live wrappers.
+
 ## Current Detach And State Policy
 
 The current experimental policy is explicit:
