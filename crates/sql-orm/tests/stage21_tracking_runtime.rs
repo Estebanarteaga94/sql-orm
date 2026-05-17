@@ -290,6 +290,71 @@ async fn public_pool_transaction_preserves_runtime_policies_and_tracking() -> Re
     result
 }
 
+#[cfg(feature = "pool-bb8")]
+#[tokio::test]
+async fn public_pool_transaction_cleans_pinned_slot_after_save_changes_error()
+-> Result<(), OrmError> {
+    let Some(connection_string) = test_connection_string() else {
+        eprintln!(
+            "skipping pooled save_changes error cleanup integration test because {TEST_CONNECTION_ENV} is not set"
+        );
+        return Ok(());
+    };
+
+    let _fixture_guard = tracking_runtime_fixture_lock().await;
+    let keep_tables = keep_test_tables();
+    reset_test_table(&connection_string).await?;
+
+    let result = async {
+        let pool = MssqlPool::builder()
+            .max_size(1)
+            .acquire_timeout(Duration::from_secs(2))
+            .connect(&connection_string)
+            .await?;
+        let db = TrackingRuntimeDb::from_pool(pool).with_tenant(RuntimeTenant { tenant_id: 77 });
+
+        let _tracked = db.users.add_tracked(TrackedPolicyUser {
+            id: 0,
+            name: "missing audit value".to_string(),
+        });
+
+        let error = db
+            .transaction(|tx| async move { tx.save_changes().await })
+            .await
+            .expect_err("missing required audit column should fail the tracked insert");
+
+        assert!(
+            error.message().contains("created_by")
+                || error.message().contains("insert")
+                || error.message().contains("NULL"),
+            "unexpected error message: {}",
+            error.message()
+        );
+
+        db.clear_tracker();
+        assert_eq!(db.users.query().count().await?, 0);
+
+        let db = db.with_audit_request_values(AuditRequestValues::new(vec![ColumnValue::new(
+            "created_by",
+            SqlValue::String("after-error".to_string()),
+        )]));
+        let inserted = db.users.add_tracked(TrackedPolicyUser {
+            id: 0,
+            name: "after cleanup".to_string(),
+        });
+        assert_eq!(db.save_changes().await?, 1);
+
+        assert!(inserted.id > 0);
+        assert_eq!(db.users.query().count().await?, 1);
+
+        Ok(())
+    }
+    .await;
+
+    cleanup_test_table(&connection_string, keep_tables).await?;
+    result
+}
+
 fn test_connection_string() -> Option<String> {
     std::env::var(TEST_CONNECTION_ENV)
         .ok()
