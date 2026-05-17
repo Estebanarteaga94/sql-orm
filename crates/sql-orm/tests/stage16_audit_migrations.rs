@@ -7,7 +7,7 @@ use sql_orm::sqlserver::SqlServerCompiler;
 #[derive(AuditFields)]
 #[allow(dead_code)]
 struct Audit {
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     #[orm(insertable = false)]
     #[orm(updatable = false)]
@@ -17,7 +17,7 @@ struct Audit {
     #[orm(nullable)]
     created_by: Option<i64>,
 
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     #[orm(insertable = false)]
     updated_at: Option<String>,
@@ -38,7 +38,7 @@ struct AuditedEntity {
     name: String,
 
     #[orm(length = 40)]
-    #[orm(default_sql = "'new'")]
+    #[orm(unsafe_default_sql = "'new'")]
     status: Option<String>,
 }
 
@@ -53,7 +53,7 @@ struct PlainEntity {
     name: String,
 
     #[orm(length = 40)]
-    #[orm(default_sql = "'new'")]
+    #[orm(unsafe_default_sql = "'new'")]
     status: Option<String>,
 }
 

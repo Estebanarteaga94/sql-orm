@@ -1,0 +1,5 @@
+error: default_sql es un fragmento SQL unsafe; usa unsafe_default_sql = "..." para reconocer explícitamente el riesgo
+ --> tests/ui/entity_legacy_sql_fragments.rs:9:11
+  |
+9 |     #[orm(default_sql = "SYSUTCDATETIME()")]
+  |           ^^^^^^^^^^^

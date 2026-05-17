@@ -17,7 +17,7 @@ use sql_orm::prelude::*;
 
 #[derive(AuditFields)]
 struct Audit {
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     created_at: String,
 
@@ -106,8 +106,9 @@ Supported field attributes include:
 - `updated_by`
 - `length`
 - `nullable`
-- `default_sql`
+- `unsafe_default_sql`
 - `sql_type`
+- `unsafe_sql_type`
 - `precision`
 - `scale`
 - `renamed_from`
@@ -118,7 +119,7 @@ Unsupported audit-field attributes include:
 
 - `primary_key`
 - `identity`
-- `computed_sql`
+- `unsafe_computed_sql`
 - `rowversion`
 - `index`
 - `unique`

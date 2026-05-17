@@ -2,7 +2,7 @@ use sql_orm::prelude::*;
 
 #[derive(AuditFields)]
 pub struct TodoAudit {
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     #[orm(updatable = false)]
     pub created_at: String,
@@ -11,7 +11,7 @@ pub struct TodoAudit {
     pub created_by: Option<i64>,
 
     #[orm(nullable)]
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     pub updated_at: Option<String>,
 
@@ -34,7 +34,7 @@ pub struct User {
     #[orm(length = 120)]
     pub display_name: String,
 
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     pub created_at: String,
 
     #[orm(rowversion)]
@@ -60,10 +60,10 @@ pub struct TodoList {
     #[orm(length = 500)]
     pub description: Option<String>,
 
-    #[orm(default_sql = "0")]
+    #[orm(unsafe_default_sql = "0")]
     pub is_archived: bool,
 
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     pub created_at: String,
 
     #[orm(rowversion)]
@@ -94,13 +94,13 @@ pub struct TodoItem {
 
     pub position: i32,
 
-    #[orm(default_sql = "0")]
+    #[orm(unsafe_default_sql = "0")]
     pub is_completed: bool,
 
     #[orm(nullable)]
     pub completed_at: Option<String>,
 
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     pub created_at: String,
 
     #[orm(rowversion)]

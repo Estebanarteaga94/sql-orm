@@ -157,10 +157,19 @@ fn derive_policy_fields_impl(input: DeriveInput, kind: PolicyFieldsKind) -> Resu
         }
         column_names.push(column_name.clone());
         let renamed_from = option_lit_str(config.renamed_from);
-        let sql_type = config.sql_type.map_or_else(
-            || quote! { <#field_ty as ::sql_orm::core::SqlTypeMapping>::SQL_SERVER_TYPE },
-            |sql_type| sql_type_from_string(&sql_type),
-        );
+        let sql_type = match (config.sql_type, config.unsafe_sql_type) {
+            (Some(sql_type), None) => sql_type_from_string(&sql_type)?,
+            (None, Some(sql_type)) => unsafe_sql_type_from_string(&sql_type),
+            (Some(sql_type), Some(_)) => {
+                return Err(Error::new_spanned(
+                    sql_type,
+                    "sql_type y unsafe_sql_type no pueden usarse juntos",
+                ));
+            }
+            (None, None) => {
+                quote! { <#field_ty as ::sql_orm::core::SqlTypeMapping>::SQL_SERVER_TYPE }
+            }
+        };
         let nullable = config.nullable || type_info.nullable;
         let default_sql = option_lit_str(config.default_sql);
         let max_length = config.length.map_or_else(
@@ -300,10 +309,19 @@ fn derive_tenant_context_impl(input: DeriveInput) -> Result<TokenStream2> {
         .unwrap_or_else(|| LitStr::new(&field_ident.to_string(), field_ident.span()));
     validate_non_empty_lit_str(&column_name, "column no puede estar vacío")?;
     let renamed_from = option_lit_str(config.renamed_from);
-    let sql_type = config.sql_type.map_or_else(
-        || quote! { <#field_ty as ::sql_orm::core::SqlTypeMapping>::SQL_SERVER_TYPE },
-        |sql_type| sql_type_from_string(&sql_type),
-    );
+    let sql_type = match (config.sql_type, config.unsafe_sql_type) {
+        (Some(sql_type), None) => sql_type_from_string(&sql_type)?,
+        (None, Some(sql_type)) => unsafe_sql_type_from_string(&sql_type),
+        (Some(sql_type), Some(_)) => {
+            return Err(Error::new_spanned(
+                sql_type,
+                "sql_type y unsafe_sql_type no pueden usarse juntos",
+            ));
+        }
+        (None, None) => {
+            quote! { <#field_ty as ::sql_orm::core::SqlTypeMapping>::SQL_SERVER_TYPE }
+        }
+    };
     let max_length = config.length.map_or_else(
         || quote! { <#field_ty as ::sql_orm::core::SqlTypeMapping>::DEFAULT_MAX_LENGTH },
         |length| quote! { Some(#length) },
@@ -553,9 +571,16 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
             }
         }
 
-        let sql_type = match config.sql_type {
-            Some(sql_type) => sql_type_from_string(&sql_type),
-            None => infer_sql_type(&type_info, config.rowversion, &field.ty)?,
+        let sql_type = match (config.sql_type, config.unsafe_sql_type) {
+            (Some(sql_type), None) => sql_type_from_string(&sql_type)?,
+            (None, Some(sql_type)) => unsafe_sql_type_from_string(&sql_type),
+            (Some(sql_type), Some(_)) => {
+                return Err(Error::new_spanned(
+                    sql_type,
+                    "sql_type y unsafe_sql_type no pueden usarse juntos",
+                ));
+            }
+            (None, None) => infer_sql_type(&type_info, config.rowversion, &field.ty)?,
         };
 
         if config.identity && !type_info.is_integer {
@@ -2174,6 +2199,10 @@ fn parse_field_config(field: &Field) -> Result<FieldConfig> {
             } else if meta.path.is_ident("nullable") {
                 config.nullable = true;
             } else if meta.path.is_ident("default_sql") {
+                return Err(meta.error(
+                    "default_sql es un fragmento SQL unsafe; usa unsafe_default_sql = \"...\" para reconocer explícitamente el riesgo",
+                ));
+            } else if meta.path.is_ident("unsafe_default_sql") {
                 config.default_sql = Some(parse_lit_str(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("renamed_from") {
                 config.renamed_from = Some(parse_lit_str(meta.value()?.parse()?)?);
@@ -2196,11 +2225,17 @@ fn parse_field_config(field: &Field) -> Result<FieldConfig> {
                 });
             } else if meta.path.is_ident("sql_type") {
                 config.sql_type = Some(parse_lit_str(meta.value()?.parse()?)?);
+            } else if meta.path.is_ident("unsafe_sql_type") {
+                config.unsafe_sql_type = Some(parse_lit_str(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("precision") {
                 config.precision = Some(parse_u8_expr(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("scale") {
                 config.scale = Some(parse_u8_expr(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("computed_sql") {
+                return Err(meta.error(
+                    "computed_sql es un fragmento SQL unsafe; usa unsafe_computed_sql = \"...\" para reconocer explícitamente el riesgo",
+                ));
+            } else if meta.path.is_ident("unsafe_computed_sql") {
                 config.computed_sql = Some(parse_lit_str(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("rowversion") {
                 config.rowversion = true;
@@ -2298,11 +2333,17 @@ fn parse_policy_field_config(field: &Field, kind: PolicyFieldsKind) -> Result<Au
             } else if meta.path.is_ident("nullable") {
                 config.nullable = true;
             } else if meta.path.is_ident("default_sql") {
+                return Err(meta.error(
+                    "default_sql es un fragmento SQL unsafe; usa unsafe_default_sql = \"...\" para reconocer explícitamente el riesgo",
+                ));
+            } else if meta.path.is_ident("unsafe_default_sql") {
                 config.default_sql = Some(parse_lit_str(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("renamed_from") {
                 config.renamed_from = Some(parse_lit_str(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("sql_type") {
                 config.sql_type = Some(parse_lit_str(meta.value()?.parse()?)?);
+            } else if meta.path.is_ident("unsafe_sql_type") {
+                config.unsafe_sql_type = Some(parse_lit_str(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("precision") {
                 config.precision = Some(parse_u8_expr(meta.value()?.parse()?)?);
             } else if meta.path.is_ident("scale") {
@@ -2962,10 +3003,19 @@ fn infer_sql_type(type_info: &TypeInfo, rowversion: bool, ty: &Type) -> Result<T
     Ok(token)
 }
 
-fn sql_type_from_string(value: &LitStr) -> TokenStream2 {
+fn sql_type_from_string(value: &LitStr) -> Result<TokenStream2> {
+    sql_type_from_string_with_custom(value, false)
+}
+
+fn unsafe_sql_type_from_string(value: &LitStr) -> TokenStream2 {
+    sql_type_from_string_with_custom(value, true)
+        .expect("unsafe SQL type fragments always allow custom SQL Server types")
+}
+
+fn sql_type_from_string_with_custom(value: &LitStr, allow_custom: bool) -> Result<TokenStream2> {
     let normalized = value.value().to_ascii_lowercase();
 
-    if normalized.starts_with("bigint") {
+    let token = if normalized.starts_with("bigint") {
         quote! { ::sql_orm::core::SqlServerType::BigInt }
     } else if normalized == "int" {
         quote! { ::sql_orm::core::SqlServerType::Int }
@@ -2993,9 +3043,16 @@ fn sql_type_from_string(value: &LitStr) -> TokenStream2 {
         quote! { ::sql_orm::core::SqlServerType::VarBinary }
     } else if normalized.starts_with("rowversion") {
         quote! { ::sql_orm::core::SqlServerType::RowVersion }
-    } else {
+    } else if allow_custom {
         quote! { ::sql_orm::core::SqlServerType::Custom(#value) }
-    }
+    } else {
+        return Err(Error::new_spanned(
+            value,
+            "sql_type no reconoce este tipo SQL Server; usa unsafe_sql_type = \"...\" para tipos SQL custom",
+        ));
+    };
+
+    Ok(token)
 }
 
 fn analyze_type(ty: &Type) -> Result<TypeInfo> {
@@ -3224,6 +3281,7 @@ struct AuditFieldConfig {
     length: Option<u32>,
     default_sql: Option<LitStr>,
     sql_type: Option<LitStr>,
+    unsafe_sql_type: Option<LitStr>,
     precision: Option<u8>,
     scale: Option<u8>,
     insertable: Option<bool>,
@@ -3236,6 +3294,7 @@ struct TenantContextFieldConfig {
     renamed_from: Option<LitStr>,
     length: Option<u32>,
     sql_type: Option<LitStr>,
+    unsafe_sql_type: Option<LitStr>,
     precision: Option<u8>,
     scale: Option<u8>,
 }
@@ -3254,6 +3313,7 @@ struct FieldConfig {
     computed_sql: Option<LitStr>,
     rowversion: bool,
     sql_type: Option<LitStr>,
+    unsafe_sql_type: Option<LitStr>,
     precision: Option<u8>,
     scale: Option<u8>,
     indexes: Vec<IndexConfig>,

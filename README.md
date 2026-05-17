@@ -412,7 +412,7 @@ use sql_orm::prelude::*;
 #[derive(AuditFields)]
 pub struct Audit {
     #[orm(created_at)]
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     pub created_at: DateTime<Utc>,
 
     #[orm(created_by)]

@@ -481,7 +481,7 @@ mod tests {
     #[derive(AuditFields)]
     struct PublicAudit {
         #[orm(created_at)]
-        #[orm(default_sql = "SYSUTCDATETIME()")]
+        #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
         #[orm(sql_type = "datetime2")]
         #[orm(updatable = false)]
         created_at: String,
@@ -917,7 +917,7 @@ mod tests {
         #[orm(index(name = "ix_users_display_name"))]
         display_name: Option<String>,
 
-        #[orm(default_sql = "'system'")]
+        #[orm(unsafe_default_sql = "'system'")]
         created_by: String,
 
         #[orm(rowversion)]

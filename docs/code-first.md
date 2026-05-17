@@ -41,11 +41,12 @@ Common field attributes include:
 - `#[orm(column = "db_column")]`
 - `#[orm(length = 120)]`
 - `#[orm(nullable)]`
-- `#[orm(default_sql = "...")]`
+- `#[orm(unsafe_default_sql = "...")]`
 - `#[orm(sql_type = "datetime2")]`
+- `#[orm(unsafe_sql_type = "vendor_specific_type")]`
 - `#[orm(precision = 18)]`
 - `#[orm(scale = 2)]`
-- `#[orm(computed_sql = "...")]`
+- `#[orm(unsafe_computed_sql = "...")]`
 - `#[orm(rowversion)]`
 - `#[orm(index(name = "..."))]`
 - `#[orm(unique)]`
@@ -102,7 +103,7 @@ Entity Policies add reusable model concerns without creating a second schema pip
 ```rust
 #[derive(AuditFields)]
 pub struct Audit {
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     #[orm(updatable = false)]
     pub created_at: String,

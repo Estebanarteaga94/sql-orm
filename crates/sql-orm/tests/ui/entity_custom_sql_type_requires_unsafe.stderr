@@ -1,0 +1,5 @@
+error: sql_type no reconoce este tipo SQL Server; usa unsafe_sql_type = "..." para tipos SQL custom
+ --> tests/ui/entity_custom_sql_type_requires_unsafe.rs:9:22
+  |
+9 |     #[orm(sql_type = "geography")]
+  |                      ^^^^^^^^^^^

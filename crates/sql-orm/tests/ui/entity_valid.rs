@@ -14,7 +14,7 @@ pub struct Customer {
     #[orm(nullable)]
     pub display_name: Option<String>,
 
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     pub created_at: String,
 
     #[orm(rowversion)]

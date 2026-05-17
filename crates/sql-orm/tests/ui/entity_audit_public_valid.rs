@@ -3,7 +3,7 @@ use std::collections::BTreeMap;
 
 #[derive(AuditFields)]
 struct Audit {
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     #[orm(updatable = false)]
     created_at: String,

@@ -1,0 +1,5 @@
+error: computed_sql es un fragmento SQL unsafe; usa unsafe_computed_sql = "..." para reconocer explícitamente el riesgo
+ --> tests/ui/entity_legacy_computed_sql.rs:9:11
+  |
+9 |     #[orm(computed_sql = "[first_name] + [last_name]")]
+  |           ^^^^^^^^^^^^

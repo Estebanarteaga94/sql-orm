@@ -3,7 +3,7 @@ use uuid::Uuid;
 
 #[derive(AuditFields)]
 struct AuditField {
-    #[orm(default_sql = "SYSUTCDATETIME()")]
+    #[orm(unsafe_default_sql = "SYSUTCDATETIME()")]
     #[orm(sql_type = "datetime2")]
     created_at: String,
 

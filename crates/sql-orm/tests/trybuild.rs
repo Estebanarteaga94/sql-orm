@@ -3,6 +3,7 @@ fn entity_derive_ui() {
     let tests = trybuild::TestCases::new();
 
     tests.pass("tests/ui/entity_valid.rs");
+    tests.pass("tests/ui/entity_unsafe_sql_fragments_valid.rs");
     tests.pass("tests/ui/entity_renamed_from_valid.rs");
     tests.pass("tests/ui/entity_table_renamed_from_valid.rs");
     tests.pass("tests/ui/entity_composite_index_valid.rs");
@@ -37,6 +38,9 @@ fn entity_derive_ui() {
     tests.pass("tests/ui/entity_policies_with_structured_foreign_key_valid.rs");
     tests.pass("tests/ui/entity_tenant_attr_valid.rs");
     tests.compile_fail("tests/ui/entity_missing_primary_key.rs");
+    tests.compile_fail("tests/ui/entity_legacy_sql_fragments.rs");
+    tests.compile_fail("tests/ui/entity_legacy_computed_sql.rs");
+    tests.compile_fail("tests/ui/entity_custom_sql_type_requires_unsafe.rs");
     tests.compile_fail("tests/ui/entity_identity_invalid_type.rs");
     tests.compile_fail("tests/ui/entity_foreign_key_empty_segment.rs");
     tests.compile_fail("tests/ui/entity_foreign_key_invalid_format.rs");
