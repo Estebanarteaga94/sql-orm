@@ -3410,6 +3410,27 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn clear_tracker_discards_modified_entries_before_save_phase_validation() {
+        let context = CompositeDummyContext {
+            entities: DbSet::<CompositeKeyEntity>::disconnected(),
+        };
+        let registry = <CompositeDummyContext as DbContext>::tracking_registry(&context);
+        let mut modified = Tracked::from_loaded(CompositeKeyEntity);
+        modified.attach_registry(registry.clone());
+        modified.mark_modified();
+
+        assert_eq!(registry.entry_count(), 1);
+
+        <CompositeDummyContext as DbContext>::clear_tracker(&context);
+
+        let modified_saved = context.entities.save_tracked_modified().await.unwrap();
+
+        assert_eq!(modified_saved, 0);
+        assert_eq!(registry.entry_count(), 0);
+        assert_eq!(modified.state(), crate::EntityState::Modified);
+    }
+
+    #[tokio::test]
     async fn save_tracked_modified_skips_update_when_persisted_snapshot_is_unchanged() {
         let dbset = DbSet::<ExplicitLoadRoot>::disconnected();
         let registry = dbset.tracking_registry();
