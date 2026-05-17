@@ -1639,6 +1639,42 @@ mod tests {
     }
 
     #[test]
+    fn registered_tracked_accept_current_updates_detached_registry_owned_snapshots() {
+        let registry = Arc::new(TrackingRegistry::default());
+
+        {
+            let mut tracked = Tracked::from_loaded(SnapshotEntity {
+                name: "loaded".to_string(),
+            });
+            tracked
+                .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+                .unwrap();
+            tracked.current_mut().name = "accepted detached current".to_string();
+        }
+
+        let registered = registry.tracked_for::<SnapshotEntity>()[0].clone();
+        assert!(registered.has_persisted_changes());
+
+        registered.accept_current();
+
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(registry.registrations()[0].state, EntityState::Unchanged);
+        assert!(!registered.has_persisted_changes());
+        assert_eq!(registered.current_clone().name, "accepted detached current");
+
+        let mut reattached = Tracked::from_loaded(SnapshotEntity {
+            name: "stale database value".to_string(),
+        });
+        reattached
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        assert_eq!(reattached.state(), EntityState::Unchanged);
+        assert_eq!(reattached.original().name, "accepted detached current");
+        assert_eq!(reattached.current().name, "accepted detached current");
+    }
+
+    #[test]
     fn dropping_added_wrapper_detaches_handle_without_removing_registry_entry() {
         let registry = Arc::new(TrackingRegistry::default());
 
