@@ -306,6 +306,66 @@ async fn public_dbcontext_transaction_rolls_back_on_err() -> Result<(), OrmError
     result
 }
 
+#[tokio::test]
+async fn public_dbcontext_transaction_rejects_outer_context_interleaving() -> Result<(), OrmError> {
+    let Some(connection_string) = test_connection_string() else {
+        eprintln!(
+            "skipping public transaction interleaving guard test because {TEST_CONNECTION_ENV} is not set"
+        );
+        return Ok(());
+    };
+
+    let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
+    reset_test_table(&connection_string).await?;
+    announce_test_table(keep_tables, false);
+
+    let result = async {
+        let db = PublicCrudDb::connect(&connection_string).await?;
+        let outer_users = db.users.clone();
+
+        let inserted = db
+            .transaction(|tx| async move {
+                let inserted = tx
+                    .users
+                    .insert(NewPublicCrudUser {
+                        name: "Scoped Only".to_string(),
+                        active: true,
+                    })
+                    .await?;
+
+                let outer_error = outer_users.query().count().await.unwrap_err();
+                assert_eq!(
+                    outer_error.message(),
+                    "a transaction is active on this shared connection; use the transaction context passed to db.transaction(...)"
+                );
+
+                assert_eq!(tx.users.query().count().await?, 1);
+
+                Ok(inserted)
+            })
+            .await?;
+
+        assert_eq!(db.users.query().count().await?, 1);
+        let persisted = db.users.find(inserted.id).await?;
+        assert_eq!(
+            persisted,
+            Some(PublicCrudUser {
+                id: inserted.id,
+                name: "Scoped Only".to_string(),
+                active: true,
+            })
+        );
+
+        Ok(())
+    }
+    .await;
+
+    cleanup_test_table(&connection_string, keep_tables).await?;
+
+    result
+}
+
 #[cfg(feature = "pool-bb8")]
 #[tokio::test]
 async fn public_dbcontext_pool_transaction_commits_and_rolls_back() -> Result<(), OrmError> {
