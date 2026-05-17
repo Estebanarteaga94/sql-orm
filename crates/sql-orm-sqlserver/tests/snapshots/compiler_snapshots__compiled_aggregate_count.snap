@@ -1,0 +1,8 @@
+---
+source: crates/sql-orm-sqlserver/tests/compiler_snapshots.rs
+expression: render_snapshot(&compiled)
+---
+SQL: SELECT COUNT(*) AS [count] FROM [sales].[customers] WHERE (([sales].[customers].[active] = @P1) AND ([sales].[customers].[created_at] >= @P2))
+Params:
+1: Bool(true)
+2: String("2026-01-01T00:00:00")

@@ -4,8 +4,9 @@ use sql_orm_core::{
     Insertable, PrimaryKeyMetadata, SqlServerType, SqlValue,
 };
 use sql_orm_query::{
-    CountQuery, DeleteQuery, Expr, InsertQuery, OrderBy, Pagination, Predicate, SelectQuery,
-    SortDirection, TableRef, UpdateQuery,
+    AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
+    CountQuery, DeleteQuery, ExistsQuery, Expr, InsertQuery, OrderBy, Pagination, Predicate,
+    SelectQuery, SortDirection, TableRef, UpdateQuery,
 };
 use sql_orm_sqlserver::SqlServerCompiler;
 
@@ -355,6 +356,127 @@ fn snapshots_compiled_count_sql_and_params() {
     let compiled = SqlServerCompiler::compile_count(&query).unwrap();
 
     assert_snapshot!("compiled_count", render_snapshot(&compiled));
+}
+
+#[test]
+fn snapshots_compiled_aggregate_count_sql_and_params() {
+    let query = AggregateQuery::from_entity::<Customer>()
+        .project(vec![AggregateProjection::count_as("count")])
+        .filter(Predicate::eq(
+            Expr::from(Customer::active),
+            Expr::value(SqlValue::Bool(true)),
+        ))
+        .filter(Predicate::gte(
+            Expr::from(Customer::created_at),
+            Expr::value(SqlValue::String("2026-01-01T00:00:00".to_string())),
+        ));
+
+    let compiled = SqlServerCompiler::compile_aggregate(&query).unwrap();
+
+    assert_snapshot!("compiled_aggregate_count", render_snapshot(&compiled));
+}
+
+#[test]
+fn snapshots_compiled_exists_with_join_sql_and_params() {
+    let query = ExistsQuery::from_entity::<Customer>()
+        .inner_join::<Order>(Predicate::eq(
+            Expr::from(Customer::id),
+            Expr::from(Order::customer_id),
+        ))
+        .filter(Predicate::eq(
+            Expr::from(Customer::active),
+            Expr::value(SqlValue::Bool(true)),
+        ))
+        .filter(Predicate::gt(
+            Expr::from(Order::total_cents),
+            Expr::value(SqlValue::I64(5000)),
+        ));
+
+    let compiled = SqlServerCompiler::compile_exists(&query).unwrap();
+
+    assert_snapshot!("compiled_exists_with_join", render_snapshot(&compiled));
+}
+
+#[test]
+fn snapshots_compiled_scalar_aggregates_with_join_sql_and_params() {
+    let query = AggregateQuery::from_entity::<Customer>()
+        .inner_join::<Order>(Predicate::eq(
+            Expr::from(Customer::id),
+            Expr::from(Order::customer_id),
+        ))
+        .project(vec![
+            AggregateProjection::sum_as(Order::total_cents, "sum_cents"),
+            AggregateProjection::avg_as(Order::total_cents, "avg_cents"),
+            AggregateProjection::min_as(Order::total_cents, "min_cents"),
+            AggregateProjection::max_as(Order::total_cents, "max_cents"),
+        ])
+        .filter(Predicate::eq(
+            Expr::from(Customer::active),
+            Expr::value(SqlValue::Bool(true)),
+        ))
+        .filter(Predicate::gte(
+            Expr::from(Order::total_cents),
+            Expr::value(SqlValue::I64(1000)),
+        ));
+
+    let compiled = SqlServerCompiler::compile_aggregate(&query).unwrap();
+
+    assert_snapshot!(
+        "compiled_scalar_aggregates_with_join",
+        render_snapshot(&compiled)
+    );
+}
+
+#[test]
+fn snapshots_compiled_grouped_aggregate_with_having_join_and_params() {
+    let query = AggregateQuery::from_entity_as::<Customer>("c")
+        .inner_join_as::<Order>(
+            "o",
+            Predicate::eq(
+                Expr::column_as(Customer::id, "c"),
+                Expr::column_as(Order::customer_id, "o"),
+            ),
+        )
+        .filter(Predicate::eq(
+            Expr::column_as(Customer::active, "c"),
+            Expr::value(SqlValue::Bool(true)),
+        ))
+        .filter(Predicate::gte(
+            Expr::column_as(Order::total_cents, "o"),
+            Expr::value(SqlValue::I64(1000)),
+        ))
+        .group_by(vec![Expr::column_as(Order::customer_id, "o")])
+        .project(vec![
+            AggregateProjection::group_key_as(
+                Expr::column_as(Order::customer_id, "o"),
+                "customer_id",
+            ),
+            AggregateProjection::count_as("order_count"),
+            AggregateProjection::sum_as(Expr::column_as(Order::total_cents, "o"), "sum_cents"),
+            AggregateProjection::avg_as(Expr::column_as(Order::total_cents, "o"), "avg_cents"),
+            AggregateProjection::min_as(Expr::column_as(Order::total_cents, "o"), "min_cents"),
+            AggregateProjection::max_as(Expr::column_as(Order::total_cents, "o"), "max_cents"),
+        ])
+        .having(AggregatePredicate::gt(
+            AggregateExpr::count_all(),
+            Expr::value(SqlValue::I64(1)),
+        ))
+        .having(AggregatePredicate::gte(
+            AggregateExpr::sum(Expr::column_as(Order::total_cents, "o")),
+            Expr::value(SqlValue::I64(10_000)),
+        ))
+        .order_by(AggregateOrderBy::desc(AggregateExpr::sum(Expr::column_as(
+            Order::total_cents,
+            "o",
+        ))))
+        .paginate(Pagination::page(2, 25));
+
+    let compiled = SqlServerCompiler::compile_aggregate(&query).unwrap();
+
+    assert_snapshot!(
+        "compiled_grouped_aggregate_with_having_join_and_params",
+        render_snapshot(&compiled)
+    );
 }
 
 fn render_snapshot(compiled: &sql_orm_query::CompiledQuery) -> String {

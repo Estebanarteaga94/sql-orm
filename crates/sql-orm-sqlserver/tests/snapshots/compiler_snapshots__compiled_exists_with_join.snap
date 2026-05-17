@@ -1,0 +1,8 @@
+---
+source: crates/sql-orm-sqlserver/tests/compiler_snapshots.rs
+expression: render_snapshot(&compiled)
+---
+SQL: SELECT CASE WHEN EXISTS (SELECT 1 FROM [sales].[customers] INNER JOIN [sales].[orders] ON ([sales].[customers].[id] = [sales].[orders].[customer_id]) WHERE (([sales].[customers].[active] = @P1) AND ([sales].[orders].[total_cents] > @P2))) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS [exists]
+Params:
+1: Bool(true)
+2: I64(5000)

@@ -1,0 +1,8 @@
+---
+source: crates/sql-orm-sqlserver/tests/compiler_snapshots.rs
+expression: render_snapshot(&compiled)
+---
+SQL: SELECT SUM([sales].[orders].[total_cents]) AS [sum_cents], AVG([sales].[orders].[total_cents]) AS [avg_cents], MIN([sales].[orders].[total_cents]) AS [min_cents], MAX([sales].[orders].[total_cents]) AS [max_cents] FROM [sales].[customers] INNER JOIN [sales].[orders] ON ([sales].[customers].[id] = [sales].[orders].[customer_id]) WHERE (([sales].[customers].[active] = @P1) AND ([sales].[orders].[total_cents] >= @P2))
+Params:
+1: Bool(true)
+2: I64(1000)
