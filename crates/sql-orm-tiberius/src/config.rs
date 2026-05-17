@@ -1,12 +1,24 @@
 use sql_orm_core::OrmError;
+use std::fmt;
 use std::time::Duration;
 use tiberius::Config;
 
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MssqlConnectionConfig {
     connection_string: String,
     inner: Config,
     options: MssqlOperationalOptions,
+}
+
+impl fmt::Debug for MssqlConnectionConfig {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MssqlConnectionConfig")
+            .field("connection_string", &"<redacted>")
+            .field("addr", &self.addr())
+            .field("options", &self.options)
+            .finish()
+    }
 }
 
 impl MssqlConnectionConfig {
@@ -453,6 +465,24 @@ mod tests {
         .with_options(MssqlOperationalOptions::new().with_tracing(MssqlTracingOptions::enabled()));
 
         assert!(config.options().tracing.enabled);
+    }
+
+    #[test]
+    fn debug_redacts_connection_string() {
+        let config = MssqlConnectionConfig::from_connection_string(
+            "server=tcp:localhost,1433;database=SecretDb;user=sa;password=Password123;TrustServerCertificate=true;Application Name=secret-app",
+        )
+        .unwrap();
+
+        let debug = format!("{config:?}");
+
+        assert!(debug.contains("MssqlConnectionConfig"));
+        assert!(debug.contains("connection_string: \"<redacted>\""));
+        assert!(debug.contains("addr: \"localhost:1433\""));
+        assert!(!debug.contains("SecretDb"));
+        assert!(!debug.contains("Password123"));
+        assert!(!debug.contains("secret-app"));
+        assert!(!debug.contains("user=sa"));
     }
 
     #[test]
