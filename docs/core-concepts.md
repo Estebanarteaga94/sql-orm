@@ -400,7 +400,9 @@ For the criteria used to stabilize `Tracked<T>` and `save_changes()`, see
 - SQL Server is the only supported database target.
 - Public persistence workflows are centered on simple primary keys.
 - `Tracked<T>` and `save_changes()` are stable for explicit tracking with simple primary keys.
-- `db.transaction(...)` is not supported on contexts created from a pool until a physical connection can be pinned for the whole closure.
+- `db.transaction(...)` supports contexts created from a pool when
+  `pool-bb8` is enabled by pinning one physical connection for the whole
+  closure.
 - Navigation properties are implemented for metadata, inferred explicit joins,
   single-navigation includes, join-based `has_many` includes, and explicit
   `has_many` collection loading; automatic relationship persistence and graph

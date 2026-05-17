@@ -183,7 +183,11 @@ Relevant limits:
 - Navigation wrapper mutations are not graph update commands. Persist
   relationship changes by updating, deleting or inserting the dependent entity
   or explicit join entity directly.
-- `db.transaction(...)` is blocked for contexts created from pools until one physical connection can be pinned for the full closure.
+- With `pool-bb8`, `db.transaction(...)` is supported for contexts created
+  from `from_pool(...)`. The runtime pins one physical pooled connection for
+  the full closure, reuses it for `save_changes()`, tenant, audit and
+  soft-delete paths, disables retry while the transaction is active, and clears
+  the pinned slot after commit, rollback or transaction setup errors.
 
 The current inventory of pending verification, deferred, and blocked public
 surfaces is tracked in [Stability audit](stability-audit.md). The criteria used

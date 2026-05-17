@@ -129,7 +129,7 @@ The public tracking surface is stable for explicit tracking with simple
 primary keys after the release-level Stage 21 validation and documentation
 pass. The current implementation has removed wrapper lifetime as a persistence
 requirement for pending work, while retaining documented limits around
-relationship graph persistence and transactions from pooled contexts.
+relationship graph persistence.
 
 As of 2026-05-16, registry diagnostics expose a stable `entry_id` through
 `TrackedEntityRegistration`. This is the first observable step toward owned
@@ -511,9 +511,9 @@ connections:
   TRANSACTION` calls.
 
 This guarantees atomicity for the current registry-backed `save_changes()`
-execution on direct connections. Contexts backed by pools remain blocked for
-transactions until Etapa 22 pins one physical pooled connection for the entire
-transaction closure.
+execution on direct connections and, with `pool-bb8`, on contexts backed by
+pools through one physical pooled connection pinned for the entire transaction
+closure.
 
 ## Public API Surface
 

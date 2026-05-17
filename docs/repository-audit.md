@@ -96,8 +96,10 @@ The following features are implemented in code and have tests or implementation 
 These items exist only with explicit limits or partial scope:
 
 - Public CRUD, Active Record and tracking routes are oriented to simple primary keys. Composite primary keys exist in metadata but are not a complete public persistence workflow.
-- `save_changes()` and `Tracked<T>` are experimental and snapshot based, not a full EF-style unit of work.
-- `db.transaction(...)` is blocked for contexts created from a pool until a physical connection can be pinned for the whole closure.
+- `save_changes()` and `Tracked<T>` are stable for explicit single-primary-key
+  tracking, but not a full EF-style unit of work.
+- `db.transaction(...)` supports contexts created from a pool under
+  `pool-bb8` by pinning one physical connection for the whole closure.
 - `raw<T>()` and `raw_exec()` do not apply ORM filters for `tenant` or `soft_delete`. The caller must write those predicates manually.
 - Soft-delete automatic read filters apply to the root entity of `DbSetQuery<E>`, not to every manually joined entity.
 - Query aliases for multiple references to the same table are supported through explicit aliases. Fully automatic alias assignment is still not implemented.

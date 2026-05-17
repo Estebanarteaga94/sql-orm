@@ -69,7 +69,8 @@ blocked surfaces and adding typed aggregations. These items are tracked in
 - Preserve the current `db.transaction(...)` API for direct connections while adding support for `SharedConnection::Pool`.
 - Ensure timeouts, tracing, disabled retry inside transactions, audit, tenant, `soft_delete`, and tracking all use the pinned transactional connection.
 - Validate commit, rollback, and error behavior with focused unit coverage and optional real SQL Server integration tests.
-- Update transactions documentation and release notes only after the pooled transaction path is validated.
+- The pooled transaction path is implemented behind `pool-bb8`: `SharedConnection::Pool` acquires one owned pooled connection, installs it as the pinned transaction connection, reuses it through `SharedConnection::lock()`, disables retry for the transaction scope, restores retry and clears the pinned slot after commit, rollback, closure errors, `save_changes()` errors, and transaction setup/finish cleanup paths.
+- Coverage now includes pool-backed commit, rollback and nested-transaction rejection, `save_changes()` with tenant/audit/soft_delete/tracking inside a pooled transaction, cleanup after a `save_changes()` error, and unit coverage for artificial `BEGIN`, `COMMIT`, and `ROLLBACK` cleanup plans.
 
 ### Etapa 23: Migration Downgrade
 
@@ -184,9 +185,9 @@ Initial experimental code-first ORM release for Rust and SQL Server, built on to
 - High-level typed aggregations and `group_by` are not available in `0.1.0`; aggregation APIs are planned for `0.2.0`.
 - `count()` does not preserve joins in this release.
 - Public CRUD, Active Record, and tracking are still oriented around simple primary keys.
-- `save_changes()` and `Tracked<T>` are stable for explicit single-primary-key tracking after Stage 21. Composite primary keys, relationship graph persistence and pooled-context transactions remain documented limits.
+- `save_changes()` and `Tracked<T>` are stable for explicit single-primary-key tracking after Stage 21. Composite primary keys and relationship graph persistence remain documented limits.
 - Savepoints are not available.
-- `db.transaction(...)` must not be treated as supported on contexts created from `from_pool(...)` until a physical connection can be pinned for the full closure.
+- `db.transaction(...)` is supported for contexts created from `from_pool(...)` when `pool-bb8` is enabled; one physical pooled connection is pinned for the full closure.
 - `AuditProvider` has a public runtime contract, audit-owned column metadata, typed `with_audit_values(Audit { ... })`, `DbContext`/`SharedConnection` transport, and insert/update auto-fill through the main `DbSet`, Active Record, and `save_changes()` paths.
 - `audit = Audit` does not add visible Rust fields or entity column symbols.
 - `timestamps` and automatic `soft_delete`/`tenant` filters over manually joined entities remain deferred.

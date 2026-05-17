@@ -35,7 +35,6 @@ These surfaces are documented as unavailable or blocked, not experimental:
 
 | Surface | Current status | Next backlog stage |
 | --- | --- | --- |
-| Transactions from `DbContext::from_pool(...)` | Blocked by design until one physical pooled connection is pinned for the full transaction closure. Direct-connection transactions remain available. | Etapa 22 |
 | `include_many(...).split_query()` | Public builder method exists, but execution returns a clear not-implemented error. Join-based collection include is the available path. | Future navigation follow-up |
 | Direct many-to-many navigation | Rejected; use an explicit join entity with ordinary foreign keys and supported navigation edges. | Future relationship-update design |
 | Automatic lazy loading | Not available; lazy wrappers are state containers and never issue SQL by themselves. | Future explicit async loader design |
@@ -60,7 +59,9 @@ Public rustdoc already marks the same stability boundaries:
 
 - `crates/sql-orm/src/tracking.rs` names the tracking module as
   experimental and lists its runtime limits.
-- `DbContext::transaction(...)` documents the pool-backed transaction block.
+- `DbContext::transaction(...)` supports direct connections and, with
+  `pool-bb8`, contexts created from `from_pool(...)` by pinning one physical
+  pooled connection for the closure.
 - `DbSetQueryIncludeMany::split_query()` documents that execution is not
   implemented.
 

@@ -541,7 +541,13 @@ Generated artifacts:
 
 `db.transaction(...)` is available on contexts created from a direct connection.
 
-With the optional `pool-bb8` feature, transactions from pooled contexts are currently blocked until the runtime can pin a single physical connection for the full transactional closure.
+With the optional `pool-bb8` feature, `db.transaction(...)` is also supported
+for contexts created from `from_pool(...)`. The runtime checks out one physical
+pooled SQL Server connection, pins it for the full closure, runs `BEGIN`,
+`COMMIT` or `ROLLBACK` on that same connection, and then returns it to the
+pool. Runtime tenant, audit, soft-delete and tracking state stay on the shared
+context handle, and `save_changes()` reuses the active transaction instead of
+opening a nested one.
 
 <details>
 <summary>Operational features</summary>
@@ -616,7 +622,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | Raw SQL filters | Tenant and soft-delete filters must be written manually |
 | `database downgrade` | Not implemented yet |
 | `migration.rs` | Deferred |
-| Pooled transactions | Blocked until connection pinning is implemented |
+| Pooled transactions | Supported with `pool-bb8`; one physical connection is pinned for the closure |
 
 ---
 
@@ -636,7 +642,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | [Typed projections](docs/projections.md) | Repository guide for `select(...)`, `all_as::<T>()`, aliases, and DTOs |
 | [Typed raw SQL](docs/raw-sql.md) | Repository guide for `raw<T>()`, `raw_exec()`, parameters, and security |
 | [Relationships](docs/relationships.md) | Repository guide for foreign keys, joins, navigation, and loading |
-| [Transactions](docs/transactions.md) | Repository guide for runtime behavior and pool limits |
+| [Transactions](docs/transactions.md) | Repository guide for runtime behavior and pooled transactions |
 | [Migrations](docs/migrations.md) | Repository guide for snapshots, diffs, `migration add`, and `database update` |
 | [Entity policies](docs/entity-policies.md) | Repository guide for audit, soft delete, tenant, and limits |
 | [Tracking stability](docs/tracking-stability.md) | Repository guide for stabilization criteria for tracking APIs |

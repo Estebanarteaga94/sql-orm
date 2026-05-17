@@ -308,9 +308,7 @@ The following may remain out of scope if documented and tested as limits:
 - direct many-to-many mutation persistence,
 - automatic lazy loading,
 - graph-wide cascade persistence from navigation collections,
-- complete composite primary key support,
-- transactions from pooled contexts until Etapa 22 pins one physical
-  connection.
+- complete composite primary key support.
 
 These limits must not be described as experimental once the stable contract is
 set. They should be documented as supported exclusions.
