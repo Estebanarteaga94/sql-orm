@@ -1696,6 +1696,43 @@ mod tests {
     }
 
     #[test]
+    fn current_snapshot_for_key_ignores_unregistered_identity() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(SnapshotEntity {
+            name: "loaded".to_string(),
+        });
+        tracked
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+        let registration_id = tracked.registration_id.expect("registered");
+
+        registry.unregister(registration_id);
+
+        assert_eq!(
+            registry.current_snapshot_for_key::<SnapshotEntity>(SqlValue::I64(7)),
+            None
+        );
+    }
+
+    #[test]
+    fn current_snapshot_for_key_ignores_cleared_identity() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(SnapshotEntity {
+            name: "loaded".to_string(),
+        });
+        tracked
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        registry.clear();
+
+        assert_eq!(
+            registry.current_snapshot_for_key::<SnapshotEntity>(SqlValue::I64(7)),
+            None
+        );
+    }
+
+    #[test]
     fn tracking_registry_rejects_duplicate_loaded_identity() {
         let registry = Arc::new(TrackingRegistry::default());
         let mut first = Tracked::from_loaded(DummyEntity);
