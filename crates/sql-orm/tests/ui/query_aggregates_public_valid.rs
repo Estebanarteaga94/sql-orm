@@ -1,15 +1,33 @@
 use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone)]
+#[orm(table = "customers", schema = "sales")]
+struct Customer {
+    #[orm(primary_key)]
+    #[orm(identity)]
+    id: i64,
+
+    #[orm(length = 120)]
+    name: String,
+
+    #[orm(has_many(Order, foreign_key = customer_id))]
+    orders: Collection<Order>,
+}
+
+#[derive(Entity, Debug, Clone)]
 #[orm(table = "orders", schema = "sales")]
 struct Order {
     #[orm(primary_key)]
     #[orm(identity)]
     id: i64,
 
+    #[orm(foreign_key(entity = Customer, column = id))]
     customer_id: i64,
     total_cents: i64,
     tax_rate: f64,
+
+    #[orm(belongs_to(Customer, foreign_key = customer_id))]
+    customer: Navigation<Customer>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -33,6 +51,7 @@ impl FromRow for OrderTotals {
 
 #[derive(DbContext, Debug, Clone)]
 struct AppDbContext {
+    pub customers: DbSet<Customer>,
     pub orders: DbSet<Order>,
 }
 
@@ -77,5 +96,23 @@ fn main() {
                 AggregateProjection::max_as(Order::total_cents, "total_cents"),
             ])
             .first_as::<OrderTotals>();
+
+        let _grouped_navigation_join_future = db
+            .customers
+            .query()
+            .try_left_join_navigation_as::<Order>("orders", "orders")
+            .expect("aggregation should require an explicit navigation join")
+            .group_by(Order::customer_id.aliased("orders"))
+            .expect("aliased joined columns are valid group keys")
+            .select_aggregate((
+                Order::customer_id.aliased("orders"),
+                AggregateProjection::count_as("order_count"),
+                AggregateProjection::sum_as(Order::total_cents.aliased("orders"), "total_cents"),
+            ))
+            .having(AggregatePredicate::gt(
+                AggregateExpr::count_all(),
+                SqlValue::I64(1),
+            ))
+            .all_as::<OrderTotals>();
     };
 }

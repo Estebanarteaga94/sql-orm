@@ -4,7 +4,9 @@ Status: Etapa 24 in progress. The neutral AST cut exists in `sql-orm-query`;
 SQL Server compilation for aggregate AST and `EXISTS` exists in
 `sql-orm-sqlserver`; scalar and grouped public `DbSetQuery` APIs are
 implemented. Return-type validation, expanded snapshots, runtime SQL Server
-tests and final public documentation are still pending.
+tests and final public documentation are still pending. Joins configured
+explicitly before an aggregation, including fallible navigation joins with
+explicit aliases, are now covered by the public and unit-test surface.
 
 This document defines the public aggregation surface that Etapa 24 should
 implement on top of `DbSetQuery`. It remains a design contract for the
@@ -264,6 +266,13 @@ to `WHERE`.
 - Root `tenant` and `soft_delete` filters are applied before aggregation.
 - Joins configured before `count`, `exists`, scalar aggregates or `group_by`
   are preserved in the aggregate query AST.
+- Navigation aliases are supported only through the existing explicit helpers
+  such as `try_left_join_navigation_as::<T>("nav", "alias")`, followed by
+  aliased columns like `T::column.aliased("alias")` in `group_by`,
+  `select_aggregate`, `having`, `order_by` or scalar aggregate expressions.
+- `group_by` over an aliased column does not infer a join. If the alias was not
+  added through an explicit join first, the ORM still compiles the stated AST
+  and SQL Server will reject the missing table source.
 - Manual joins do not receive automatic `tenant` or `soft_delete` filters for
   joined entities in this first cut, matching the current query-builder limit.
 - `include(...)` and `include_many(...)` do not expose aggregation methods.

@@ -1629,7 +1629,8 @@ mod tests {
     use crate::context::{ActiveTenant, DbSet};
     use crate::page_request::PageRequest;
     use crate::{
-        IncludeCollection, SoftDeleteEntity, TenantScopedEntity, Tracked, TrackingRegistry,
+        EntityColumnAliasExt, IncludeCollection, SoftDeleteEntity, TenantScopedEntity, Tracked,
+        TrackingRegistry,
     };
     use chrono::{NaiveDate, NaiveDateTime};
     use insta::assert_snapshot;
@@ -1826,6 +1827,12 @@ mod tests {
         fn metadata() -> &'static EntityMetadata {
             &NAVIGATION_TARGET_METADATA
         }
+    }
+
+    #[allow(non_upper_case_globals)]
+    impl NavigationTarget {
+        const id: EntityColumn<NavigationTarget> = EntityColumn::new("id", "id");
+        const owner_id: EntityColumn<NavigationTarget> = EntityColumn::new("owner_id", "owner_id");
     }
 
     impl FromRow for NavigationRoot {
@@ -3331,6 +3338,49 @@ mod tests {
     }
 
     #[test]
+    fn scalar_aggregate_query_preserves_explicit_join_and_aliased_column() {
+        let query = DbSet::<NavigationRoot>::disconnected()
+            .query()
+            .try_left_join_navigation_as::<NavigationTarget>("orders", "orders")
+            .unwrap()
+            .filter(Predicate::gt(
+                Expr::from(NavigationTarget::owner_id.aliased("orders")),
+                Expr::value(SqlValue::I64(10)),
+            ));
+
+        let aggregate = query
+            .scalar_aggregate_query(AggregateProjection::expr_as(
+                AggregateExpr::max(NavigationTarget::id.aliased("orders")),
+                "value",
+            ))
+            .unwrap();
+
+        assert_eq!(aggregate.joins.len(), 1);
+        assert_eq!(
+            aggregate.joins[0].table,
+            TableRef::with_alias("sales", "navigation_targets", "orders")
+        );
+
+        let compiled = SqlServerCompiler::compile_aggregate(&aggregate).unwrap();
+        assert!(compiled.sql.contains(
+            "LEFT JOIN [sales].[navigation_targets] AS [orders] ON ([dbo].[navigation_roots].[id] = [orders].[owner_id])"
+        ));
+        assert!(
+            compiled
+                .sql
+                .starts_with("SELECT MAX([orders].[id]) AS [value]")
+        );
+        assert!(compiled.sql.contains("WHERE ("));
+        assert!(compiled.sql.contains("[orders].[owner_id] > @P1"));
+        assert!(
+            compiled
+                .sql
+                .contains("[dbo].[navigation_roots].[deleted_at] IS NULL")
+        );
+        assert_eq!(compiled.params, vec![SqlValue::I64(10)]);
+    }
+
+    #[test]
     fn grouped_query_builds_aggregate_ast_with_projection_having_order_and_pagination() {
         let dbset = DbSet::<TestEntity>::disconnected();
         let grouped = dbset
@@ -3383,6 +3433,78 @@ mod tests {
                 SqlValue::I64(10),
             ]
         );
+    }
+
+    #[test]
+    fn grouped_query_preserves_explicit_navigation_alias_join() {
+        let grouped = DbSet::<NavigationRoot>::disconnected()
+            .query()
+            .try_left_join_navigation_as::<NavigationTarget>("orders", "orders")
+            .unwrap()
+            .filter(Predicate::gt(
+                Expr::from(NavigationTarget::owner_id.aliased("orders")),
+                Expr::value(SqlValue::I64(10)),
+            ))
+            .group_by(NavigationTarget::owner_id.aliased("orders"))
+            .unwrap()
+            .select_aggregate((
+                NavigationTarget::owner_id.aliased("orders"),
+                AggregateProjection::count_as("order_count"),
+            ))
+            .having(AggregatePredicate::gt(
+                AggregateExpr::count_all(),
+                Expr::value(SqlValue::I64(1)),
+            ))
+            .order_by(AggregateOrderBy::desc(AggregateExpr::count_all()));
+
+        let aggregate = grouped.aggregate_query();
+
+        assert_eq!(aggregate.joins.len(), 1);
+        assert_eq!(
+            aggregate.group_by,
+            vec![Expr::from(NavigationTarget::owner_id.aliased("orders"))]
+        );
+        assert_eq!(aggregate.projection[0].alias, "owner_id");
+
+        let compiled = SqlServerCompiler::compile_aggregate(aggregate).unwrap();
+        assert!(compiled.sql.contains(
+            "LEFT JOIN [sales].[navigation_targets] AS [orders] ON ([dbo].[navigation_roots].[id] = [orders].[owner_id])"
+        ));
+        assert!(compiled.sql.contains("[orders].[owner_id] AS [owner_id]"));
+        assert!(compiled.sql.contains("COUNT(*) AS [order_count]"));
+        assert!(compiled.sql.contains("GROUP BY [orders].[owner_id]"));
+        assert!(compiled.sql.contains("HAVING (COUNT(*) > @P2)"));
+        assert!(compiled.sql.contains("ORDER BY COUNT(*) DESC"));
+        assert!(
+            compiled
+                .sql
+                .contains("[dbo].[navigation_roots].[deleted_at] IS NULL")
+        );
+        assert_eq!(compiled.params, vec![SqlValue::I64(10), SqlValue::I64(1)]);
+    }
+
+    #[test]
+    fn grouped_query_does_not_infer_hidden_join_from_aliased_group_key() {
+        let grouped = DbSet::<NavigationRoot>::disconnected()
+            .query()
+            .group_by(NavigationTarget::owner_id.aliased("orders"))
+            .unwrap()
+            .select_aggregate((
+                NavigationTarget::owner_id.aliased("orders"),
+                AggregateProjection::count_as("order_count"),
+            ));
+
+        let aggregate = grouped.aggregate_query();
+
+        assert!(aggregate.joins.is_empty());
+        assert_eq!(
+            aggregate.group_by,
+            vec![Expr::from(NavigationTarget::owner_id.aliased("orders"))]
+        );
+
+        let compiled = SqlServerCompiler::compile_aggregate(aggregate).unwrap();
+        assert!(!compiled.sql.contains(" JOIN "));
+        assert!(compiled.sql.contains("GROUP BY [orders].[owner_id]"));
     }
 
     #[test]

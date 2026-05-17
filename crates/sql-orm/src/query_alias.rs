@@ -1,5 +1,5 @@
 use sql_orm_core::{Entity, EntityColumn};
-use sql_orm_query::{ColumnRef, Expr, SelectProjection, TableRef};
+use sql_orm_query::{AggregateProjection, ColumnRef, Expr, SelectProjection, TableRef};
 use std::marker::PhantomData;
 
 /// Public column reference bound to a SQL table alias.
@@ -83,6 +83,13 @@ impl<E: Entity> From<AliasedEntityColumn<E>> for SelectProjection {
     }
 }
 
+impl<E: Entity> From<AliasedEntityColumn<E>> for AggregateProjection {
+    fn from(value: AliasedEntityColumn<E>) -> Self {
+        let column_name = value.column_name;
+        AggregateProjection::group_key_as(value.expr(), column_name)
+    }
+}
+
 pub trait EntityColumnAliasExt<E: Entity> {
     fn aliased(self, alias: &'static str) -> AliasedEntityColumn<E>;
 }
@@ -99,7 +106,7 @@ mod tests {
     use sql_orm_core::{
         ColumnMetadata, Entity, EntityColumn, EntityMetadata, PrimaryKeyMetadata, SqlServerType,
     };
-    use sql_orm_query::{ColumnRef, Expr, SelectProjection, TableRef};
+    use sql_orm_query::{AggregateProjection, ColumnRef, Expr, SelectProjection, TableRef};
 
     struct TestEntity;
 
@@ -173,6 +180,10 @@ mod tests {
         assert_eq!(
             SelectProjection::from(aliased),
             SelectProjection::expr_as(Expr::Column(aliased.column_ref()), "name")
+        );
+        assert_eq!(
+            AggregateProjection::from(aliased),
+            AggregateProjection::group_key_as(Expr::Column(aliased.column_ref()), "name")
         );
     }
 }
