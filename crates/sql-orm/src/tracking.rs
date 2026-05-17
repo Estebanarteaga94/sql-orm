@@ -1707,6 +1707,48 @@ mod tests {
     }
 
     #[test]
+    fn loaded_identity_reattach_rejects_incompatible_registry_snapshots() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let registration_id;
+
+        {
+            let mut tracked = Tracked::from_loaded(SnapshotEntity {
+                name: "loaded".to_string(),
+            });
+            tracked
+                .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+                .unwrap();
+            tracked.current_mut().name = "changed before drop".to_string();
+            registration_id = tracked.registration_id.expect("registered");
+        }
+
+        registry.set_snapshots(
+            registration_id,
+            SnapshotEntityAlias {
+                name: "wrong original type".to_string(),
+            },
+            SnapshotEntityAlias {
+                name: "wrong current type".to_string(),
+            },
+        );
+
+        let mut reattached = Tracked::from_loaded(SnapshotEntity {
+            name: "fresh database value".to_string(),
+        });
+        let error = reattached
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "tracked entity `DummyEntity` has incompatible registry snapshots"
+        );
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(reattached.state(), EntityState::Unchanged);
+        assert_eq!(reattached.current().name, "fresh database value");
+    }
+
+    #[test]
     fn detached_loaded_identity_can_be_registered_again() {
         let registry = Arc::new(TrackingRegistry::default());
         let mut first = Tracked::from_loaded(SnapshotEntity {
