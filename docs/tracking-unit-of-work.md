@@ -5,12 +5,12 @@ implementation guide for replacing wrapper-lifetime persistence with a
 context-owned tracker.
 
 The current implementation now keeps pending `Added`, `Modified` and `Deleted`
-work in registry-owned snapshots after wrapper drop. This document does not
-claim that the runtime has already been stabilized.
+work in registry-owned snapshots after wrapper drop or consume. This document
+does not claim that the runtime has already been stabilized.
 
 ## Implementation Status
 
-As of 2026-05-07, the first registry slice is implemented:
+As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
 
 - loaded tracked entities are registered with identity derived from entity
   type, schema, table and single-column primary key value,
@@ -69,7 +69,8 @@ As of 2026-05-07, the first registry slice is implemented:
   with `into_current()` keeps the work in the registry through `Drop`.
 - registry collision behavior is covered when converting an `Added` temporary
   identity to a persisted primary key: duplicate persisted identities return
-  `OrmError` and do not replace the temporary entry identity.
+  `OrmError` and do not replace the temporary entry identity. This now covers
+  collisions against both live wrappers and detached registry-owned entries.
 - registry error/idempotency behavior is covered for the current internal
   slice: updating a missing registration returns a stable `OrmError`,
   unregistering a missing registration is a no-op, and public
@@ -103,7 +104,8 @@ As of 2026-05-07, the first registry slice is implemented:
   context registry for `save_changes()`.
 - helper paths that accept no-op modifications or sync persisted rows update
   registry-owned snapshots and state even when the original wrapper has already
-  been dropped.
+  been dropped. Focused coverage fixes both `RegisteredTracked::accept_current(...)`
+  and `RegisteredTracked::sync_persisted(...)` for detached entries.
 - the first identity-map cut can reattach a detached loaded identity through
   `find_tracked(...)`: the new wrapper receives the registry-owned
   original/current snapshots and state, while a second live wrapper for the
@@ -122,6 +124,13 @@ mutable wrapper changes can be synchronized into the registry-owned current
 snapshot. That pointer is cleared on wrapper drop for pending states; the unit
 of work no longer requires the wrapper to stay alive for `Added`, `Modified`
 or `Deleted` persistence.
+
+The public tracking surface still remains labelled experimental until the
+release-level Stage 21 validation and documentation pass decides which
+guarantees are promoted. The current implementation has removed wrapper
+lifetime as a persistence requirement for pending work, but it still has
+documented limits around simple primary keys, relationship graph persistence
+and transactions from pooled contexts.
 
 As of 2026-05-16, registry diagnostics expose a stable `entry_id` through
 `TrackedEntityRegistration`. This is the first observable step toward owned

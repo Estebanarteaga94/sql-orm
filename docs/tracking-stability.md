@@ -21,6 +21,14 @@ The current implementation is useful but intentionally narrow:
   `DbSet` in three phases: `Added`, `Modified`, then `Deleted`.
 - Pending `Added`, `Modified` and `Deleted` entries remain registered through
   registry-owned snapshots after their wrappers are dropped or consumed.
+- Detached loaded identities can reattach to registry-owned original/current
+  snapshots, while a second live handle for the same persisted identity is
+  rejected.
+- Registry-owned snapshots are updated when no-op changes are accepted or
+  persisted rows are synchronized, even after the original wrapper has been
+  dropped.
+- Persisted identity collisions are rejected both against live entries and
+  detached registry-owned entries.
 - Mutable access marks `Unchanged` values as `Modified` immediately.
 - `remove_tracked(...)` on an `Added` wrapper cancels the pending insert.
 - Persistence reuses the existing `DbSet` insert/update/delete paths.
@@ -28,7 +36,9 @@ The current implementation is useful but intentionally narrow:
 - Navigation includes and explicit loads do not register related entities
   automatically and do not persist relationship changes.
 
-Those facts are not stable guarantees yet. They are the starting point.
+Those facts are the current stabilization baseline, not final release
+guarantees. The public label should remain experimental until the final Stage
+21 validation, release documentation and compatibility decision are complete.
 
 ## Stability Bar
 

@@ -167,11 +167,18 @@ The main data-access API is:
 Relevant limits:
 
 - `find`, `update`, `delete`, Active Record, and public tracking remain oriented around simple primary keys.
-- `save_changes()` and `Tracked<T>` are experimental.
+- `save_changes()` and `Tracked<T>` are still documented as experimental until
+  the final Stage 21 validation and release documentation pass is complete.
 - Pending `Added`, `Modified` and `Deleted` tracking work is held by the
   context registry after the wrapper is dropped or consumed. Explicit
   `detach_tracked(...)`, `Tracked::detach()` and `clear_tracker()` still remove
   work from the current unit of work.
+- A detached loaded identity can reattach to registry-owned original/current
+  snapshots. A second live `Tracked<T>` handle for the same persisted identity
+  in one context is rejected with `OrmError`.
+- Registry-owned snapshots are also used when `save_changes()` accepts no-op
+  modifications or synchronizes persisted rows, so those paths do not require
+  the original wrapper to remain alive.
 - Navigation wrapper mutations are not graph update commands. Persist
   relationship changes by updating, deleting or inserting the dependent entity
   or explicit join entity directly.

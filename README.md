@@ -608,7 +608,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | `Tracked<T>` | Experimental |
 | `save_changes()` | Experimental |
 | Composite primary keys | Metadata exists, public persistence support is limited |
-| Tracking ownership | Pending `Added`, `Modified`, and `Deleted` work is registry-owned; API remains experimental |
+| Tracking ownership | Pending `Added`, `Modified`, and `Deleted` work is registry-owned after wrapper drop/consume; detached loaded identities can reattach to registry snapshots; API remains experimental until final Stage 21 release validation |
 | Relationship graph persistence | Not implemented; persist dependents or explicit join entities directly |
 | Many-to-many navigation | Use an explicit join entity |
 | Lazy loading | No automatic I/O from field access |

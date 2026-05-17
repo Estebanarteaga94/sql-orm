@@ -123,6 +123,15 @@ The derived context provides connection helpers such as `connect(...)`, `connect
 
 The public CRUD and tracking routes are currently centered on simple primary keys. Composite primary key metadata exists, but complete public persistence workflows for composite keys are not implemented.
 
+The tracking unit of work now stores pending `Added`, `Modified` and `Deleted`
+work in the context registry after a `Tracked<T>` wrapper is dropped or
+consumed. `save_changes()` reads registry-owned snapshots, and the internal
+helpers that accept unchanged values or synchronize persisted rows update those
+snapshots even when the original wrapper is gone. The API is still labelled
+experimental until the final Stage 21 validation and documentation pass is
+completed, but wrapper lifetime is no longer required for pending work to be
+persisted.
+
 Navigation loading does not turn the experimental tracker into a graph tracker.
 Includes materialize ordinary entity values, and explicit tracked collection
 loading attaches related values to the tracked root without registering those
@@ -141,10 +150,12 @@ type and primary-key values. `find_tracked(...)` can reattach registry entries
 that still exist after their previous wrapper was dropped or consumed, but a
 second live `Tracked<T>` handle for the same persisted identity in one context
 is rejected with `OrmError`; detach or drop the existing handle before loading
-it again. Navigation materialization through includes and explicit collection
-loads can reuse registry-owned snapshots for related rows that are already
-tracked, but it does not register graphs or move SQL generation or execution
-out of their current crates.
+it again. The same registry identity guard prevents an `Added` temporary entry
+from adopting a persisted primary key that is already tracked by a live or
+detached entry. Navigation materialization through includes and explicit
+collection loads can reuse registry-owned snapshots for related rows that are
+already tracked, but it does not register graphs or move SQL generation or
+execution out of their current crates.
 
 ## Query AST
 
