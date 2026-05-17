@@ -1,6 +1,6 @@
 use crate::expr::TableRef;
 use crate::predicate::Predicate;
-use sql_orm_core::{Changeset, ColumnValue, Entity};
+use sql_orm_core::{Changeset, ColumnValue, Entity, EntityMetadata};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct UpdateQuery {
@@ -8,6 +8,7 @@ pub struct UpdateQuery {
     pub changes: Vec<ColumnValue>,
     pub predicate: Option<Predicate>,
     pub allow_all_rows: bool,
+    pub entity: Option<&'static EntityMetadata>,
 }
 
 impl UpdateQuery {
@@ -17,6 +18,7 @@ impl UpdateQuery {
             changes: changeset.changes(),
             predicate: None,
             allow_all_rows: false,
+            entity: Some(E::metadata()),
         }
     }
 

@@ -585,6 +585,7 @@ mod tests {
         assert_eq!(update.changes.len(), 1);
         assert!(update.predicate.is_some());
         assert!(!update.allow_all_rows);
+        assert_eq!(update.entity, Some(Customer::metadata()));
         assert!(
             UpdateQuery::for_entity::<Customer, _>(&UpdateCustomer {
                 email: Some("ana.maria@example.com".to_string()),

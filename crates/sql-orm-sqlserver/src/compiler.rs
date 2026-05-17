@@ -102,6 +102,7 @@ impl crate::SqlServerCompiler {
                 "SQL Server update compilation requires a WHERE predicate or explicit allow_all_rows()",
             ));
         }
+        validate_update_query(query)?;
 
         let mut parameters = ParameterBuilder::default();
         let assignments = compile_assignments(&query.changes, &mut parameters)?;
@@ -287,6 +288,73 @@ fn validate_insert_column(
     if !column.insertable {
         return Err(OrmError::new(format!(
             "SQL Server insert column `{}` on entity `{}` is not insertable",
+            column.column_name, metadata.rust_name
+        )));
+    }
+
+    Ok(())
+}
+
+fn validate_update_query(query: &UpdateQuery) -> Result<(), OrmError> {
+    let Some(metadata) = query.entity else {
+        return Err(OrmError::new(
+            "SQL Server update compilation requires entity metadata",
+        ));
+    };
+
+    if metadata.schema != query.table.schema || metadata.table != query.table.table {
+        return Err(OrmError::new(format!(
+            "SQL Server update target [{}].[{}] does not match entity metadata [{}].[{}]",
+            query.table.schema, query.table.table, metadata.schema, metadata.table
+        )));
+    }
+
+    let mut seen_columns = BTreeSet::new();
+    for change in &query.changes {
+        if !seen_columns.insert(change.column_name) {
+            return Err(OrmError::new(format!(
+                "SQL Server update column `{}` is duplicated",
+                change.column_name
+            )));
+        }
+
+        let column = metadata.column(change.column_name).ok_or_else(|| {
+            OrmError::new(format!(
+                "SQL Server update column `{}` is not defined on entity `{}`",
+                change.column_name, metadata.rust_name
+            ))
+        })?;
+        validate_update_column(metadata, column)?;
+    }
+
+    Ok(())
+}
+
+fn validate_update_column(
+    metadata: &EntityMetadata,
+    column: &ColumnMetadata,
+) -> Result<(), OrmError> {
+    if column.primary_key {
+        return Err(OrmError::new(format!(
+            "SQL Server update column `{}` on entity `{}` is a primary key and cannot be updated",
+            column.column_name, metadata.rust_name
+        )));
+    }
+    if column.rowversion {
+        return Err(OrmError::new(format!(
+            "SQL Server update column `{}` on entity `{}` is rowversion and cannot be updated",
+            column.column_name, metadata.rust_name
+        )));
+    }
+    if column.is_computed() {
+        return Err(OrmError::new(format!(
+            "SQL Server update column `{}` on entity `{}` is computed and cannot be updated",
+            column.column_name, metadata.rust_name
+        )));
+    }
+    if !column.updatable {
+        return Err(OrmError::new(format!(
+            "SQL Server update column `{}` on entity `{}` is not updatable",
             column.column_name, metadata.rust_name
         )));
     }
@@ -1467,6 +1535,133 @@ mod tests {
         let compiled_delete = SqlServerCompiler::compile_delete(&delete.allow_all_rows()).unwrap();
         assert_eq!(compiled_delete.sql, "DELETE FROM [sales].[customers]");
         assert!(compiled_delete.params.is_empty());
+    }
+
+    #[test]
+    fn rejects_invalid_update_columns_against_entity_metadata() {
+        let predicate = Predicate::eq(Expr::from(Customer::id), Expr::value(SqlValue::I64(7)));
+
+        let missing_metadata_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::for_entity::<Customer>(),
+            changes: vec![ColumnValue::new(
+                "email",
+                SqlValue::String("ana@example.com".to_string()),
+            )],
+            predicate: Some(predicate.clone()),
+            allow_all_rows: false,
+            entity: None,
+        })
+        .unwrap_err();
+        assert_eq!(
+            missing_metadata_error.message(),
+            "SQL Server update compilation requires entity metadata"
+        );
+
+        let target_mismatch_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::new("sales", "other_customers"),
+            changes: vec![ColumnValue::new(
+                "email",
+                SqlValue::String("ana@example.com".to_string()),
+            )],
+            predicate: Some(predicate.clone()),
+            allow_all_rows: false,
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            target_mismatch_error.message(),
+            "SQL Server update target [sales].[other_customers] does not match entity metadata [sales].[customers]"
+        );
+
+        let unknown_column_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::for_entity::<Customer>(),
+            changes: vec![ColumnValue::new(
+                "not_a_column",
+                SqlValue::String("value".to_string()),
+            )],
+            predicate: Some(predicate.clone()),
+            allow_all_rows: false,
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            unknown_column_error.message(),
+            "SQL Server update column `not_a_column` is not defined on entity `Customer`"
+        );
+
+        let duplicate_column_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::for_entity::<Customer>(),
+            changes: vec![
+                ColumnValue::new("email", SqlValue::String("first@example.com".to_string())),
+                ColumnValue::new("email", SqlValue::String("second@example.com".to_string())),
+            ],
+            predicate: Some(predicate.clone()),
+            allow_all_rows: false,
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            duplicate_column_error.message(),
+            "SQL Server update column `email` is duplicated"
+        );
+
+        let primary_key_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::for_entity::<Customer>(),
+            changes: vec![ColumnValue::new("id", SqlValue::I64(8))],
+            predicate: Some(predicate.clone()),
+            allow_all_rows: false,
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            primary_key_error.message(),
+            "SQL Server update column `id` on entity `Customer` is a primary key and cannot be updated"
+        );
+
+        let non_updatable_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::for_entity::<Customer>(),
+            changes: vec![ColumnValue::new(
+                "created_by_runtime",
+                SqlValue::String("system".to_string()),
+            )],
+            predicate: Some(predicate.clone()),
+            allow_all_rows: false,
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            non_updatable_error.message(),
+            "SQL Server update column `created_by_runtime` on entity `Customer` is not updatable"
+        );
+
+        let rowversion_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::for_entity::<Customer>(),
+            changes: vec![ColumnValue::new("version", SqlValue::Bytes(vec![1, 2, 3]))],
+            predicate: Some(predicate.clone()),
+            allow_all_rows: false,
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            rowversion_error.message(),
+            "SQL Server update column `version` on entity `Customer` is rowversion and cannot be updated"
+        );
+
+        let computed_error = SqlServerCompiler::compile_update(&UpdateQuery {
+            table: TableRef::for_entity::<Customer>(),
+            changes: vec![ColumnValue::new(
+                "email_domain",
+                SqlValue::String("example.com".to_string()),
+            )],
+            predicate: Some(predicate),
+            allow_all_rows: false,
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            computed_error.message(),
+            "SQL Server update column `email_domain` on entity `Customer` is computed and cannot be updated"
+        );
     }
 
     #[test]
