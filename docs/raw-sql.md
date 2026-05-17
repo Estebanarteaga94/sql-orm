@@ -41,6 +41,28 @@ let result = db
 
 `RawQuery<T>` materializes rows with `FromRow`. `RawCommand` returns `ExecuteResult`.
 
+Raw SQL has an explicit execution classification for retry safety:
+
+- `RawQuery<T>` defaults to `RawNoRetry`;
+- `RawQuery<T>::read_only()` marks a raw query as read-only and eligible for the configured read retry policy;
+- `RawQuery<T>::no_retry()` forces the default no-retry behavior;
+- `RawCommand` defaults to `Write`;
+- `RawCommand::migration()` marks command SQL as migration or schema-management SQL;
+- `RawCommand::no_retry()` forces command SQL to bypass retry.
+
+The ORM does not inspect the SQL text to decide retry safety. A string that starts with `SELECT` is still not retried unless the raw query is explicitly marked with `read_only()`.
+
+Read-only raw query with retry opt-in:
+
+```rust
+let rows = db
+    .raw::<UserDto>("SELECT id, email FROM dbo.users WHERE active = @P1")
+    .param(true)
+    .read_only()
+    .all()
+    .await?;
+```
+
 ## Query Hints
 
 `RawQuery<T>` supports SQL Server query hints through `query_hint(...)`.
@@ -56,7 +78,7 @@ let rows = db
     .await?;
 ```
 
-Use this when a parametrized raw query gets a poor cached or generic SQL Server plan and recompiling per execution is an acceptable tradeoff. The parameter rules remain unchanged: values are still bound through `@P1..@Pn`.
+Use this when a parametrized raw query gets a poor cached or generic SQL Server plan and recompiling per execution is an acceptable tradeoff. Query hints do not change retry classification: add `read_only()` separately when the SQL is safe to retry. The parameter rules remain unchanged: values are still bound through `@P1..@Pn`.
 
 Do not write `OPTION (...)` manually in the SQL when using `query_hint(...)`. The ORM rejects that combination before execution to avoid duplicating or mixing API-managed hints with hand-written hints.
 
@@ -89,6 +111,7 @@ Rules:
 - placeholders must be continuous from `@P1` to `@Pn`;
 - the number of provided parameters must match the highest placeholder index;
 - repeated placeholders reuse the same value;
+- placeholders inside string literals, bracketed identifiers, double-quoted identifiers, `--` line comments, and `/* ... */` block comments are ignored by validation;
 - values are bound as parameters, not interpolated strings.
 
 Valid repeated placeholder:
@@ -101,6 +124,36 @@ db.raw::<UserDto>(
 .all()
 .await?;
 ```
+
+Ignored placeholder-like text:
+
+```rust
+db.raw::<UserDto>(
+    "SELECT '@P1 is text' AS note, id, email FROM dbo.users -- @P2 ignored
+     WHERE id = @P1",
+)
+.param(7_i64)
+.all()
+.await?;
+```
+
+This query expects one parameter because only the `@P1` in `WHERE id = @P1` is in executable SQL.
+
+## Retry Contract
+
+Configured retry applies only to materialized read paths whose compiled execution classification is `ReadOnly`.
+
+For normal ORM queries, `sql-orm-sqlserver` assigns that classification when it compiles read-only ASTs such as `SELECT`, `COUNT`, `EXISTS`, and aggregations. For raw SQL, the caller must classify the query explicitly with `RawQuery<T>::read_only()`.
+
+Raw SQL retry rules:
+
+- `RawQuery<T>` is `RawNoRetry` by default, even if the SQL starts with `SELECT`;
+- `RawQuery<T>::read_only()` opts into retry for idempotent read-only SQL;
+- `RawCommand` is `Write` by default and is not retried automatically;
+- `RawCommand::migration()` documents schema-management intent and is not retried automatically;
+- no raw SQL is retried inside `db.transaction(...)`, because transaction scopes disable retry.
+
+Only mark raw SQL as read-only when rerunning the exact statement is safe. Do not use `read_only()` for statements with side effects, non-idempotent stored procedures, mutation hidden behind `SELECT`, temporary table setup, lock acquisition with side effects, or any operation that depends on running exactly once.
 
 ## Security
 
@@ -151,6 +204,7 @@ Raw SQL can run inside `db.transaction(...)` when using the transaction context 
 - No automatic application of `tenant`, `soft_delete`, or other policies.
 - No automatic integration with migrations, `DbSetQuery`, or query-builder projections.
 - Query hints are currently available only on `RawQuery<T>`, not on `RawCommand` or the public query builder.
+- Retry for raw queries is opt-in via `read_only()`; it is never inferred from the SQL text.
 
 ## Validation
 
@@ -159,4 +213,6 @@ Coverage includes:
 - raw parameter unit tests;
 - repeated `@P1` behavior;
 - continuous placeholder validation;
+- ignored placeholder-like text in strings, delimited identifiers, and comments;
+- explicit raw SQL execution classification for retry;
 - public real SQL Server tests behind `SQL_ORM_TEST_CONNECTION_STRING`.
