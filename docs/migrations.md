@@ -14,7 +14,7 @@ See also [Core concepts](core-concepts.md).
 - `down.sql` is generated when all operations are reversible with the available payload.
 - Destructive changes are blocked by default unless explicitly allowed.
 - `database update` generates an idempotent script and can execute it with `--execute`.
-- `database downgrade --target <MigrationId|0>` generates an idempotent rollback script from local `down.sql` artifacts.
+- `database downgrade --target <MigrationId|0>` generates an idempotent rollback script from local `down.sql` artifacts and can execute it with `--execute`.
 
 ## Recommended Flow
 
@@ -129,7 +129,7 @@ The generated script uses a `__sql_orm_migrations` history table. It records mig
 
 ## Database Downgrade
 
-`database downgrade` is being implemented in Etapa 23. Script generation is available and built on the artifacts that already exist today:
+`database downgrade` is being implemented in Etapa 23 and is built on the artifacts that already exist today:
 
 - local migration directories under `migrations/`;
 - `down.sql` for rollback SQL;
@@ -149,7 +149,7 @@ By default the command prints a SQL script:
 sql-orm-cli database downgrade --target <MigrationId> > database_downgrade.sql
 ```
 
-Execution remains planned for a later Etapa 23 task and is not available yet:
+To execute directly:
 
 ```bash
 sql-orm-cli database downgrade --target <MigrationId> --execute \
@@ -170,6 +170,12 @@ The script generation flow is:
 8. Delete the migration row from `[dbo].[__sql_orm_migrations]` only after `down.sql` succeeds.
 
 The first implementation should not introduce `migration.rs`. Hand-authored rollback logic belongs in `down.sql` for this phase.
+
+Connection-string resolution order for `--execute` matches `database update`:
+
+1. `--connection-string`
+2. `DATABASE_URL`
+3. `SQL_ORM_TEST_CONNECTION_STRING`
 
 Safety requirements:
 
@@ -244,8 +250,7 @@ The script generates an initial migration from the current example model, a no-o
 
 ## Limits
 
-- `down.sql` execution is not available automatically yet; only script generation exists.
-- `database downgrade --execute` is planned for Etapa 23 but not implemented yet.
+- `database downgrade --execute` is available but still needs optional real SQL Server coverage in Etapa 23.
 - `migration.rs` is outside the current MVP.
 - Composite foreign-key derivation from public attributes is not part of the current derive surface.
 - Review SQL carefully for computed columns, foreign keys, indexes, and explicit renames.

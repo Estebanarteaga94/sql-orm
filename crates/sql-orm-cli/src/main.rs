@@ -147,14 +147,22 @@ fn run(args: Vec<String>, root: &Path) -> Result<String, String> {
             }
 
             let connection_string = resolve_database_update_connection_string(&options)?;
-            execute_database_update_script(&connection_string, script)?;
+            execute_database_script(&connection_string, script, "database update")?;
             Ok("Database update applied.".to_string())
         }
-        CliCommand::DatabaseDowngrade { target } => {
+        CliCommand::DatabaseDowngrade { options } => {
             let history_table_sql = SqlServerCompiler::compile_migrations_history_table()
                 .map_err(|error| error.to_string())?;
-            build_database_downgrade_script(root, &history_table_sql, &target)
-                .map_err(|error| error.to_string())
+            let script = build_database_downgrade_script(root, &history_table_sql, &options.target)
+                .map_err(|error| error.to_string())?;
+
+            if !options.execute {
+                return Ok(script);
+            }
+
+            let connection_string = resolve_database_downgrade_connection_string(&options)?;
+            execute_database_script(&connection_string, script, "database downgrade")?;
+            Ok("Database downgrade applied.".to_string())
         }
     }
 }
@@ -490,7 +498,7 @@ enum CliCommand {
         options: DatabaseUpdateOptions,
     },
     DatabaseDowngrade {
-        target: String,
+        options: DatabaseDowngradeOptions,
     },
 }
 
@@ -512,16 +520,17 @@ fn parse_command(args: &[String]) -> Result<CliCommand, String> {
         }
         [_bin, group, action, rest @ ..] if group == "database" && action == "downgrade" => {
             Ok(CliCommand::DatabaseDowngrade {
-                target: parse_database_downgrade_target(rest)?,
+                options: parse_database_downgrade_options(rest)?,
             })
         }
         _ => Err(
-            "Usage:\n  sql-orm-cli migration add <Name> [--model-snapshot <Path>] [--snapshot-bin <BinName> [--manifest-path <Path>]] [--allow-destructive]\n  sql-orm-cli migration list\n  sql-orm-cli database update [--execute [--connection-string <ConnectionString>]]\n  sql-orm-cli database downgrade --target <MigrationId|0>".to_string(),
+            "Usage:\n  sql-orm-cli migration add <Name> [--model-snapshot <Path>] [--snapshot-bin <BinName> [--manifest-path <Path>]] [--allow-destructive]\n  sql-orm-cli migration list\n  sql-orm-cli database update [--execute [--connection-string <ConnectionString>]]\n  sql-orm-cli database downgrade --target <MigrationId|0> [--execute [--connection-string <ConnectionString>]]".to_string(),
         ),
     }
 }
 
-fn parse_database_downgrade_target(args: &[String]) -> Result<String, String> {
+fn parse_database_downgrade_options(args: &[String]) -> Result<DatabaseDowngradeOptions, String> {
+    let mut options = DatabaseDowngradeOptions::default();
     let mut target = None;
     let mut index = 0;
 
@@ -534,17 +543,42 @@ fn parse_database_downgrade_target(args: &[String]) -> Result<String, String> {
                 target = Some(value.clone());
                 index += 2;
             }
+            "--execute" => {
+                options.execute = true;
+                index += 1;
+            }
+            "--connection-string" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "--connection-string requires a value".to_string())?;
+                options.connection_string = Some(value.clone());
+                index += 2;
+            }
             unknown => {
                 return Err(format!("unknown database downgrade option: {unknown}"));
             }
         }
     }
 
-    target.ok_or_else(|| "database downgrade requires --target <MigrationId|0>".to_string())
+    options.target =
+        target.ok_or_else(|| "database downgrade requires --target <MigrationId|0>".to_string())?;
+
+    if options.connection_string.is_some() && !options.execute {
+        return Err("--connection-string requires --execute".to_string());
+    }
+
+    Ok(options)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 struct DatabaseUpdateOptions {
+    execute: bool,
+    connection_string: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct DatabaseDowngradeOptions {
+    target: String,
     execute: bool,
     connection_string: Option<String>,
 }
@@ -593,7 +627,25 @@ fn resolve_database_update_connection_string(
         })
 }
 
-fn execute_database_update_script(connection_string: &str, script: String) -> Result<(), String> {
+fn resolve_database_downgrade_connection_string(
+    options: &DatabaseDowngradeOptions,
+) -> Result<String, String> {
+    if let Some(connection_string) = &options.connection_string {
+        return Ok(connection_string.clone());
+    }
+
+    env::var("DATABASE_URL")
+        .or_else(|_| env::var("SQL_ORM_TEST_CONNECTION_STRING"))
+        .map_err(|_| {
+            "database downgrade --execute requires --connection-string, DATABASE_URL, or SQL_ORM_TEST_CONNECTION_STRING".to_string()
+        })
+}
+
+fn execute_database_script(
+    connection_string: &str,
+    script: String,
+    operation: &str,
+) -> Result<(), String> {
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|error| format!("failed to create async runtime: {error}"))?;
 
@@ -604,7 +656,7 @@ fn execute_database_update_script(connection_string: &str, script: String) -> Re
         connection
             .execute(CompiledQuery::new(script, vec![]))
             .await
-            .map_err(|error| format!("failed to apply database update: {error}"))?;
+            .map_err(|error| format!("failed to apply {operation}: {error}"))?;
 
         Ok(())
     })
@@ -669,8 +721,8 @@ fn parse_migration_add_options(args: &[String]) -> Result<MigrationAddOptions, S
 #[cfg(test)]
 mod tests {
     use super::{
-        CliCommand, DatabaseUpdateOptions, MigrationAddOptions, build_migration_plan,
-        first_destructive_migration_operation, parse_command, run,
+        CliCommand, DatabaseDowngradeOptions, DatabaseUpdateOptions, MigrationAddOptions,
+        build_migration_plan, first_destructive_migration_operation, parse_command, run,
     };
     use sql_orm_core::SqlServerType;
     use sql_orm_migrate::{
@@ -967,7 +1019,31 @@ mod tests {
             ])
             .unwrap(),
             CliCommand::DatabaseDowngrade {
-                target: "100_create_customers".to_string()
+                options: DatabaseDowngradeOptions {
+                    target: "100_create_customers".to_string(),
+                    execute: false,
+                    connection_string: None,
+                }
+            }
+        );
+        assert_eq!(
+            parse_command(&[
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                "0".to_string(),
+                "--execute".to_string(),
+                "--connection-string".to_string(),
+                "Server=localhost;Database=tempdb;".to_string(),
+            ])
+            .unwrap(),
+            CliCommand::DatabaseDowngrade {
+                options: DatabaseDowngradeOptions {
+                    target: "0".to_string(),
+                    execute: true,
+                    connection_string: Some("Server=localhost;Database=tempdb;".to_string()),
+                }
             }
         );
     }
@@ -1506,5 +1582,26 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("database downgrade requires --target <MigrationId|0>"));
+    }
+
+    #[test]
+    fn run_database_downgrade_connection_string_requires_execute() {
+        let root = temp_project_root();
+
+        let error = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                "0".to_string(),
+                "--connection-string".to_string(),
+                "Server=localhost;Database=tempdb;".to_string(),
+            ],
+            &root,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("--connection-string requires --execute"));
     }
 }
