@@ -1,5 +1,6 @@
 use sql_orm_migrate::{
-    MigrationOperation, ModelSnapshot, build_database_update_script, create_migration_scaffold,
+    MigrationOperation, ModelSnapshot, build_database_downgrade_script,
+    build_database_update_script, create_migration_scaffold,
     create_migration_scaffold_with_snapshot, diff_column_operations, diff_relational_operations,
     diff_schema_and_table_operations, list_migrations, read_latest_model_snapshot,
     read_model_snapshot, write_migration_down_sql, write_migration_up_sql,
@@ -148,6 +149,12 @@ fn run(args: Vec<String>, root: &Path) -> Result<String, String> {
             let connection_string = resolve_database_update_connection_string(&options)?;
             execute_database_update_script(&connection_string, script)?;
             Ok("Database update applied.".to_string())
+        }
+        CliCommand::DatabaseDowngrade { target } => {
+            let history_table_sql = SqlServerCompiler::compile_migrations_history_table()
+                .map_err(|error| error.to_string())?;
+            build_database_downgrade_script(root, &history_table_sql, &target)
+                .map_err(|error| error.to_string())
         }
     }
 }
@@ -482,6 +489,9 @@ enum CliCommand {
     DatabaseUpdate {
         options: DatabaseUpdateOptions,
     },
+    DatabaseDowngrade {
+        target: String,
+    },
 }
 
 fn parse_command(args: &[String]) -> Result<CliCommand, String> {
@@ -500,10 +510,37 @@ fn parse_command(args: &[String]) -> Result<CliCommand, String> {
                 options: parse_database_update_options(rest)?,
             })
         }
+        [_bin, group, action, rest @ ..] if group == "database" && action == "downgrade" => {
+            Ok(CliCommand::DatabaseDowngrade {
+                target: parse_database_downgrade_target(rest)?,
+            })
+        }
         _ => Err(
-            "Usage:\n  sql-orm-cli migration add <Name> [--model-snapshot <Path>] [--snapshot-bin <BinName> [--manifest-path <Path>]] [--allow-destructive]\n  sql-orm-cli migration list\n  sql-orm-cli database update [--execute [--connection-string <ConnectionString>]]".to_string(),
+            "Usage:\n  sql-orm-cli migration add <Name> [--model-snapshot <Path>] [--snapshot-bin <BinName> [--manifest-path <Path>]] [--allow-destructive]\n  sql-orm-cli migration list\n  sql-orm-cli database update [--execute [--connection-string <ConnectionString>]]\n  sql-orm-cli database downgrade --target <MigrationId|0>".to_string(),
         ),
     }
+}
+
+fn parse_database_downgrade_target(args: &[String]) -> Result<String, String> {
+    let mut target = None;
+    let mut index = 0;
+
+    while index < args.len() {
+        match args[index].as_str() {
+            "--target" => {
+                let value = args
+                    .get(index + 1)
+                    .ok_or_else(|| "--target requires a migration id or 0".to_string())?;
+                target = Some(value.clone());
+                index += 2;
+            }
+            unknown => {
+                return Err(format!("unknown database downgrade option: {unknown}"));
+            }
+        }
+    }
+
+    target.ok_or_else(|| "database downgrade requires --target <MigrationId|0>".to_string())
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -918,6 +955,19 @@ mod tests {
                     execute: true,
                     connection_string: Some("Server=localhost;Database=tempdb;".to_string()),
                 }
+            }
+        );
+        assert_eq!(
+            parse_command(&[
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                "100_create_customers".to_string(),
+            ])
+            .unwrap(),
+            CliCommand::DatabaseDowngrade {
+                target: "100_create_customers".to_string()
             }
         );
     }
@@ -1388,5 +1438,73 @@ mod tests {
         assert!(output.contains("THROW 50001, N'sql-orm migration checksum mismatch"));
         assert!(output.contains("BEGIN TRANSACTION;"));
         assert!(output.contains("ROLLBACK TRANSACTION;"));
+    }
+
+    #[test]
+    fn run_database_downgrade_outputs_sql_script() {
+        let root = temp_project_root();
+        let first_dir = root.join("migrations/100_create_customers");
+        let second_dir = root.join("migrations/200_create_orders");
+        fs::create_dir_all(&first_dir).unwrap();
+        fs::create_dir_all(&second_dir).unwrap();
+        fs::write(
+            first_dir.join("up.sql"),
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+        )
+        .unwrap();
+        fs::write(
+            first_dir.join("down.sql"),
+            "DROP TABLE [sales].[customers];",
+        )
+        .unwrap();
+        fs::write(first_dir.join("model_snapshot.json"), "{ \"schemas\": [] }").unwrap();
+        fs::write(
+            second_dir.join("up.sql"),
+            "CREATE TABLE [sales].[orders] ([id] bigint NOT NULL);",
+        )
+        .unwrap();
+        fs::write(second_dir.join("down.sql"), "DROP TABLE [sales].[orders];").unwrap();
+        fs::write(
+            second_dir.join("model_snapshot.json"),
+            "{ \"schemas\": [] }",
+        )
+        .unwrap();
+
+        let output = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                "100_create_customers".to_string(),
+            ],
+            &root,
+        )
+        .unwrap();
+
+        assert!(output.contains("-- sql-orm database downgrade"));
+        assert!(output.contains("CREATE TABLE [dbo].[__sql_orm_migrations]"));
+        assert!(output.contains("DROP TABLE [sales].[orders]"));
+        assert!(!output.contains("DROP TABLE [sales].[customers]"));
+        assert!(output.contains(
+            "DELETE FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'200_create_orders';"
+        ));
+    }
+
+    #[test]
+    fn run_database_downgrade_requires_explicit_target() {
+        let root = temp_project_root();
+
+        let error = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+            ],
+            &root,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("database downgrade requires --target <MigrationId|0>"));
     }
 }

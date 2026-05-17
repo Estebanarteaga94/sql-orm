@@ -192,6 +192,70 @@ pub fn build_database_update_script(
     Ok(script.join("\n\n"))
 }
 
+pub fn build_database_downgrade_script(
+    root: &Path,
+    history_table_sql: &str,
+    target: &str,
+) -> Result<String, OrmError> {
+    let target = target.trim();
+    if target.is_empty() {
+        return Err(OrmError::new(
+            "database downgrade requires an explicit target",
+        ));
+    }
+
+    let migrations = list_migrations(root)?;
+    if target != "0" && !migrations.iter().any(|migration| migration.id == target) {
+        return Err(OrmError::new(format!(
+            "database downgrade target `{target}` is not a known local migration"
+        )));
+    }
+
+    let rollback_migrations = migrations
+        .iter()
+        .filter(|migration| target == "0" || migration.id.as_str() > target)
+        .rev()
+        .map(|migration| {
+            let up_sql = fs::read_to_string(&migration.up_sql_path)
+                .map_err(|_| OrmError::new("failed to read migration up.sql"))?;
+            let down_sql = fs::read_to_string(&migration.down_sql_path)
+                .map_err(|_| OrmError::new("failed to read migration down.sql"))?;
+            let down_statements = split_sql_statements(&down_sql);
+            if down_statements.is_empty() {
+                return Err(OrmError::new(format!(
+                    "database downgrade migration `{}` has no executable down.sql statements",
+                    migration.id
+                )));
+            }
+
+            Ok(DowngradeMigrationBlock {
+                id: migration.id.clone(),
+                checksum: checksum_hex(up_sql.as_bytes()),
+                down_statements,
+            })
+        })
+        .collect::<Result<Vec<_>, OrmError>>()?;
+
+    let mut script = vec![
+        "-- sql-orm database downgrade".to_string(),
+        "SET ANSI_NULLS ON;".to_string(),
+        "SET ANSI_PADDING ON;".to_string(),
+        "SET ANSI_WARNINGS ON;".to_string(),
+        "SET ARITHABORT ON;".to_string(),
+        "SET CONCAT_NULL_YIELDS_NULL ON;".to_string(),
+        "SET QUOTED_IDENTIFIER ON;".to_string(),
+        "SET NUMERIC_ROUNDABORT OFF;".to_string(),
+        history_table_sql.to_string(),
+        render_downgrade_history_guard(&migrations, target),
+    ];
+
+    for migration in rollback_migrations {
+        script.push(render_idempotent_downgrade_block(&migration));
+    }
+
+    Ok(script.join("\n\n"))
+}
+
 fn render_idempotent_migration_block(id: &str, name: &str, checksum: &str, body: &str) -> String {
     format!(
         "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}' AND [checksum] <> N'{checksum}')\nBEGIN\n    THROW 50001, N'sql-orm migration checksum mismatch for {id}', 1;\nEND\n\nIF NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}')\nBEGIN\n    BEGIN TRY\n        BEGIN TRANSACTION;\n{body}        INSERT INTO [dbo].[__sql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'{id}', N'{name}', N'{checksum}', N'{version}');\n        COMMIT TRANSACTION;\n    END TRY\n    BEGIN CATCH\n        IF XACT_STATE() <> 0\n            ROLLBACK TRANSACTION;\n        THROW;\n    END CATCH\nEND",
@@ -199,6 +263,62 @@ fn render_idempotent_migration_block(id: &str, name: &str, checksum: &str, body:
         name = name,
         checksum = checksum,
         version = ORM_VERSION,
+        body = body,
+    )
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct DowngradeMigrationBlock {
+    id: String,
+    checksum: String,
+    down_statements: Vec<String>,
+}
+
+fn render_downgrade_history_guard(migrations: &[MigrationEntry], target: &str) -> String {
+    let local_history_guard = if migrations.is_empty() {
+        "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations])\nBEGIN\n    THROW 50002, N'sql-orm migration history contains entries missing from local migrations', 1;\nEND".to_string()
+    } else {
+        let known_ids = migrations
+            .iter()
+            .map(|migration| format!("N'{}'", escape_sql_literal(&migration.id)))
+            .collect::<Vec<_>>()
+            .join(", ");
+        format!(
+            "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] NOT IN ({known_ids}))\nBEGIN\n    THROW 50002, N'sql-orm migration history contains entries missing from local migrations', 1;\nEND",
+            known_ids = known_ids,
+        )
+    };
+    let target_literal = escape_sql_literal(target);
+    let target_guard = if target == "0" {
+        String::new()
+    } else {
+        format!(
+            "\n\nIF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] > N'{target}')\n   AND NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{target}')\nBEGIN\n    THROW 50003, N'sql-orm downgrade target {target} is not applied in migration history', 1;\nEND",
+            target = target_literal,
+        )
+    };
+
+    format!(
+        "{local_history_guard}{target_guard}",
+        local_history_guard = local_history_guard,
+        target_guard = target_guard,
+    )
+}
+
+fn render_idempotent_downgrade_block(migration: &DowngradeMigrationBlock) -> String {
+    let id = escape_sql_literal(&migration.id);
+    let checksum = escape_sql_literal(&migration.checksum);
+    let body = migration
+        .down_statements
+        .iter()
+        .map(|statement| format!("        EXEC(N'{}');", escape_sql_literal(statement)))
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!(
+        "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}' AND [checksum] <> N'{checksum}')\nBEGIN\n    THROW 50001, N'sql-orm migration checksum mismatch for {id}', 1;\nEND\n\nIF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}')\nBEGIN\n    BEGIN TRY\n        BEGIN TRANSACTION;\n{body}\n        DELETE FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}';\n        COMMIT TRANSACTION;\n    END TRY\n    BEGIN CATCH\n        IF XACT_STATE() <> 0\n            ROLLBACK TRANSACTION;\n        THROW;\n    END CATCH\nEND",
+        id = id,
+        checksum = checksum,
         body = body,
     )
 }
@@ -275,14 +395,14 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_database_update_script, create_migration_scaffold,
+        build_database_downgrade_script, build_database_update_script, create_migration_scaffold,
         create_migration_scaffold_with_snapshot, latest_migration, list_migrations,
         read_latest_model_snapshot, read_model_snapshot, write_migration_down_sql,
         write_migration_up_sql, write_model_snapshot,
     };
     use crate::{ModelSnapshot, SchemaSnapshot};
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_project_root() -> PathBuf {
@@ -293,6 +413,18 @@ mod tests {
         let path = std::env::temp_dir().join(format!("sql_orm_migrate_{unique}"));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn write_local_migration(root: &Path, id: &str, up_sql: &str, down_sql: &str) {
+        let migration_dir = root.join("migrations").join(id);
+        fs::create_dir_all(&migration_dir).unwrap();
+        fs::write(migration_dir.join("up.sql"), up_sql).unwrap();
+        fs::write(migration_dir.join("down.sql"), down_sql).unwrap();
+        fs::write(
+            migration_dir.join("model_snapshot.json"),
+            "{ \"schemas\": [] }",
+        )
+        .unwrap();
     }
 
     #[test]
@@ -473,6 +605,137 @@ mod tests {
 
         assert!(!script.contains("EXEC(N'');"));
         assert!(script.contains("INSERT INTO [dbo].[__sql_orm_migrations]"));
+    }
+
+    #[test]
+    fn builds_database_downgrade_script_in_reverse_order() {
+        let root = temp_project_root();
+        write_local_migration(
+            &root,
+            "100_create_customers",
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[customers];",
+        );
+        write_local_migration(
+            &root,
+            "200_create_orders",
+            "CREATE TABLE [sales].[orders] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[orders];",
+        );
+        write_local_migration(
+            &root,
+            "300_create_lines",
+            "CREATE TABLE [sales].[order_lines] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[order_lines];",
+        );
+
+        let script = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "100_create_customers",
+        )
+        .unwrap();
+
+        let lines_pos = script.find("DROP TABLE [sales].[order_lines]").unwrap();
+        let orders_pos = script.find("DROP TABLE [sales].[orders]").unwrap();
+        assert!(lines_pos < orders_pos);
+        assert!(!script.contains("DROP TABLE [sales].[customers]"));
+        assert!(script.contains("CREATE TABLE [dbo].[__sql_orm_migrations]"));
+        assert!(
+            script.contains(
+                "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] NOT IN"
+            )
+        );
+        assert!(script.contains("sql-orm downgrade target 100_create_customers is not applied"));
+        assert!(
+            script.contains(
+                "THROW 50001, N'sql-orm migration checksum mismatch for 300_create_lines'"
+            )
+        );
+        assert!(script.contains("BEGIN TRANSACTION;"));
+        assert!(script.contains(
+            "DELETE FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'300_create_lines';"
+        ));
+        assert!(script.contains("ROLLBACK TRANSACTION;"));
+    }
+
+    #[test]
+    fn builds_database_downgrade_script_to_empty_database_sentinel() {
+        let root = temp_project_root();
+        write_local_migration(
+            &root,
+            "100_create_customers",
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[customers];",
+        );
+
+        let script = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "0",
+        )
+        .unwrap();
+
+        assert!(script.contains("DROP TABLE [sales].[customers]"));
+        assert!(!script.contains("downgrade target 0 is not applied"));
+    }
+
+    #[test]
+    fn database_downgrade_script_with_no_local_migrations_rejects_any_history_rows() {
+        let root = temp_project_root();
+
+        let script = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "0",
+        )
+        .unwrap();
+
+        assert!(script.contains("IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations])"));
+        assert!(script.contains("history contains entries missing from local migrations"));
+        assert!(!script.contains("NOT IN (NULL)"));
+    }
+
+    #[test]
+    fn database_downgrade_rejects_unknown_target_and_empty_down_sql() {
+        let root = temp_project_root();
+        write_local_migration(
+            &root,
+            "100_create_customers",
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[customers];",
+        );
+
+        let error = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "999_missing",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("target `999_missing` is not a known local migration")
+        );
+
+        write_local_migration(
+            &root,
+            "200_create_orders",
+            "CREATE TABLE [sales].[orders] ([id] bigint NOT NULL);",
+            "-- manual rollback pending\n",
+        );
+
+        let error = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "100_create_customers",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("migration `200_create_orders` has no executable down.sql statements")
+        );
     }
 
     #[test]

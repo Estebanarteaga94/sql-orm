@@ -14,6 +14,7 @@ See also [Core concepts](core-concepts.md).
 - `down.sql` is generated when all operations are reversible with the available payload.
 - Destructive changes are blocked by default unless explicitly allowed.
 - `database update` generates an idempotent script and can execute it with `--execute`.
+- `database downgrade --target <MigrationId|0>` generates an idempotent rollback script from local `down.sql` artifacts.
 
 ## Recommended Flow
 
@@ -126,9 +127,9 @@ Connection-string resolution order for `--execute`:
 
 The generated script uses a `__sql_orm_migrations` history table. It records migration identity and checksum. Editing an already-applied migration is treated as drift and should fail intentionally.
 
-## Planned Database Downgrade
+## Database Downgrade
 
-`database downgrade` is the next migration workflow planned for Etapa 23. It must be built on the artifacts that already exist today:
+`database downgrade` is being implemented in Etapa 23. Script generation is available and built on the artifacts that already exist today:
 
 - local migration directories under `migrations/`;
 - `down.sql` for rollback SQL;
@@ -142,7 +143,13 @@ The command shape should stay script-first, matching `database update`:
 sql-orm-cli database downgrade --target <MigrationId>
 ```
 
-By default the command should print a SQL script. Execution remains opt-in:
+By default the command prints a SQL script:
+
+```bash
+sql-orm-cli database downgrade --target <MigrationId> > database_downgrade.sql
+```
+
+Execution remains planned for a later Etapa 23 task and is not available yet:
 
 ```bash
 sql-orm-cli database downgrade --target <MigrationId> --execute \
@@ -151,10 +158,10 @@ sql-orm-cli database downgrade --target <MigrationId> --execute \
 
 The target is the last migration that should remain applied after the downgrade. Rolling back everything should require an explicit sentinel target such as `0`; there should be no implicit "previous migration" default.
 
-The script generation flow should be:
+The script generation flow is:
 
 1. Read local migrations in ascending order.
-2. Read applied migrations from `[dbo].[__sql_orm_migrations]` when execution is requested, or generate a script that queries that table when only printing SQL.
+2. Generate SQL guards that query `[dbo].[__sql_orm_migrations]`.
 3. Validate that the requested target is explicit and known, unless it is the empty-database sentinel.
 4. Select applied migrations after the target.
 5. Process those migrations in reverse order.
@@ -164,7 +171,7 @@ The script generation flow should be:
 
 The first implementation should not introduce `migration.rs`. Hand-authored rollback logic belongs in `down.sql` for this phase.
 
-Safety requirements for the implementation phase:
+Safety requirements:
 
 - reject missing target;
 - reject unknown target;
@@ -237,8 +244,8 @@ The script generates an initial migration from the current example model, a no-o
 
 ## Limits
 
-- `down.sql` is not executed automatically yet.
-- `database downgrade` is designed for Etapa 23 but not implemented yet.
+- `down.sql` execution is not available automatically yet; only script generation exists.
+- `database downgrade --execute` is planned for Etapa 23 but not implemented yet.
 - `migration.rs` is outside the current MVP.
 - Composite foreign-key derivation from public attributes is not part of the current derive surface.
 - Review SQL carefully for computed columns, foreign keys, indexes, and explicit renames.

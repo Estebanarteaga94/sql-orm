@@ -11,7 +11,8 @@ pub use diff::{
     diff_column_operations, diff_relational_operations, diff_schema_and_table_operations,
 };
 pub use filesystem::{
-    MigrationEntry, MigrationScaffold, build_database_update_script, create_migration_scaffold,
+    MigrationEntry, MigrationScaffold, build_database_downgrade_script,
+    build_database_update_script, create_migration_scaffold,
     create_migration_scaffold_with_snapshot, latest_migration, list_migrations,
     read_latest_model_snapshot, read_model_snapshot, write_migration_down_sql,
     write_migration_up_sql, write_model_snapshot,
