@@ -328,10 +328,15 @@ mod tests {
                 Expr::from(Customer::email),
                 Expr::value(SqlValue::String("%@example.com".to_string())),
             ),
+            Predicate::like_escaped(
+                Expr::from(Customer::email),
+                Expr::value(SqlValue::String(r"%literal\%%".to_string())),
+                '\\',
+            ),
         ]);
 
         match predicate {
-            Predicate::And(parts) => assert_eq!(parts.len(), 2),
+            Predicate::And(parts) => assert_eq!(parts.len(), 3),
             other => panic!("unexpected predicate shape: {other:?}"),
         }
     }

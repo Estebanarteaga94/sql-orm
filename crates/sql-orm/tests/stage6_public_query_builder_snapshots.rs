@@ -109,7 +109,7 @@ fn public_query_builder_alias_snapshot_preserves_sql_and_parameter_order() {
 
 #[test]
 fn public_query_builder_keeps_untrusted_values_out_of_sql_text() {
-    let malicious = "'; DROP TABLE dbo.snapshot_users; --";
+    let malicious = "'; DROP TABLE dbo.snapshot_users; -- %_[range]";
 
     let compiled = SqlServerCompiler::compile_select(
         &sql_orm::query::SelectQuery::from_entity::<SnapshotUser>()
@@ -123,7 +123,7 @@ fn public_query_builder_keeps_untrusted_values_out_of_sql_text() {
     assert_eq!(compiled.params.len(), 3);
     assert_eq!(
         compiled.params[0],
-        SqlValue::String(format!("%{malicious}%"))
+        SqlValue::String(r"%'; DROP TABLE dbo.snapshot\_users; -- \%\_\[range\]%".to_string())
     );
     assert_eq!(compiled.params[1], SqlValue::I64(0));
     assert_eq!(compiled.params[2], SqlValue::I64(5));

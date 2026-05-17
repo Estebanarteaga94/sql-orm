@@ -1057,9 +1057,10 @@ mod tests {
         );
         assert_eq!(
             DerivedUser::email.contains("@example.com"),
-            Predicate::like(
+            Predicate::like_escaped(
                 Expr::from(DerivedUser::email),
-                Expr::value(SqlValue::String("%@example.com%".to_string()))
+                Expr::value(SqlValue::String("%@example.com%".to_string())),
+                '\\'
             )
         );
         assert_eq!(
@@ -1071,9 +1072,10 @@ mod tests {
                 .contains("@example.com")
                 .and(DerivedUser::display_name.is_not_null()),
             Predicate::and(vec![
-                Predicate::like(
+                Predicate::like_escaped(
                     Expr::from(DerivedUser::email),
-                    Expr::value(SqlValue::String("%@example.com%".to_string()))
+                    Expr::value(SqlValue::String("%@example.com%".to_string())),
+                    '\\'
                 ),
                 Predicate::is_not_null(Expr::from(DerivedUser::display_name))
             ])

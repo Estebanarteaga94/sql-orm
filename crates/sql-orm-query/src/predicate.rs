@@ -9,6 +9,7 @@ pub enum Predicate {
     Lt(Expr, Expr),
     Lte(Expr, Expr),
     Like(Expr, Expr),
+    LikeEscaped(Expr, Expr, char),
     IsNull(Expr),
     IsNotNull(Expr),
     And(Vec<Predicate>),
@@ -43,6 +44,10 @@ impl Predicate {
 
     pub const fn like(left: Expr, right: Expr) -> Self {
         Self::Like(left, right)
+    }
+
+    pub const fn like_escaped(left: Expr, right: Expr, escape: char) -> Self {
+        Self::LikeEscaped(left, right, escape)
     }
 
     pub const fn is_null(expr: Expr) -> Self {

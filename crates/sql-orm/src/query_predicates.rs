@@ -1,6 +1,8 @@
 use crate::AliasedEntityColumn;
-use sql_orm_core::{Entity, EntityColumn, SqlTypeMapping};
+use sql_orm_core::{Entity, EntityColumn, SqlTypeMapping, SqlValue};
 use sql_orm_query::{Expr, Predicate};
+
+const LIKE_ESCAPE_CHAR: char = '\\';
 
 // The plan maestro fija explícitamente `is_null` e `is_not_null` como API pública.
 #[allow(clippy::wrong_self_convention)]
@@ -92,26 +94,35 @@ impl<E: Entity> EntityColumnPredicateExt<E> for EntityColumn<E> {
     }
 
     fn contains(self, value: impl Into<String>) -> Predicate {
-        Predicate::like(
+        Predicate::like_escaped(
             Expr::from(self),
-            Expr::value(sql_orm_core::SqlValue::String(format!(
+            Expr::value(SqlValue::String(format!(
                 "%{}%",
-                value.into()
+                escape_like_literal(value.into())
             ))),
+            LIKE_ESCAPE_CHAR,
         )
     }
 
     fn starts_with(self, value: impl Into<String>) -> Predicate {
-        Predicate::like(
+        Predicate::like_escaped(
             Expr::from(self),
-            Expr::value(sql_orm_core::SqlValue::String(format!("{}%", value.into()))),
+            Expr::value(SqlValue::String(format!(
+                "{}%",
+                escape_like_literal(value.into())
+            ))),
+            LIKE_ESCAPE_CHAR,
         )
     }
 
     fn ends_with(self, value: impl Into<String>) -> Predicate {
-        Predicate::like(
+        Predicate::like_escaped(
             Expr::from(self),
-            Expr::value(sql_orm_core::SqlValue::String(format!("%{}", value.into()))),
+            Expr::value(SqlValue::String(format!(
+                "%{}",
+                escape_like_literal(value.into())
+            ))),
+            LIKE_ESCAPE_CHAR,
         )
     }
 }
@@ -168,33 +179,56 @@ impl<E: Entity> EntityColumnPredicateExt<E> for AliasedEntityColumn<E> {
     }
 
     fn contains(self, value: impl Into<String>) -> Predicate {
-        Predicate::like(
+        Predicate::like_escaped(
             Expr::from(self),
-            Expr::value(sql_orm_core::SqlValue::String(format!(
+            Expr::value(SqlValue::String(format!(
                 "%{}%",
-                value.into()
+                escape_like_literal(value.into())
             ))),
+            LIKE_ESCAPE_CHAR,
         )
     }
 
     fn starts_with(self, value: impl Into<String>) -> Predicate {
-        Predicate::like(
+        Predicate::like_escaped(
             Expr::from(self),
-            Expr::value(sql_orm_core::SqlValue::String(format!("{}%", value.into()))),
+            Expr::value(SqlValue::String(format!(
+                "{}%",
+                escape_like_literal(value.into())
+            ))),
+            LIKE_ESCAPE_CHAR,
         )
     }
 
     fn ends_with(self, value: impl Into<String>) -> Predicate {
-        Predicate::like(
+        Predicate::like_escaped(
             Expr::from(self),
-            Expr::value(sql_orm_core::SqlValue::String(format!("%{}", value.into()))),
+            Expr::value(SqlValue::String(format!(
+                "%{}",
+                escape_like_literal(value.into())
+            ))),
+            LIKE_ESCAPE_CHAR,
         )
     }
 }
 
+fn escape_like_literal(value: impl AsRef<str>) -> String {
+    let value = value.as_ref();
+    let mut escaped = String::with_capacity(value.len());
+
+    for ch in value.chars() {
+        if matches!(ch, LIKE_ESCAPE_CHAR | '%' | '_' | '[' | ']') {
+            escaped.push(LIKE_ESCAPE_CHAR);
+        }
+        escaped.push(ch);
+    }
+
+    escaped
+}
+
 #[cfg(test)]
 mod tests {
-    use super::EntityColumnPredicateExt;
+    use super::{EntityColumnPredicateExt, LIKE_ESCAPE_CHAR};
     use crate::EntityColumnAliasExt;
     use sql_orm_core::{
         ColumnMetadata, Entity, EntityColumn, EntityMetadata, PrimaryKeyMetadata, SqlServerType,
@@ -330,23 +364,44 @@ mod tests {
 
         assert_eq!(
             TestEntity::name.contains("ana"),
-            Predicate::like(
+            Predicate::like_escaped(
                 expected_column.clone(),
-                Expr::Value(SqlValue::String("%ana%".to_string()))
+                Expr::Value(SqlValue::String("%ana%".to_string())),
+                LIKE_ESCAPE_CHAR
             )
         );
         assert_eq!(
             TestEntity::name.starts_with("ana"),
-            Predicate::like(
+            Predicate::like_escaped(
                 expected_column.clone(),
-                Expr::Value(SqlValue::String("ana%".to_string()))
+                Expr::Value(SqlValue::String("ana%".to_string())),
+                LIKE_ESCAPE_CHAR
             )
         );
         assert_eq!(
             TestEntity::name.ends_with("ana"),
-            Predicate::like(
+            Predicate::like_escaped(
                 expected_column,
-                Expr::Value(SqlValue::String("%ana".to_string()))
+                Expr::Value(SqlValue::String("%ana".to_string())),
+                LIKE_ESCAPE_CHAR
+            )
+        );
+    }
+
+    #[test]
+    fn string_predicate_methods_escape_like_wildcards_and_ranges() {
+        let expected_column = Expr::Column(ColumnRef::new(
+            TableRef::new("dbo", "test_entities"),
+            "name",
+            "name",
+        ));
+
+        assert_eq!(
+            TestEntity::name.contains(r"a%_b[c]\d"),
+            Predicate::like_escaped(
+                expected_column,
+                Expr::Value(SqlValue::String(r"%a\%\_b\[c\]\\d%".to_string())),
+                LIKE_ESCAPE_CHAR
             )
         );
     }
@@ -361,9 +416,10 @@ mod tests {
 
         assert_eq!(
             TestEntity::name.aliased("t").contains("ana"),
-            Predicate::like(
+            Predicate::like_escaped(
                 expected_column.clone(),
-                Expr::Value(SqlValue::String("%ana%".to_string()))
+                Expr::Value(SqlValue::String("%ana%".to_string())),
+                LIKE_ESCAPE_CHAR
             )
         );
         assert_eq!(

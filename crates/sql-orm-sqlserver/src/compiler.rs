@@ -679,6 +679,9 @@ fn compile_predicate(
         Predicate::Lt(left, right) => compile_comparison(left, "<", right, parameters),
         Predicate::Lte(left, right) => compile_comparison(left, "<=", right, parameters),
         Predicate::Like(left, right) => compile_comparison(left, "LIKE", right, parameters),
+        Predicate::LikeEscaped(left, right, escape) => {
+            compile_like_escaped(left, right, *escape, parameters)
+        }
         Predicate::IsNull(expr) => Ok(format!("({} IS NULL)", compile_expr(expr, parameters)?)),
         Predicate::IsNotNull(expr) => {
             Ok(format!("({} IS NOT NULL)", compile_expr(expr, parameters)?))
@@ -774,6 +777,35 @@ fn compile_comparison(
         compile_expr(left, parameters)?,
         compile_expr(right, parameters)?,
     ))
+}
+
+fn compile_like_escaped(
+    left: &Expr,
+    right: &Expr,
+    escape: char,
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    validate_like_escape_char(escape)?;
+    Ok(format!(
+        "({} LIKE {} ESCAPE {})",
+        compile_expr(left, parameters)?,
+        compile_expr(right, parameters)?,
+        quote_like_escape_literal(escape),
+    ))
+}
+
+fn validate_like_escape_char(escape: char) -> Result<(), OrmError> {
+    if !escape.is_ascii() || escape == '\'' || escape.is_ascii_alphanumeric() {
+        return Err(OrmError::new(
+            "SQL Server LIKE ESCAPE character must be a single non-alphanumeric ASCII character other than quote",
+        ));
+    }
+
+    Ok(())
+}
+
+fn quote_like_escape_literal(escape: char) -> String {
+    format!("N'{escape}'")
 }
 
 fn compile_logical(
@@ -1201,6 +1233,42 @@ mod tests {
                 SqlValue::I64(20),
                 SqlValue::I64(20),
             ]
+        );
+    }
+
+    #[test]
+    fn compiles_escaped_like_predicate_with_escape_clause() {
+        let query = SelectQuery::from_entity::<Customer>().filter(Predicate::like_escaped(
+            Expr::from(Customer::email),
+            Expr::value(SqlValue::String(r"%a\%\_b\[c\]\\d%".to_string())),
+            '\\',
+        ));
+
+        let compiled = SqlServerCompiler::compile_select(&query).unwrap();
+
+        assert_eq!(
+            compiled.sql,
+            r"SELECT * FROM [sales].[customers] WHERE ([sales].[customers].[email] LIKE @P1 ESCAPE N'\')"
+        );
+        assert_eq!(
+            compiled.params,
+            vec![SqlValue::String(r"%a\%\_b\[c\]\\d%".to_string())]
+        );
+    }
+
+    #[test]
+    fn rejects_unsafe_like_escape_characters() {
+        let query = SelectQuery::from_entity::<Customer>().filter(Predicate::like_escaped(
+            Expr::from(Customer::email),
+            Expr::value(SqlValue::String("%literal%".to_string())),
+            '\'',
+        ));
+
+        let error = SqlServerCompiler::compile_select(&query).unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "SQL Server LIKE ESCAPE character must be a single non-alphanumeric ASCII character other than quote"
         );
     }
 

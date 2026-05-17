@@ -63,7 +63,7 @@ fn public_projection_sql_preserves_aliases_and_parameter_order() {
 LOWER([dbo].[sql_orm_public_projections].[name]) AS [lower_name] \
 FROM [dbo].[sql_orm_public_projections] \
 WHERE (([dbo].[sql_orm_public_projections].[active] = @P1) \
-AND ([dbo].[sql_orm_public_projections].[name] LIKE @P2)) \
+AND ([dbo].[sql_orm_public_projections].[name] LIKE @P2 ESCAPE N'\\')) \
 ORDER BY [dbo].[sql_orm_public_projections].[id] ASC \
 OFFSET @P3 ROWS FETCH NEXT @P4 ROWS ONLY\n\
 Params:\n\

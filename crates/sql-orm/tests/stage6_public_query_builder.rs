@@ -50,9 +50,10 @@ fn public_query_builder_extensions_produce_expected_ast() {
                     Expr::from(QueryUser::active),
                     Expr::value(SqlValue::Bool(true)),
                 ),
-                Predicate::like(
+                Predicate::like_escaped(
                     Expr::from(QueryUser::email),
                     Expr::value(SqlValue::String("%@example.com%".to_string())),
+                    '\\',
                 ),
             ]))
             .order_by(OrderBy::new(
@@ -80,9 +81,10 @@ fn public_predicate_composition_flattens_logical_groups() {
                     Expr::from(QueryUser::active),
                     Expr::value(SqlValue::Bool(true)),
                 ),
-                Predicate::like(
+                Predicate::like_escaped(
                     Expr::from(QueryUser::email),
                     Expr::value(SqlValue::String("%@example.com%".to_string())),
+                    '\\',
                 ),
                 Predicate::is_not_null(Expr::from(QueryUser::email)),
             ]),
