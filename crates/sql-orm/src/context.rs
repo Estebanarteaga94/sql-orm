@@ -1012,15 +1012,39 @@ impl<E: Entity> DbSet<E> {
     ) -> Result<(), OrmError>
     where
         E: EntityPrimaryKey + IncludeCollection<J>,
-        J: FromRow + Send + SoftDeleteEntity + TenantScopedEntity,
+        J: Clone
+            + EntityPrimaryKey
+            + FromRow
+            + Send
+            + SoftDeleteEntity
+            + Sync
+            + TenantScopedEntity
+            + 'static,
     {
         let related = self
             .explicit_collection_query::<J>(tracked.current(), navigation)?
             .all()
             .await?;
+        let related = self.identity_mapped_navigation_values(related)?;
         tracked
             .current_mut_without_state_change()
             .set_included_collection(navigation, related)
+    }
+
+    fn identity_mapped_navigation_values<J>(&self, values: Vec<J>) -> Result<Vec<J>, OrmError>
+    where
+        J: Entity + EntityPrimaryKey + Clone + Send + Sync + 'static,
+    {
+        values
+            .into_iter()
+            .map(|value| {
+                let key = value.primary_key_value()?;
+                Ok(self
+                    .tracking_registry
+                    .current_snapshot_for_key::<J>(key)
+                    .unwrap_or(value))
+            })
+            .collect()
     }
 
     #[doc(hidden)]
@@ -3078,6 +3102,39 @@ mod tests {
         assert_eq!(registry.tracked_for::<ExplicitLoadRoot>().len(), 1);
         assert_eq!(registry.tracked_for::<ExplicitLoadChild>().len(), 0);
         assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[test]
+    fn tracked_navigation_values_reuse_identity_map_snapshots_when_available() {
+        let dbset = DbSet::<TestEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked_related = Tracked::from_loaded(ExplicitLoadRoot {
+            id: 7,
+            children_loaded: 1,
+        });
+        tracked_related
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+        tracked_related.current_mut().children_loaded = 3;
+
+        let values = dbset
+            .identity_mapped_navigation_values(vec![
+                ExplicitLoadRoot {
+                    id: 7,
+                    children_loaded: 0,
+                },
+                ExplicitLoadRoot {
+                    id: 8,
+                    children_loaded: 2,
+                },
+            ])
+            .unwrap();
+
+        assert_eq!(values[0].id, 7);
+        assert_eq!(values[0].children_loaded, 3);
+        assert_eq!(values[1].id, 8);
+        assert_eq!(values[1].children_loaded, 2);
+        assert_eq!(registry.tracked_for::<ExplicitLoadRoot>().len(), 1);
     }
 
     #[test]

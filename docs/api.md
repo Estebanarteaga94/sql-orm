@@ -237,7 +237,11 @@ Explicit collection loading is available from `DbSet<E>`:
 This first explicit loading cut supports `has_many` navigations where the root
 entity has a single-column primary key and the navigation local column is that
 primary key. The tracked variant attaches the collection without marking the
-tracked entity as modified.
+tracked entity as modified. When a related entity is already present in the
+tracking registry, `load_collection_tracked(...)` attaches the registry-owned
+current snapshot for that related identity instead of the freshly materialized
+row. Related rows that are not already tracked remain ordinary values and are
+not registered automatically.
 
 Navigation graph tracking remains intentionally narrow. Includes return
 ordinary entity values and do not register included graphs automatically.
@@ -249,13 +253,14 @@ Many-to-many link changes follow the same rule: insert, update or delete the
 explicit join entity rows directly. There is no direct collection navigation
 whose mutations are translated into link-table updates.
 
-The identity map has an initial tracking-only cut: if `find_tracked(...)`
+The identity map has an initial tracking-focused cut: if `find_tracked(...)`
 loads a persisted identity whose previous wrapper was dropped but whose entry
 remains in the context registry, the returned wrapper reattaches to the
 registry-owned snapshot instead of creating a duplicate. Multiple live wrappers
-for the same persisted identity still return an error. Sharing canonical
-instances with `include`, `include_many` and explicit navigation loads remains
-future work.
+for the same persisted identity still return an error. `load_collection_tracked(...)`
+also consults those snapshots for already tracked related rows. Sharing
+canonical instances with `include`, `include_many` and ordinary
+`load_collection(...)` remains future work.
 
 Navigation includes are not projection builders. After `include(...)` or
 `include_many(...)`, the returned builder does not expose `select(...)`,

@@ -325,7 +325,10 @@ assert_eq!(user.state(), EntityState::Unchanged);
 ```
 
 The tracked variant attaches the collection without marking the root as
-`Modified`. Related entities are not registered in the tracking registry.
+`Modified`. If a related entity is already tracked in the same context,
+`load_collection_tracked(...)` uses the registry-owned current snapshot for
+that related identity. Related entities that are not already tracked are not
+registered automatically.
 
 The current explicit loading cut supports `has_many` navigations where the root
 has a simple primary key and the navigation local column is that primary key.

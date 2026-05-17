@@ -645,6 +645,29 @@ impl TrackingRegistry {
             .map(|snapshots| (snapshots.original.clone(), snapshots.current.clone()))
     }
 
+    pub(crate) fn current_snapshot_for_key<E: Entity + Clone + Send + Sync + 'static>(
+        &self,
+        key: SqlValue,
+    ) -> Option<E> {
+        let identity = TrackedIdentity::for_entity::<E>(TrackedPrimaryKeyIdentity::Simple(key));
+        let mut state = self.state.lock().expect("tracking registry mutex poisoned");
+        let entry = state
+            .entries
+            .iter_mut()
+            .find(|entry| entry.identity == identity)?;
+
+        if entry.wrapper_attached {
+            unsafe {
+                (entry.sync_current_from_wrapper)(&mut entry.snapshots, entry.inner_address);
+            }
+        }
+
+        entry
+            .snapshots
+            .downcast_ref::<TrackingSnapshots<E>>()
+            .map(|snapshots| snapshots.current.clone())
+    }
+
     pub fn clear(&self) {
         self.state
             .lock()

@@ -108,6 +108,10 @@ As of 2026-05-07, the first registry slice is implemented:
   `find_tracked(...)`: the new wrapper receives the registry-owned
   original/current snapshots and state, while a second live wrapper for the
   same identity still returns the existing duplicate-tracking `OrmError`.
+- `load_collection_tracked(...)` now consults the registry for related entities
+  that are already tracked and attaches their registry-owned current snapshots
+  to the navigation collection, without registering newly materialized related
+  rows automatically.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current
@@ -213,7 +217,9 @@ Current rules:
 - `include(...)` and `include_many(...)` materialize ordinary entity values;
   they do not automatically register roots or related rows in the tracker.
 - `load_collection_tracked(...)` attaches a collection to an already tracked
-  root without changing the root state to `Modified`.
+  root without changing the root state to `Modified`; already tracked related
+  rows are attached from registry-owned current snapshots when their identity
+  is present.
 - The same no-modification rule applies to single navigation assignment through
   the generated `IncludeNavigation<T>` contract.
 - Related entities assigned into `Navigation<T>`, `LazyNavigation<T>`,
@@ -224,9 +230,10 @@ Current rules:
 
 The future identity map must be context-owned and shared by tracked roots,
 included entities and explicit loads. Registry-owned pending snapshots remove
-the immediate wrapper-lifetime blocker, but identity-map behavior remains a
-separate Etapa 21 task because it needs canonical instance semantics across
-tracking and navigation materialization.
+the immediate wrapper-lifetime blocker, and `load_collection_tracked(...)` now
+reuses already tracked related snapshots. `include(...)`, `include_many(...)`
+and ordinary `load_collection(...)` still need canonical instance semantics
+before graph materialization can be called complete.
 
 ## Future Relationship Persistence
 

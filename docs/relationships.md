@@ -360,7 +360,9 @@ only at the root entity for this cut:
   they do not automatically register the root or included entities in the
   tracking registry.
 - `load_collection_tracked(...)` attaches a collection to the current tracked
-  root without changing its state from `Unchanged` to `Modified`.
+  root without changing its state from `Unchanged` to `Modified`. If a related
+  row is already tracked in the same context, the collection receives the
+  registry-owned current snapshot for that identity.
 - Related entities loaded into `Navigation<T>`, `Collection<T>`,
   `LazyNavigation<T>` or `LazyCollection<T>` are not automatically tracked.
 - Mutating a navigation field through `tracked.current_mut()` still follows the

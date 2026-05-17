@@ -137,10 +137,12 @@ entities. Until that exists, persist relationship changes through ordinary
 `DbSet` operations on the dependent entity or explicit join entity.
 
 The future stable graph-tracking direction is a context-owned identity map keyed
-by entity type and primary-key values. Root queries, includes and explicit loads
-should reuse a canonical tracked instance for the same row inside one context.
-That design belongs with `Tracked<T>` / `save_changes()` stabilization and must
-not move SQL generation or execution out of their current crates.
+by entity type and primary-key values. `find_tracked(...)` can already
+reattach detached entries, and `load_collection_tracked(...)` can reuse
+registry-owned snapshots for related rows that are already tracked. Full
+canonical reuse for root queries, includes and ordinary explicit loads remains
+tracking stabilization work and must not move SQL generation or execution out
+of their current crates.
 
 ## Query AST
 
