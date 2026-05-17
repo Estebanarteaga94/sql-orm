@@ -9,6 +9,12 @@
 //! behavior for direct connections, policy integration and public compile-time
 //! coverage.
 //!
+//! As of the final Stage 21 documentation pass, wrapper lifetime is no longer
+//! the blocker for pending `Added`, `Modified` and `Deleted` entries:
+//! registry-owned snapshots keep that work available after wrapper drop or
+//! consume. The public label still remains experimental until final release
+//! validation, runtime coverage and the compatibility decision are complete.
+//!
 //! This module intentionally defines only the minimal public contracts for the
 //! future tracking pipeline. In this stage it does not:
 //! - replace the explicit `DbSet`/`ActiveRecord` APIs

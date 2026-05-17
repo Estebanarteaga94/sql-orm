@@ -129,8 +129,10 @@ consumed. `save_changes()` reads registry-owned snapshots, and the internal
 helpers that accept unchanged values or synchronize persisted rows update those
 snapshots even when the original wrapper is gone. The API is still labelled
 experimental until the final Stage 21 validation and documentation pass is
-completed, but wrapper lifetime is no longer required for pending work to be
-persisted.
+completed, but wrapper lifetime is no longer required for pending `Added`,
+`Modified` or `Deleted` work to be persisted. The remaining stability gate is
+release-level validation, including runtime coverage and the explicit
+compatibility decision to remove the label.
 
 Navigation loading does not turn the experimental tracker into a graph tracker.
 Includes materialize ordinary entity values, and explicit tracked collection

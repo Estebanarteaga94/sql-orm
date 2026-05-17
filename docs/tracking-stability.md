@@ -40,6 +40,12 @@ Those facts are the current stabilization baseline, not final release
 guarantees. The public label should remain experimental until the final Stage
 21 validation, release documentation and compatibility decision are complete.
 
+As of the final documentation pass on 2026-05-17, wrapper lifetime is no longer
+the blocker for pending `Added`, `Modified` or `Deleted` work: those entries are
+registry-owned after wrapper drop or consume. The label still remains
+experimental because final Stage 21 validation, runtime coverage, and the
+release compatibility decision are tracked as separate unfinished tasks.
+
 ## Stability Bar
 
 Tracking can be called stable only when the API has deterministic behavior for:

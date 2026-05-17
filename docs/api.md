@@ -173,6 +173,10 @@ Relevant limits:
   context registry after the wrapper is dropped or consumed. Explicit
   `detach_tracked(...)`, `Tracked::detach()` and `clear_tracker()` still remove
   work from the current unit of work.
+- Wrapper lifetime is no longer the blocker for those pending operations; the
+  remaining blocker for removing the experimental label is final Stage 21
+  validation, including runtime coverage and the explicit compatibility
+  decision recorded in the release documentation.
 - A detached loaded identity can reattach to registry-owned original/current
   snapshots. A second live `Tracked<T>` handle for the same persisted identity
   in one context is rejected with `OrmError`.
