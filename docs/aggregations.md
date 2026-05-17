@@ -7,6 +7,9 @@ implemented. Return-type validation, expanded snapshots, runtime SQL Server
 tests and final public documentation are still pending. Joins configured
 explicitly before an aggregation, including fallible navigation joins with
 explicit aliases, are now covered by the public and unit-test surface.
+Ambiguous aggregate aliases and ungrouped group-key expressions are rejected
+through public builder validation where available and SQL Server compiler
+validation before SQL rendering.
 
 This document defines the public aggregation surface that Etapa 24 should
 implement on top of `DbSetQuery`. It remains a design contract for the
@@ -202,6 +205,10 @@ impl<E: Entity> DbSetGroupedQuery<E> {
     where
         P: AggregateProjections;
 
+    pub fn try_select_aggregate<P>(self, projection: P) -> Result<Self, OrmError>
+    where
+        P: AggregateProjections;
+
     pub fn having(self, predicate: AggregatePredicate) -> Self;
     pub fn order_by(self, order: AggregateOrderBy) -> Self;
     pub fn limit(self, limit: u64) -> Self;
@@ -230,14 +237,21 @@ tuple, array, and `Vec`.
 - Group key projections may use their column name as the default alias when the
   expression is an entity column.
 - Non-column group key expressions require an explicit alias.
-- Duplicate aliases are rejected before execution.
+- `try_select_aggregate(...)` rejects empty projection lists, empty aliases and
+  duplicate aliases before execution. `select_aggregate(...)` remains as the
+  infallible builder for compatibility, and the compiler still validates the
+  same conditions before SQL rendering.
 - Grouped queries require at least one group key and at least one projection.
-- Projected non-aggregate expressions must appear in `group_by(...)`.
+- Projected non-aggregate expressions must appear in `group_by(...)`; the same
+  rule applies to group-key expressions used in `HAVING` and aggregate
+  `ORDER BY`.
+- Non-aggregate column expressions on the right side of `HAVING` comparisons
+  must also be grouped.
 - Aggregate projection aliases are the contract consumed by `FromRow` DTOs.
 
-The first cut should prefer runtime validation with clear `OrmError` messages
-inside the builder/compiler. Compile-time rejection can be added only where the
-type system already has enough information without creating a proc-macro DSL.
+The first cut uses runtime validation with clear `OrmError` messages inside
+the builder/compiler. Compile-time rejection can be added only where the type
+system already has enough information without creating a proc-macro DSL.
 
 ## Having
 

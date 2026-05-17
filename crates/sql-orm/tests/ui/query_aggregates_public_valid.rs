@@ -91,10 +91,11 @@ fn main() {
             .query()
             .group_by([Order::customer_id])
             .expect("group_by should accept arrays")
-            .select_aggregate([
+            .try_select_aggregate([
                 AggregateProjection::group_key(Order::customer_id),
                 AggregateProjection::max_as(Order::total_cents, "total_cents"),
             ])
+            .expect("try_select_aggregate should validate aliases")
             .first_as::<OrderTotals>();
 
         let _grouped_navigation_join_future = db

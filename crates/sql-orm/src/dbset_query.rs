@@ -16,6 +16,7 @@ use sql_orm_query::{
     SelectQuery, TableRef,
 };
 use sql_orm_sqlserver::SqlServerCompiler;
+use std::collections::BTreeSet;
 
 #[derive(Clone)]
 /// Fluent query builder bound to one `DbSet<E>`.
@@ -771,6 +772,17 @@ impl<E: Entity> DbSetGroupedQuery<E> {
         self
     }
 
+    /// Selects aggregate projections and validates aliases before execution.
+    pub fn try_select_aggregate<P>(mut self, projection: P) -> Result<Self, OrmError>
+    where
+        P: AggregateProjections,
+    {
+        let projection = projection.into_aggregate_projections();
+        validate_aggregate_projection_aliases(&projection)?;
+        self.aggregate_query.projection = projection;
+        Ok(self)
+    }
+
     /// Adds a `HAVING` predicate over aggregate expressions or group keys.
     pub fn having(mut self, predicate: AggregatePredicate) -> Self {
         self.aggregate_query = self.aggregate_query.having(predicate);
@@ -832,6 +844,31 @@ impl<E: Entity> DbSetGroupedQuery<E> {
             OrmError::new("DbSetGroupedQuery requires an initialized shared connection")
         })
     }
+}
+
+fn validate_aggregate_projection_aliases(
+    projection: &[AggregateProjection],
+) -> Result<(), OrmError> {
+    if projection.is_empty() {
+        return Err(OrmError::new(
+            "select_aggregate requires at least one aggregate projection",
+        ));
+    }
+
+    let mut aliases = BTreeSet::new();
+    for projection in projection {
+        if projection.alias.trim().is_empty() {
+            return Err(OrmError::new("aggregate projection alias cannot be empty"));
+        }
+        if !aliases.insert(projection.alias) {
+            return Err(OrmError::new(format!(
+                "aggregate projection alias `{}` is duplicated",
+                projection.alias
+            )));
+        }
+    }
+
+    Ok(())
 }
 
 impl<E: Entity> core::fmt::Debug for DbSetGroupedQuery<E> {
@@ -1624,7 +1661,7 @@ where
 mod tests {
     use super::{
         DbSetQuery, enforce_include_many_join_row_limit, identity_mapped_navigation_value,
-        tenant_value_matches_column_type,
+        tenant_value_matches_column_type, validate_aggregate_projection_aliases,
     };
     use crate::context::{ActiveTenant, DbSet};
     use crate::page_request::PageRequest;
@@ -3547,6 +3584,43 @@ mod tests {
         assert_eq!(
             error.message(),
             "group_by requires at least one group key expression"
+        );
+    }
+
+    #[test]
+    fn grouped_query_try_select_aggregate_rejects_alias_ambiguity_early() {
+        let grouped = DbSet::<TestEntity>::disconnected()
+            .query()
+            .group_by(TestEntity::id)
+            .unwrap();
+
+        let empty_error = grouped
+            .try_select_aggregate(AggregateProjection::count_as(" "))
+            .unwrap_err();
+        assert_eq!(
+            empty_error.message(),
+            "aggregate projection alias cannot be empty"
+        );
+
+        let grouped = DbSet::<TestEntity>::disconnected()
+            .query()
+            .group_by(TestEntity::id)
+            .unwrap();
+        let duplicate_error = grouped
+            .try_select_aggregate((
+                AggregateProjection::count_as("value"),
+                AggregateProjection::sum_as(TestEntity::id, "value"),
+            ))
+            .unwrap_err();
+        assert_eq!(
+            duplicate_error.message(),
+            "aggregate projection alias `value` is duplicated"
+        );
+
+        let empty_projection_error = validate_aggregate_projection_aliases(&[]).unwrap_err();
+        assert_eq!(
+            empty_projection_error.message(),
+            "select_aggregate requires at least one aggregate projection"
         );
     }
 

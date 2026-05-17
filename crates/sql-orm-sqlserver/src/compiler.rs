@@ -222,6 +222,16 @@ fn validate_aggregate_query(query: &AggregateQuery) -> Result<(), OrmError> {
         ));
     }
 
+    validate_aggregate_projection(&query.projection, &query.group_by)?;
+
+    if let Some(having) = &query.having {
+        validate_aggregate_predicate(having, &query.group_by)?;
+    }
+
+    for order in &query.order_by {
+        validate_aggregate_expr(&order.expr, &query.group_by)?;
+    }
+
     Ok(())
 }
 
@@ -317,6 +327,94 @@ fn compile_aggregate_projection(
         })
         .collect::<Result<Vec<_>, OrmError>>()?;
     Ok(parts.join(", "))
+}
+
+fn validate_aggregate_projection(
+    projection: &[AggregateProjection],
+    group_by: &[Expr],
+) -> Result<(), OrmError> {
+    let mut aliases = BTreeSet::new();
+
+    for projection in projection {
+        if projection.alias.trim().is_empty() {
+            return Err(OrmError::new(
+                "SQL Server aggregate projection alias cannot be empty",
+            ));
+        }
+        if !aliases.insert(projection.alias) {
+            return Err(OrmError::new(format!(
+                "SQL Server aggregate projection alias `{}` is duplicated",
+                projection.alias
+            )));
+        }
+
+        validate_aggregate_expr(&projection.expr, group_by)?;
+    }
+
+    Ok(())
+}
+
+fn validate_aggregate_expr(expr: &AggregateExpr, group_by: &[Expr]) -> Result<(), OrmError> {
+    match expr {
+        AggregateExpr::GroupKey(expr) => validate_group_key(expr, group_by),
+        AggregateExpr::CountAll
+        | AggregateExpr::Count(_)
+        | AggregateExpr::Sum(_)
+        | AggregateExpr::Avg(_)
+        | AggregateExpr::Min(_)
+        | AggregateExpr::Max(_) => Ok(()),
+    }
+}
+
+fn validate_aggregate_predicate(
+    predicate: &AggregatePredicate,
+    group_by: &[Expr],
+) -> Result<(), OrmError> {
+    match predicate {
+        AggregatePredicate::Eq(left, right)
+        | AggregatePredicate::Ne(left, right)
+        | AggregatePredicate::Gt(left, right)
+        | AggregatePredicate::Gte(left, right)
+        | AggregatePredicate::Lt(left, right)
+        | AggregatePredicate::Lte(left, right) => {
+            validate_aggregate_expr(left, group_by)?;
+            validate_non_aggregate_expr_in_grouped_context(right, group_by)
+        }
+        AggregatePredicate::And(predicates) | AggregatePredicate::Or(predicates) => {
+            if predicates.is_empty() {
+                return Err(OrmError::new(
+                    "aggregate logical predicate compilation requires at least one child predicate",
+                ));
+            }
+
+            for predicate in predicates {
+                validate_aggregate_predicate(predicate, group_by)?;
+            }
+            Ok(())
+        }
+        AggregatePredicate::Not(predicate) => validate_aggregate_predicate(predicate, group_by),
+    }
+}
+
+fn validate_non_aggregate_expr_in_grouped_context(
+    expr: &Expr,
+    group_by: &[Expr],
+) -> Result<(), OrmError> {
+    match expr {
+        Expr::Column(_) => validate_group_key(expr, group_by),
+        Expr::Value(_) => Ok(()),
+        Expr::Binary { left, right, .. } => {
+            validate_non_aggregate_expr_in_grouped_context(left, group_by)?;
+            validate_non_aggregate_expr_in_grouped_context(right, group_by)
+        }
+        Expr::Unary { expr, .. } => validate_non_aggregate_expr_in_grouped_context(expr, group_by),
+        Expr::Function { args, .. } => {
+            for arg in args {
+                validate_non_aggregate_expr_in_grouped_context(arg, group_by)?;
+            }
+            Ok(())
+        }
+    }
 }
 
 fn compile_group_by(
@@ -1250,6 +1348,53 @@ mod tests {
         .unwrap_err();
         assert_eq!(
             missing_group_key_error.message(),
+            "SQL Server aggregate group key projection must appear in GROUP BY"
+        );
+
+        let empty_alias_error = SqlServerCompiler::compile_aggregate(
+            &AggregateQuery::from_entity::<Order>().project(vec![AggregateProjection::expr_as(
+                AggregateExpr::count_all(),
+                " ",
+            )]),
+        )
+        .unwrap_err();
+        assert_eq!(
+            empty_alias_error.message(),
+            "SQL Server aggregate projection alias cannot be empty"
+        );
+
+        let ungrouped_having_column_error = SqlServerCompiler::compile_aggregate(
+            &AggregateQuery::from_entity::<Order>()
+                .group_by(vec![Expr::from(Order::customer_id)])
+                .project(vec![
+                    AggregateProjection::group_key(Order::customer_id),
+                    AggregateProjection::count_as("order_count"),
+                ])
+                .having(AggregatePredicate::gt(
+                    AggregateExpr::count_all(),
+                    Expr::from(Order::total_cents),
+                )),
+        )
+        .unwrap_err();
+        assert_eq!(
+            ungrouped_having_column_error.message(),
+            "SQL Server aggregate group key projection must appear in GROUP BY"
+        );
+
+        let ungrouped_order_key_error = SqlServerCompiler::compile_aggregate(
+            &AggregateQuery::from_entity::<Order>()
+                .group_by(vec![Expr::from(Order::customer_id)])
+                .project(vec![
+                    AggregateProjection::group_key(Order::customer_id),
+                    AggregateProjection::count_as("order_count"),
+                ])
+                .order_by(AggregateOrderBy::asc(AggregateExpr::group_key(
+                    Order::total_cents,
+                ))),
+        )
+        .unwrap_err();
+        assert_eq!(
+            ungrouped_order_key_error.message(),
             "SQL Server aggregate group key projection must appear in GROUP BY"
         );
     }
