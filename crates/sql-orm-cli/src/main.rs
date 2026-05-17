@@ -730,7 +730,7 @@ mod tests {
         SchemaSnapshot, TableSnapshot, read_model_snapshot,
     };
     use std::fs;
-    use std::path::PathBuf;
+    use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
 
     fn temp_project_root() -> PathBuf {
@@ -741,6 +741,18 @@ mod tests {
         let path = std::env::temp_dir().join(format!("sql_orm_cli_{unique}"));
         fs::create_dir_all(&path).unwrap();
         path
+    }
+
+    fn write_cli_migration(root: &Path, id: &str, up_sql: &str, down_sql: &str) {
+        let migration_dir = root.join("migrations").join(id);
+        fs::create_dir_all(&migration_dir).unwrap();
+        fs::write(migration_dir.join("up.sql"), up_sql).unwrap();
+        fs::write(migration_dir.join("down.sql"), down_sql).unwrap();
+        fs::write(
+            migration_dir.join("model_snapshot.json"),
+            "{ \"schemas\": [] }",
+        )
+        .unwrap();
     }
 
     fn test_column(
@@ -1582,6 +1594,84 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("database downgrade requires --target <MigrationId|0>"));
+    }
+
+    #[test]
+    fn run_database_downgrade_reports_missing_local_migration_artifacts() {
+        let root = temp_project_root();
+        write_cli_migration(
+            &root,
+            "100_create_customers",
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[customers];",
+        );
+        write_cli_migration(
+            &root,
+            "200_create_orders",
+            "CREATE TABLE [sales].[orders] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[orders];",
+        );
+        fs::remove_file(root.join("migrations/200_create_orders/down.sql")).unwrap();
+
+        let error = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                "100_create_customers".to_string(),
+            ],
+            &root,
+        )
+        .unwrap_err();
+
+        assert!(error.contains("migration `200_create_orders` is missing local down.sql"));
+    }
+
+    #[test]
+    fn run_database_downgrade_rejects_unknown_target_and_empty_payload() {
+        let root = temp_project_root();
+        write_cli_migration(
+            &root,
+            "100_create_customers",
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[customers];",
+        );
+
+        let error = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                "999_missing".to_string(),
+            ],
+            &root,
+        )
+        .unwrap_err();
+        assert!(error.contains("target `999_missing` is not a known local migration"));
+
+        write_cli_migration(
+            &root,
+            "200_create_orders",
+            "CREATE TABLE [sales].[orders] ([id] bigint NOT NULL);",
+            "-- rollback pending\n",
+        );
+
+        let error = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                "100_create_customers".to_string(),
+            ],
+            &root,
+        )
+        .unwrap_err();
+        assert!(
+            error.contains("migration `200_create_orders` has no executable down.sql statements")
+        );
     }
 
     #[test]

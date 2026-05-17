@@ -436,9 +436,9 @@ fn split_sql_statements(sql: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_database_downgrade_script, build_database_update_script, create_migration_scaffold,
-        create_migration_scaffold_with_snapshot, latest_migration, list_migrations,
-        read_latest_model_snapshot, read_model_snapshot, write_migration_down_sql,
+        build_database_downgrade_script, build_database_update_script, checksum_hex,
+        create_migration_scaffold, create_migration_scaffold_with_snapshot, latest_migration,
+        list_migrations, read_latest_model_snapshot, read_model_snapshot, write_migration_down_sql,
         write_migration_up_sql, write_model_snapshot,
     };
     use crate::{ModelSnapshot, SchemaSnapshot};
@@ -735,6 +735,57 @@ mod tests {
         assert!(script.contains("IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations])"));
         assert!(script.contains("history contains entries missing from local migrations"));
         assert!(!script.contains("NOT IN (NULL)"));
+    }
+
+    #[test]
+    fn database_downgrade_requires_explicit_target_and_renders_checksum_guards() {
+        let root = temp_project_root();
+        let orders_up = "CREATE TABLE [sales].[orders] ([id] bigint NOT NULL);";
+        write_local_migration(
+            &root,
+            "100_create_customers",
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[customers];",
+        );
+        write_local_migration(
+            &root,
+            "200_create_orders",
+            orders_up,
+            "DROP TABLE [sales].[orders];",
+        );
+
+        let error = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "   ",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("database downgrade requires an explicit target")
+        );
+
+        let script = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "100_create_customers",
+        )
+        .unwrap();
+        let orders_checksum = checksum_hex(orders_up.as_bytes());
+        let checksum_guard =
+            format!("WHERE [id] = N'200_create_orders' AND [checksum] <> N'{orders_checksum}'");
+
+        assert!(script.contains("N'100_create_customers', N'200_create_orders'"));
+        assert!(script.contains(&checksum_guard));
+        assert!(
+            script
+                .find("sql-orm migration checksum mismatch for 200_create_orders")
+                .unwrap()
+                < script.find("DROP TABLE [sales].[orders]").unwrap()
+        );
+        assert_eq!(script.matches("DROP TABLE [sales].[orders]").count(), 1);
+        assert!(!script.contains("DROP TABLE [sales].[customers]"));
     }
 
     #[test]
