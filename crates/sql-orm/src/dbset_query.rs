@@ -1631,7 +1631,9 @@ mod tests {
     use crate::{
         IncludeCollection, SoftDeleteEntity, TenantScopedEntity, Tracked, TrackingRegistry,
     };
+    use chrono::{NaiveDate, NaiveDateTime};
     use insta::assert_snapshot;
+    use rust_decimal::Decimal;
     use sql_orm_core::{
         ColumnMetadata, Entity, EntityColumn, EntityMetadata, EntityPolicyMetadata, FromRow,
         NavigationKind, NavigationMetadata, OrmError, PrimaryKeyMetadata, Row, SqlServerType,
@@ -3470,6 +3472,66 @@ mod tests {
             missing.message(),
             "scalar aggregate result column was not present"
         );
+    }
+
+    #[test]
+    fn scalar_aggregate_row_validates_supported_return_types_strictly() {
+        struct AggregateTestRow {
+            value: SqlValue,
+        }
+
+        impl Row for AggregateTestRow {
+            fn try_get(&self, column: &str) -> Result<Option<SqlValue>, OrmError> {
+                Ok((column == "value").then(|| self.value.clone()))
+            }
+        }
+
+        let date = NaiveDate::from_ymd_opt(2026, 5, 17).expect("valid date");
+        let datetime: NaiveDateTime = date.and_hms_opt(9, 30, 0).expect("valid datetime");
+        let decimal = Decimal::new(12345, 2);
+
+        let i32_row = super::ScalarAggregateRow::<i32>::from_row(&AggregateTestRow {
+            value: SqlValue::I32(7),
+        })
+        .unwrap();
+        let i64_row = super::ScalarAggregateRow::<i64>::from_row(&AggregateTestRow {
+            value: SqlValue::I64(9),
+        })
+        .unwrap();
+        let f64_row = super::ScalarAggregateRow::<f64>::from_row(&AggregateTestRow {
+            value: SqlValue::F64(10.5),
+        })
+        .unwrap();
+        let decimal_row = super::ScalarAggregateRow::<Decimal>::from_row(&AggregateTestRow {
+            value: SqlValue::Decimal(decimal),
+        })
+        .unwrap();
+        let string_row = super::ScalarAggregateRow::<String>::from_row(&AggregateTestRow {
+            value: SqlValue::String("last".to_string()),
+        })
+        .unwrap();
+        let date_row = super::ScalarAggregateRow::<NaiveDate>::from_row(&AggregateTestRow {
+            value: SqlValue::Date(date),
+        })
+        .unwrap();
+        let datetime_row =
+            super::ScalarAggregateRow::<NaiveDateTime>::from_row(&AggregateTestRow {
+                value: SqlValue::DateTime(datetime),
+            })
+            .unwrap();
+        let mismatch = super::ScalarAggregateRow::<i64>::from_row(&AggregateTestRow {
+            value: SqlValue::I32(7),
+        })
+        .unwrap_err();
+
+        assert_eq!(i32_row.value, Some(7));
+        assert_eq!(i64_row.value, Some(9));
+        assert_eq!(f64_row.value, Some(10.5));
+        assert_eq!(decimal_row.value, Some(decimal));
+        assert_eq!(string_row.value, Some("last".to_string()));
+        assert_eq!(date_row.value, Some(date));
+        assert_eq!(datetime_row.value, Some(datetime));
+        assert_eq!(mismatch.message(), "expected i64 value");
     }
 
     #[test]

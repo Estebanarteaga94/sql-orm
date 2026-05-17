@@ -24,7 +24,9 @@ impl FromRow for OrderTotals {
         Ok(Self {
             customer_id: row.get_required_typed::<i64>("customer_id")?,
             order_count: row.get_required_typed::<i64>("order_count")?,
-            total_cents: row.try_get_typed::<i64>("total_cents")?,
+            total_cents: row
+                .try_get_typed::<Option<i64>>("total_cents")?
+                .flatten(),
         })
     }
 }

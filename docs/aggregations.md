@@ -76,25 +76,21 @@ impl<E: Entity> DbSetQuery<E> {
     pub async fn exists(self) -> Result<bool, OrmError>;
     pub async fn any(self) -> Result<bool, OrmError>;
 
-    pub async fn sum<T, C>(self, column: C) -> Result<Option<T>, OrmError>
+    pub async fn sum<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
     where
-        T: SqlTypeMapping + Send,
-        C: Into<Expr>;
+        T: SqlTypeMapping + Send;
 
-    pub async fn avg<T, C>(self, column: C) -> Result<Option<T>, OrmError>
+    pub async fn avg<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
     where
-        T: SqlTypeMapping + Send,
-        C: Into<Expr>;
+        T: SqlTypeMapping + Send;
 
-    pub async fn min<T, C>(self, column: C) -> Result<Option<T>, OrmError>
+    pub async fn min<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
     where
-        T: SqlTypeMapping + Send,
-        C: Into<Expr>;
+        T: SqlTypeMapping + Send;
 
-    pub async fn max<T, C>(self, column: C) -> Result<Option<T>, OrmError>
+    pub async fn max<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
     where
-        T: SqlTypeMapping + Send,
-        C: Into<Expr>;
+        T: SqlTypeMapping + Send;
 }
 ```
 
@@ -106,6 +102,27 @@ Return rules:
   return `NULL` for empty filtered sets and for nullable expressions.
 - The caller chooses `T` explicitly because current `EntityColumn<E>` values do
   not carry the Rust field type at the type level.
+
+The scalar materializer is intentionally strict: `T` must match the
+`SqlValue` shape returned by the Tiberius adapter after SQL Server has applied
+its aggregate type rules. `NULL` is handled before `SqlTypeMapping` and becomes
+`Ok(None)`.
+
+| SQL Server aggregate result shape | Expected Rust `T` |
+| --- | --- |
+| `int`, `smallint`, `tinyint` values exposed as `SqlValue::I32` | `i32` |
+| `bigint` values exposed as `SqlValue::I64` | `i64` |
+| `float` values exposed as `SqlValue::F64` | `f64` |
+| `decimal` / `numeric` / `money` values exposed as `SqlValue::Decimal` | `rust_decimal::Decimal` |
+| `nvarchar` values exposed as `SqlValue::String` | `String` |
+| `date` values exposed as `SqlValue::Date` | `chrono::NaiveDate` |
+| `datetime2` / compatible datetime values exposed as `SqlValue::DateTime` | `chrono::NaiveDateTime` |
+| SQL `NULL` from an empty filtered set or nullable expression | outer `Option<T>::None` |
+
+For grouped DTOs, use `Option<T>` fields for aggregate aliases that can be
+`NULL`. Manual `FromRow` implementations should read those aliases with
+`row.try_get_typed::<Option<T>>("alias")?.flatten()`; `#[derive(FromRow)]`
+uses the same nullable contract for optional fields.
 
 `count()` should be reimplemented on top of the aggregate query path so it
 preserves joins and effective filters. It should ignore ordering and
