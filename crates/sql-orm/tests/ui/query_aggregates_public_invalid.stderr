@@ -1,0 +1,37 @@
+error[E0599]: no method named `all` found for struct `DbSetGroupedQuery<E>` in the current scope
+  --> tests/ui/query_aggregates_public_invalid.rs:27:47
+   |
+27 |         let _entity_materialization = grouped.all();
+   |                                               ^^^
+   |
+help: there is a method `all_as` with a similar name
+   |
+27 |         let _entity_materialization = grouped.all_as();
+   |                                                  +++
+
+error[E0277]: the trait bound `sql_orm::AggregateExpr: AggregateProjections` is not satisfied
+  --> tests/ui/query_aggregates_public_invalid.rs:34:31
+   |
+34 |             .select_aggregate(AggregateExpr::sum(Order::total_cents));
+   |              ---------------- ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ the trait `AggregateProjections` is not implemented for `sql_orm::AggregateExpr`
+   |              |
+   |              required by a bound introduced by this call
+   |
+   = help: the following other types implement trait `AggregateProjections`:
+             (A, B)
+             (A, B, C)
+             (A, B, C, D)
+             (A, B, C, D, E)
+             (A, B, C, D, E, F)
+             (A, B, C, D, E, F, G)
+             (A, B, C, D, E, F, G, H)
+             (A, B, C, D, E, F, G, H, I)
+           and $N others
+note: required by a bound in `DbSetGroupedQuery::<E>::select_aggregate`
+  --> src/dbset_query.rs
+   |
+   |     pub fn select_aggregate<P>(mut self, projection: P) -> Self
+   |            ---------------- required by a bound in this associated function
+   |     where
+   |         P: AggregateProjections,
+   |            ^^^^^^^^^^^^^^^^^^^^ required by this bound in `DbSetGroupedQuery::<E>::select_aggregate`

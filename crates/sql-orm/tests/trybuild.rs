@@ -74,5 +74,6 @@ fn entity_derive_ui() {
     tests.compile_fail("tests/ui/entity_soft_delete_column_collision.rs");
     tests.compile_fail("tests/ui/dbset_query_ast_bypass_unavailable.rs");
     tests.compile_fail("tests/ui/dbset_include_projection_unavailable.rs");
+    tests.compile_fail("tests/ui/query_aggregates_public_invalid.rs");
     tests.compile_fail("tests/ui/tracking_registry_internal_unavailable.rs");
 }
