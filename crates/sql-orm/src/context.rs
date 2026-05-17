@@ -43,6 +43,7 @@ use sql_orm_tiberius::{MssqlPool, MssqlPooledConnection};
 pub struct SharedConnection {
     inner: Arc<SharedConnectionInner>,
     runtime: Arc<SharedConnectionRuntime>,
+    transaction_scope: Option<usize>,
 }
 
 /// Active tenant value currently attached to a shared connection.
@@ -82,6 +83,8 @@ struct SharedConnectionRuntime {
     soft_delete_request_values: Option<Arc<SoftDeleteRequestValues>>,
     active_tenant: Option<ActiveTenant>,
     transaction_depth: Arc<AtomicUsize>,
+    active_transaction_scope: Arc<AtomicUsize>,
+    next_transaction_scope: Arc<AtomicUsize>,
     #[cfg(feature = "pool-bb8")]
     pinned_pool_connection: Arc<tokio::sync::Mutex<Option<MssqlPooledConnection<'static>>>>,
 }
@@ -148,6 +151,7 @@ impl SharedConnection {
                 tokio::sync::Mutex::new(connection),
             ))),
             runtime: Arc::new(SharedConnectionRuntime::default()),
+            transaction_scope: None,
         }
     }
 
@@ -160,6 +164,7 @@ impl SharedConnection {
         Self {
             inner: Arc::new(SharedConnectionInner::Pool(Box::new(pool))),
             runtime: Arc::new(SharedConnectionRuntime::default()),
+            transaction_scope: None,
         }
     }
 
@@ -178,9 +183,12 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -198,9 +206,12 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -224,9 +235,12 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -244,9 +258,12 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -265,9 +282,12 @@ impl SharedConnection {
                 soft_delete_request_values: Some(Arc::new(request_values)),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -292,9 +312,12 @@ impl SharedConnection {
                 soft_delete_request_values: None,
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -313,9 +336,12 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: Some(ActiveTenant::from_context(&tenant)),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -330,9 +356,12 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: None,
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                active_transaction_scope: Arc::clone(&self.runtime.active_transaction_scope),
+                next_transaction_scope: Arc::clone(&self.runtime.next_transaction_scope),
                 #[cfg(feature = "pool-bb8")]
                 pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
+            transaction_scope: self.transaction_scope,
         }
     }
 
@@ -341,6 +370,7 @@ impl SharedConnection {
     /// Direct connections lock the shared mutex. Pooled connections acquire a
     /// connection from the pool for the lifetime of the returned guard.
     pub async fn lock(&self) -> Result<SharedConnectionGuard<'_>, OrmError> {
+        self.ensure_can_use_active_transaction_scope()?;
         match self.inner.as_ref() {
             SharedConnectionInner::Direct(connection) => {
                 Ok(SharedConnectionGuard::Direct(connection.lock().await))
@@ -361,7 +391,7 @@ impl SharedConnection {
     #[doc(hidden)]
     pub async fn run_transaction<F, Fut, T>(&self, operation: F) -> Result<T, OrmError>
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(SharedConnection) -> Fut,
         Fut: Future<Output = Result<T, OrmError>>,
     {
         if self.is_transaction_active() {
@@ -371,23 +401,28 @@ impl SharedConnection {
         }
         ensure_transactions_supported(self.kind())?;
 
+        let transaction_scope = self.allocate_transaction_scope();
+        let transaction_connection = self.with_transaction_scope(transaction_scope);
+
         #[cfg(feature = "pool-bb8")]
         if let SharedConnectionInner::Pool(pool) = self.inner.as_ref() {
-            return self.run_pooled_transaction(pool, operation).await;
+            return transaction_connection
+                .run_pooled_transaction(pool, operation)
+                .await;
         }
 
-        let mut connection = self.lock().await?;
+        let mut connection = transaction_connection.lock().await?;
         connection.begin_transaction_scope().await?;
         let retry_options = connection.replace_retry_options(MssqlRetryOptions::disabled());
         drop(connection);
 
-        self.enter_transaction_scope();
+        self.enter_transaction_scope(transaction_scope);
 
-        let result = operation().await;
+        let result = operation(transaction_connection.clone()).await;
 
         match result {
             Ok(value) => {
-                let mut connection = self.lock().await?;
+                let mut connection = transaction_connection.lock().await?;
                 let commit_result = connection.commit_transaction().await;
                 connection.replace_retry_options(retry_options);
                 self.exit_transaction_scope();
@@ -395,7 +430,7 @@ impl SharedConnection {
                 Ok(value)
             }
             Err(error) => {
-                let mut connection = self.lock().await?;
+                let mut connection = transaction_connection.lock().await?;
                 let rollback_result = connection.rollback_transaction().await;
                 connection.replace_retry_options(retry_options);
                 self.exit_transaction_scope();
@@ -412,7 +447,7 @@ impl SharedConnection {
         operation: F,
     ) -> Result<T, OrmError>
     where
-        F: FnOnce() -> Fut,
+        F: FnOnce(SharedConnection) -> Fut,
         Fut: Future<Output = Result<T, OrmError>>,
     {
         self.install_pinned_pool_connection(pool.acquire_owned().await?)
@@ -434,8 +469,11 @@ impl SharedConnection {
         }
 
         let retry_options = self.disable_pinned_pool_retry().await?;
-        self.enter_transaction_scope();
-        let result = operation().await;
+        let transaction_scope = self
+            .transaction_scope
+            .expect("pooled transaction handle must be scoped");
+        self.enter_transaction_scope(transaction_scope);
+        let result = operation(self.clone()).await;
 
         match result {
             Ok(value) => {
@@ -486,7 +524,45 @@ impl SharedConnection {
         self.runtime.transaction_depth.load(Ordering::SeqCst) > 0
     }
 
-    fn enter_transaction_scope(&self) {
+    fn allocate_transaction_scope(&self) -> usize {
+        let scope = self
+            .runtime
+            .next_transaction_scope
+            .fetch_add(1, Ordering::SeqCst)
+            .wrapping_add(1);
+
+        if scope == 0 { 1 } else { scope }
+    }
+
+    fn with_transaction_scope(&self, scope: usize) -> Self {
+        Self {
+            inner: Arc::clone(&self.inner),
+            runtime: Arc::clone(&self.runtime),
+            transaction_scope: Some(scope),
+        }
+    }
+
+    fn active_transaction_scope(&self) -> Option<usize> {
+        match self.runtime.active_transaction_scope.load(Ordering::SeqCst) {
+            0 => None,
+            scope => Some(scope),
+        }
+    }
+
+    fn ensure_can_use_active_transaction_scope(&self) -> Result<(), OrmError> {
+        if transaction_scope_allows_lock(self.active_transaction_scope(), self.transaction_scope) {
+            Ok(())
+        } else {
+            Err(OrmError::new(
+                "a transaction is active on this shared connection; use the transaction context passed to db.transaction(...)",
+            ))
+        }
+    }
+
+    fn enter_transaction_scope(&self, scope: usize) {
+        self.runtime
+            .active_transaction_scope
+            .store(scope, Ordering::SeqCst);
         self.runtime
             .transaction_depth
             .fetch_add(1, Ordering::SeqCst);
@@ -498,6 +574,9 @@ impl SharedConnection {
             Ordering::SeqCst,
             |depth| Some(depth.saturating_sub(1)),
         );
+        self.runtime
+            .active_transaction_scope
+            .store(0, Ordering::SeqCst);
     }
 
     #[cfg(feature = "pool-bb8")]
@@ -597,6 +676,10 @@ impl SharedConnection {
     pub fn active_tenant(&self) -> Option<ActiveTenant> {
         self.runtime.active_tenant.clone()
     }
+}
+
+fn transaction_scope_allows_lock(active_scope: Option<usize>, handle_scope: Option<usize>) -> bool {
+    active_scope.is_none() || active_scope == handle_scope
 }
 
 fn ensure_transactions_supported(kind: SharedConnectionKind) -> Result<(), OrmError> {
@@ -705,9 +788,8 @@ pub trait DbContext: Sized {
     {
         let shared_connection = self.shared_connection();
         async move {
-            let transaction_connection = shared_connection.clone();
             shared_connection
-                .run_transaction(|| async move {
+                .run_transaction(|transaction_connection| async move {
                     let transaction_context = Self::from_shared_connection(transaction_connection);
                     operation(transaction_context).await
                 })
@@ -3251,6 +3333,56 @@ mod tests {
                 .transaction_depth
                 .load(std::sync::atomic::Ordering::SeqCst),
             1
+        );
+    }
+
+    #[test]
+    fn active_transaction_scope_only_allows_matching_transaction_handle() {
+        assert!(super::transaction_scope_allows_lock(None, None));
+        assert!(super::transaction_scope_allows_lock(None, Some(7)));
+        assert!(super::transaction_scope_allows_lock(Some(7), Some(7)));
+        assert!(!super::transaction_scope_allows_lock(Some(7), None));
+        assert!(!super::transaction_scope_allows_lock(Some(7), Some(8)));
+    }
+
+    #[test]
+    fn transaction_scope_lifecycle_sets_and_clears_runtime_scope() {
+        let runtime = SharedConnectionRuntime::default();
+
+        runtime
+            .active_transaction_scope
+            .store(11, std::sync::atomic::Ordering::SeqCst);
+        runtime
+            .transaction_depth
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        assert_eq!(
+            runtime
+                .active_transaction_scope
+                .load(std::sync::atomic::Ordering::SeqCst),
+            11
+        );
+
+        let _ = runtime.transaction_depth.fetch_update(
+            std::sync::atomic::Ordering::SeqCst,
+            std::sync::atomic::Ordering::SeqCst,
+            |depth| Some(depth.saturating_sub(1)),
+        );
+        runtime
+            .active_transaction_scope
+            .store(0, std::sync::atomic::Ordering::SeqCst);
+
+        assert_eq!(
+            runtime
+                .active_transaction_scope
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        assert_eq!(
+            runtime
+                .transaction_depth
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
         );
     }
 

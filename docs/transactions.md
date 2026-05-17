@@ -36,6 +36,12 @@ db.transaction(|tx| async move {
 
 Do not keep using the outer context for work that must be part of the transaction.
 
+While a transaction is active, the shared connection is scoped to the
+transaction context passed to the closure. Other clones of the same
+`SharedConnection`, including the outer context, are rejected if they try to
+acquire the connection before the transaction commits or rolls back. This keeps
+accidental work from interleaving on the same SQL Server transaction.
+
 ## Runtime State
 
 The transaction context inherits the same shared connection runtime state as the parent context, including tenant and soft-delete runtime configuration.
@@ -71,8 +77,9 @@ The internal shape is:
 - `SharedConnection::run_transaction(...)` becomes the single transaction
   boundary used by the derived inherent `transaction(...)` method and internal
   `save_changes()` transactions.
-- Direct connections keep the current direct mutex behavior. The direct path is
-  not allowed to regress while pool support is added.
+- Direct connections keep the direct mutex for physical access, plus an active
+  transaction scope id that allows only the transaction handle to acquire the
+  connection while the transaction is open.
 
 The transaction lifecycle for a pool-backed context is:
 
@@ -96,6 +103,10 @@ Nested transactions remain unsupported. If `db.transaction(...)` is called
 while `is_transaction_active()` is already true, it must return an explicit
 `OrmError` instead of issuing nested `BEGIN TRANSACTION` or pretending to
 create a savepoint.
+
+Using the outer context inside an active transaction also returns an explicit
+`OrmError`; use only the `tx` context passed to the closure for transactional
+work.
 
 Retries remain disabled for queries executed through a transaction context.
 
