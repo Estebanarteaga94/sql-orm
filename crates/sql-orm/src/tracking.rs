@@ -1446,6 +1446,43 @@ mod tests {
     }
 
     #[test]
+    fn tracking_registry_diagnostic_entry_ids_are_not_reused_after_unregister() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut first = Tracked::from_added(DummyEntity);
+        let mut second = Tracked::from_added(DummyEntity);
+
+        first.attach_registry_added(Arc::clone(&registry));
+        let first_registration_id = first.registration_id.expect("registered first entity");
+        registry.unregister(first_registration_id);
+        second.attach_registry_added(Arc::clone(&registry));
+
+        let registrations = registry.registrations();
+
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].entry_id, 1);
+        assert_eq!(registrations[0].state, EntityState::Added);
+    }
+
+    #[test]
+    fn tracking_registry_diagnostic_entry_ids_are_not_reused_after_clear() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut first = Tracked::from_added(DummyEntity);
+        let mut second = Tracked::from_added(DummyEntity);
+        let mut third = Tracked::from_added(DummyEntity);
+
+        first.attach_registry_added(Arc::clone(&registry));
+        second.attach_registry_added(Arc::clone(&registry));
+        registry.clear();
+        third.attach_registry_added(Arc::clone(&registry));
+
+        let registrations = registry.registrations();
+
+        assert_eq!(registrations.len(), 1);
+        assert_eq!(registrations[0].entry_id, 2);
+        assert_eq!(registrations[0].state, EntityState::Added);
+    }
+
+    #[test]
     fn tracking_registry_owns_observable_state_for_registered_entries() {
         let registry = Arc::new(TrackingRegistry::default());
         let mut tracked = Tracked::from_loaded(DummyEntity);
