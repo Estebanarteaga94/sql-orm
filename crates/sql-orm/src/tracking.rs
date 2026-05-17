@@ -32,8 +32,9 @@
 //! - mutable access marks `Unchanged` entities as `Modified` immediately
 //! - loaded entities are registered with a deterministic identity made from
 //!   entity type, schema, table and single-column primary key value
-//! - registering the same loaded entity identity twice in one context returns
-//!   an `OrmError` instead of keeping silent duplicates
+//! - reloading a detached loaded identity reattaches to the registry-owned
+//!   snapshot; loading the same identity while another wrapper is still
+//!   attached returns `OrmError` instead of keeping silent duplicates
 //! - added entities use temporary local identities until a successful insert
 //!   returns their persisted primary key
 //! - explicit detach removes an entry from the registry without touching the
@@ -432,7 +433,7 @@ impl<T: Entity + Clone> Tracked<T> {
         registry: TrackingRegistryHandle,
         key: SqlValue,
     ) -> Result<(), OrmError> {
-        let registration_id = registry.register_loaded(self, key)?;
+        let registration_id = registry.register_or_attach_loaded(self, key)?;
         self.registration_id = Some(registration_id);
         self.tracking_registry = Some(registry);
         Ok(())
@@ -465,20 +466,41 @@ impl<T> DerefMut for Tracked<T> {
 }
 
 impl TrackingRegistry {
-    pub(crate) fn register_loaded<E: Entity + Clone>(
+    pub(crate) fn register_or_attach_loaded<E: Entity + Clone>(
         &self,
-        tracked: &Tracked<E>,
+        tracked: &mut Tracked<E>,
         key: SqlValue,
     ) -> Result<usize, OrmError> {
         let identity =
             TrackedIdentity::for_entity::<E>(TrackedPrimaryKeyIdentity::Simple(key.clone()));
         let mut state = self.state.lock().expect("tracking registry mutex poisoned");
-        if state.entries.iter().any(|entry| entry.identity == identity) {
-            return Err(OrmError::new(format!(
-                "entity `{}` with primary key value `{:?}` is already tracked in this context",
-                E::metadata().rust_name,
-                key
-            )));
+
+        if let Some(entry) = state
+            .entries
+            .iter_mut()
+            .find(|entry| entry.identity == identity)
+        {
+            if entry.wrapper_attached {
+                return Err(OrmError::new(format!(
+                    "entity `{}` with primary key value `{:?}` is already tracked in this context",
+                    E::metadata().rust_name,
+                    key
+                )));
+            }
+
+            let Some(snapshots) = entry.snapshots.downcast_ref::<TrackingSnapshots<E>>() else {
+                return Err(OrmError::new(format!(
+                    "tracked entity `{}` has incompatible registry snapshots",
+                    E::metadata().rust_name,
+                )));
+            };
+
+            tracked.inner.original = snapshots.original.clone();
+            tracked.inner.current = snapshots.current.clone();
+            tracked.inner.state = entry.state;
+            entry.inner_address = tracked.inner.as_ref() as *const TrackedInner<E> as usize;
+            entry.wrapper_attached = true;
+            return Ok(entry.registration_id);
         }
 
         Ok(state.push_registration(tracked, identity))
@@ -1568,6 +1590,43 @@ mod tests {
         assert_eq!(registry.entry_count(), 1);
         assert_eq!(registry.registrations()[0].state, EntityState::Deleted);
         assert_eq!(registered.current_clone().name, "changed before delete");
+    }
+
+    #[test]
+    fn loaded_identity_reattaches_detached_registry_entry_with_owned_snapshots() {
+        let registry = Arc::new(TrackingRegistry::default());
+
+        {
+            let mut tracked = Tracked::from_loaded(SnapshotEntity {
+                name: "loaded".to_string(),
+            });
+            tracked
+                .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+                .unwrap();
+            tracked.current_mut().name = "changed before drop".to_string();
+
+            assert_eq!(tracked.state(), EntityState::Modified);
+            assert_eq!(registry.entry_count(), 1);
+        }
+
+        let mut reattached = Tracked::from_loaded(SnapshotEntity {
+            name: "stale database value".to_string(),
+        });
+        reattached
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(reattached.state(), EntityState::Modified);
+        assert_eq!(reattached.original().name, "loaded");
+        assert_eq!(reattached.current().name, "changed before drop");
+        assert_eq!(registry.registrations()[0].state, EntityState::Modified);
+        assert_eq!(
+            registry.tracked_for::<SnapshotEntity>()[0]
+                .current_clone()
+                .name,
+            "changed before drop"
+        );
     }
 
     #[test]

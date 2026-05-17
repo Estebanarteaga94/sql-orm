@@ -109,6 +109,11 @@ tracked twice in one context. Acceptable outcomes are:
 Silent duplicate in-memory entries for the same persisted row are not
 acceptable for a stable tracker.
 
+The current implementation has the first safe reuse rule: when the existing
+entry is detached because its wrapper was dropped, `find_tracked(...)`
+reattaches a new wrapper to the registry-owned snapshots. If another live
+wrapper is still attached, duplicate tracking is rejected with `OrmError`.
+
 ## State Transitions
 
 Stable state transitions must be explicit and tested:

@@ -104,6 +104,10 @@ As of 2026-05-07, the first registry slice is implemented:
 - helper paths that accept no-op modifications or sync persisted rows update
   registry-owned snapshots and state even when the original wrapper has already
   been dropped.
+- the first identity-map cut can reattach a detached loaded identity through
+  `find_tracked(...)`: the new wrapper receives the registry-owned
+  original/current snapshots and state, while a second live wrapper for the
+  same identity still returns the existing duplicate-tracking `OrmError`.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current
@@ -360,20 +364,24 @@ primary key returned by SQL Server.
 
 ## Duplicate Tracking
 
-Stable behavior must reject duplicate persisted identities in one context.
+Stable behavior must avoid duplicate persisted identities in one context.
 
 Rules:
 
-- `find_tracked(id)` returns an error if the identity is already tracked and a
-  reusable typed handle API is not implemented in the same cut.
+- `find_tracked(id)` reattaches a detached registry entry for the same
+  persisted identity and returns a wrapper initialized from the registry-owned
+  snapshots.
+- `find_tracked(id)` returns an error if another live wrapper is still attached
+  to the same persisted identity.
 - `add_tracked(entity)` uses a temporary identity until insert when the entity
   has an identity/generated key.
 - if `add_tracked(entity)` receives an explicit non-default primary key that is
   already tracked, it fails before registering.
 - identity comparison uses entity type, schema, table and primary key value.
 
-Returning an existing handle is deferred because it requires a typed borrow API
-over heterogeneous registry entries. Rejecting duplicates is simpler and safe.
+Multiple live handles for the same persisted row remain deferred because they
+require explicit canonical mutation semantics over heterogeneous registry
+entries. Reattaching detached entries is the first safe identity-map slice.
 
 ## State Ownership
 

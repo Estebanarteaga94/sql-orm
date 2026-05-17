@@ -249,11 +249,13 @@ Many-to-many link changes follow the same rule: insert, update or delete the
 explicit join entity rows directly. There is no direct collection navigation
 whose mutations are translated into link-table updates.
 
-The future stable design is a context-owned identity map keyed by entity type
-and primary-key values. It should let root queries, includes and explicit loads
-reuse one canonical tracked instance per row inside a context, while keeping raw
-SQL and disconnected entities explicit. That identity map is not implemented in
-the current API.
+The identity map has an initial tracking-only cut: if `find_tracked(...)`
+loads a persisted identity whose previous wrapper was dropped but whose entry
+remains in the context registry, the returned wrapper reattaches to the
+registry-owned snapshot instead of creating a duplicate. Multiple live wrappers
+for the same persisted identity still return an error. Sharing canonical
+instances with `include`, `include_many` and explicit navigation loads remains
+future work.
 
 Navigation includes are not projection builders. After `include(...)` or
 `include_many(...)`, the returned builder does not expose `select(...)`,

@@ -572,12 +572,14 @@ impl<E: Entity> DbSet<E> {
     /// experimental snapshot-based tracking container.
     ///
     /// The loaded row is registered in this context's tracker using entity
-    /// type, schema, table and primary key value. Tracking the same persisted
-    /// identity twice in one context returns `OrmError` instead of creating
-    /// duplicate entries. Composite primary keys are rejected with a stable
-    /// tracking error in the first stable cut. Included navigation graphs are
-    /// not registered automatically; use explicit tracking entry points for
-    /// every entity that should participate in `save_changes()`.
+    /// type, schema, table and primary key value. If that identity already has
+    /// a detached registry entry, the returned wrapper reattaches to the
+    /// registry-owned snapshot instead of creating a duplicate. Tracking the
+    /// same persisted identity while another wrapper is still attached returns
+    /// `OrmError`. Composite primary keys are rejected with a stable tracking
+    /// error in the first stable cut. Included navigation graphs are not
+    /// registered automatically; use explicit tracking entry points for every
+    /// entity that should participate in `save_changes()`.
     pub async fn find_tracked<K>(&self, key: K) -> Result<Option<Tracked<E>>, OrmError>
     where
         E: Clone + FromRow + Send + SoftDeleteEntity + TenantScopedEntity,
@@ -607,8 +609,8 @@ impl<E: Entity> DbSet<E> {
     /// rejects them before executing SQL in the first stable cut. A successful
     /// tracked insert replaces the temporary identity with the persisted
     /// single-column primary key returned by SQL Server. Dropping the returned
-    /// wrapper still detaches the pending insert in this experimental
-    /// wrapper-backed slice.
+    /// wrapper keeps the pending insert in the registry; use explicit detach
+    /// or clear APIs to discard it.
     pub fn add_tracked(&self, entity: E) -> Tracked<E>
     where
         E: Clone,
