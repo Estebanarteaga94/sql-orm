@@ -41,7 +41,8 @@ pub use context::{
     connect_shared_with_config, connect_shared_with_options,
 };
 pub use dbset_query::{
-    CollectionIncludeStrategy, DbSetQuery, DbSetQueryIncludeMany, DbSetQueryIncludeOne,
+    AggregateProjections, CollectionIncludeStrategy, DbSetGroupedQuery, DbSetQuery,
+    DbSetQueryIncludeMany, DbSetQueryIncludeOne, GroupByExpressions,
 };
 pub use page_request::PageRequest;
 pub use predicate_composition::PredicateCompositionExt;
@@ -55,6 +56,7 @@ pub use soft_delete_runtime::{
     SoftDeleteValues,
 };
 pub use sql_orm_core::{EntityMetadata, NavigationKind, NavigationMetadata};
+pub use sql_orm_query::{AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection};
 pub use sql_orm_tiberius::{
     MssqlConnectionConfig, MssqlHealthCheckOptions, MssqlHealthCheckQuery, MssqlOperationalOptions,
     MssqlParameterLogMode, MssqlPoolBackend, MssqlPoolOptions, MssqlRetryOptions,
@@ -373,9 +375,10 @@ pub mod prelude {
     #[cfg(feature = "pool-bb8")]
     pub use crate::connect_shared_from_pool;
     pub use crate::{
-        ActiveRecord, ActiveTenant, AuditEntity, Collection, CollectionIncludeStrategy, DbContext,
-        DbContextEntitySet, DbSet, DbSetQuery, DbSetQueryIncludeMany, DbSetQueryIncludeOne,
-        EntityColumnAliasExt, EntityColumnOrderExt, EntityColumnPredicateExt, EntityState,
+        ActiveRecord, ActiveTenant, AggregateProjections, AuditEntity, Collection,
+        CollectionIncludeStrategy, DbContext, DbContextEntitySet, DbSet, DbSetGroupedQuery,
+        DbSetQuery, DbSetQueryIncludeMany, DbSetQueryIncludeOne, EntityColumnAliasExt,
+        EntityColumnOrderExt, EntityColumnPredicateExt, EntityState, GroupByExpressions,
         IncludeCollection, IncludeNavigation, LazyCollection, LazyNavigation, MigrationModelSource,
         MssqlConnectionConfig, MssqlHealthCheckOptions, MssqlHealthCheckQuery,
         MssqlOperationalOptions, MssqlParameterLogMode, MssqlPoolBackend, MssqlPoolOptions,
@@ -402,7 +405,10 @@ pub mod prelude {
         AuditFields, Changeset, DbContext, Entity, FromRow, Insertable, SoftDeleteFields,
         TenantContext,
     };
-    pub use sql_orm_query::{Join, JoinType, SelectProjection};
+    pub use sql_orm_query::{
+        AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, Join, JoinType,
+        SelectProjection,
+    };
 }
 
 #[cfg(test)]

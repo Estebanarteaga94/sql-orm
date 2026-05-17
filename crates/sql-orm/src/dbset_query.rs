@@ -1,17 +1,19 @@
 use crate::context::{ActiveTenant, SharedConnection};
 use crate::page_request::PageRequest;
+use crate::query_alias::AliasedEntityColumn;
 use crate::query_projection::SelectProjections;
 use crate::{
     IncludeCollection, IncludeNavigation, SoftDeleteEntity, TenantScopedEntity,
     TrackingRegistryHandle,
 };
 use sql_orm_core::{
-    ColumnMetadata, Entity, EntityMetadata, FromRow, NavigationKind, OrmError, Row, SqlServerType,
-    SqlTypeMapping, SqlValue,
+    ColumnMetadata, Entity, EntityColumn, EntityMetadata, FromRow, NavigationKind, OrmError, Row,
+    SqlServerType, SqlTypeMapping, SqlValue,
 };
 use sql_orm_query::{
-    AggregateExpr, AggregateProjection, AggregateQuery, ColumnRef, ExistsQuery, Expr, Join,
-    JoinType, OrderBy, Pagination, Predicate, SelectProjection, SelectQuery, TableRef,
+    AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
+    ColumnRef, ExistsQuery, Expr, Join, JoinType, OrderBy, Pagination, Predicate, SelectProjection,
+    SelectQuery, TableRef,
 };
 use sql_orm_sqlserver::SqlServerCompiler;
 
@@ -281,6 +283,41 @@ impl<E: Entity> DbSetQuery<E> {
             .select_query
             .select(projection.into_select_projections());
         self
+    }
+
+    /// Starts a grouped aggregate query over one or more group key
+    /// expressions.
+    ///
+    /// The returned builder materializes DTOs through `all_as::<T>()` and
+    /// `first_as::<T>()`; it does not expose full-entity materialization.
+    pub fn group_by<G>(self, group_by: G) -> Result<DbSetGroupedQuery<E>, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+        G: GroupByExpressions,
+    {
+        let group_by = group_by.into_group_by_expressions();
+        if group_by.is_empty() {
+            return Err(OrmError::new(
+                "group_by requires at least one group key expression",
+            ));
+        }
+
+        let connection = self.connection.clone();
+        let effective = self.effective_select_query()?;
+        Ok(DbSetGroupedQuery {
+            connection,
+            aggregate_query: AggregateQuery {
+                from: effective.from,
+                joins: effective.joins,
+                projection: Vec::new(),
+                predicate: effective.predicate,
+                group_by,
+                having: None,
+                order_by: Vec::new(),
+                pagination: None,
+            },
+            _entity: core::marker::PhantomData,
+        })
     }
 
     #[cfg(test)]
@@ -581,6 +618,229 @@ impl<E: Entity> DbSetQuery<E> {
         };
 
         Ok(Join::new(join_type, target_table, on))
+    }
+}
+
+/// Converts public `group_by(...)` arguments into neutral query expressions.
+pub trait GroupByExpressions {
+    fn into_group_by_expressions(self) -> Vec<Expr>;
+}
+
+impl GroupByExpressions for Expr {
+    fn into_group_by_expressions(self) -> Vec<Expr> {
+        vec![self]
+    }
+}
+
+impl<E> GroupByExpressions for EntityColumn<E>
+where
+    E: Entity,
+{
+    fn into_group_by_expressions(self) -> Vec<Expr> {
+        vec![Expr::from(self)]
+    }
+}
+
+impl<E> GroupByExpressions for AliasedEntityColumn<E>
+where
+    E: Entity,
+{
+    fn into_group_by_expressions(self) -> Vec<Expr> {
+        vec![Expr::from(self)]
+    }
+}
+
+impl<P> GroupByExpressions for Vec<P>
+where
+    P: Into<Expr>,
+{
+    fn into_group_by_expressions(self) -> Vec<Expr> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+impl<P, const N: usize> GroupByExpressions for [P; N]
+where
+    P: Into<Expr>,
+{
+    fn into_group_by_expressions(self) -> Vec<Expr> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+macro_rules! impl_group_by_expressions_tuple {
+    ($($name:ident),+ $(,)?) => {
+        impl<$($name),+> GroupByExpressions for ($($name,)+)
+        where
+            $($name: Into<Expr>),+
+        {
+            #[allow(non_snake_case)]
+            fn into_group_by_expressions(self) -> Vec<Expr> {
+                let ($($name,)+) = self;
+                vec![$($name.into()),+]
+            }
+        }
+    };
+}
+
+impl_group_by_expressions_tuple!(A);
+impl_group_by_expressions_tuple!(A, B);
+impl_group_by_expressions_tuple!(A, B, C);
+impl_group_by_expressions_tuple!(A, B, C, D);
+impl_group_by_expressions_tuple!(A, B, C, D, E);
+impl_group_by_expressions_tuple!(A, B, C, D, E, F);
+impl_group_by_expressions_tuple!(A, B, C, D, E, F, G);
+impl_group_by_expressions_tuple!(A, B, C, D, E, F, G, H);
+impl_group_by_expressions_tuple!(A, B, C, D, E, F, G, H, I);
+impl_group_by_expressions_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_group_by_expressions_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_group_by_expressions_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+/// Converts public `select_aggregate(...)` arguments into aggregate
+/// projections.
+pub trait AggregateProjections {
+    fn into_aggregate_projections(self) -> Vec<AggregateProjection>;
+}
+
+impl AggregateProjections for AggregateProjection {
+    fn into_aggregate_projections(self) -> Vec<AggregateProjection> {
+        vec![self]
+    }
+}
+
+impl<P> AggregateProjections for Vec<P>
+where
+    P: Into<AggregateProjection>,
+{
+    fn into_aggregate_projections(self) -> Vec<AggregateProjection> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+impl<P, const N: usize> AggregateProjections for [P; N]
+where
+    P: Into<AggregateProjection>,
+{
+    fn into_aggregate_projections(self) -> Vec<AggregateProjection> {
+        self.into_iter().map(Into::into).collect()
+    }
+}
+
+macro_rules! impl_aggregate_projections_tuple {
+    ($($name:ident),+ $(,)?) => {
+        impl<$($name),+> AggregateProjections for ($($name,)+)
+        where
+            $($name: Into<AggregateProjection>),+
+        {
+            #[allow(non_snake_case)]
+            fn into_aggregate_projections(self) -> Vec<AggregateProjection> {
+                let ($($name,)+) = self;
+                vec![$($name.into()),+]
+            }
+        }
+    };
+}
+
+impl_aggregate_projections_tuple!(A);
+impl_aggregate_projections_tuple!(A, B);
+impl_aggregate_projections_tuple!(A, B, C);
+impl_aggregate_projections_tuple!(A, B, C, D);
+impl_aggregate_projections_tuple!(A, B, C, D, E);
+impl_aggregate_projections_tuple!(A, B, C, D, E, F);
+impl_aggregate_projections_tuple!(A, B, C, D, E, F, G);
+impl_aggregate_projections_tuple!(A, B, C, D, E, F, G, H);
+impl_aggregate_projections_tuple!(A, B, C, D, E, F, G, H, I);
+impl_aggregate_projections_tuple!(A, B, C, D, E, F, G, H, I, J);
+impl_aggregate_projections_tuple!(A, B, C, D, E, F, G, H, I, J, K);
+impl_aggregate_projections_tuple!(A, B, C, D, E, F, G, H, I, J, K, L);
+
+/// Query builder returned by `DbSetQuery::group_by(...)`.
+pub struct DbSetGroupedQuery<E: Entity> {
+    connection: Option<SharedConnection>,
+    aggregate_query: AggregateQuery,
+    _entity: core::marker::PhantomData<fn() -> E>,
+}
+
+impl<E: Entity> DbSetGroupedQuery<E> {
+    /// Selects aggregate projections materialized by alias into DTOs.
+    pub fn select_aggregate<P>(mut self, projection: P) -> Self
+    where
+        P: AggregateProjections,
+    {
+        self.aggregate_query.projection = projection.into_aggregate_projections();
+        self
+    }
+
+    /// Adds a `HAVING` predicate over aggregate expressions or group keys.
+    pub fn having(mut self, predicate: AggregatePredicate) -> Self {
+        self.aggregate_query = self.aggregate_query.having(predicate);
+        self
+    }
+
+    /// Adds aggregate ordering.
+    pub fn order_by(mut self, order: AggregateOrderBy) -> Self {
+        self.aggregate_query = self.aggregate_query.order_by(order);
+        self
+    }
+
+    /// Limits grouped aggregate rows with zero offset.
+    pub fn limit(mut self, limit: u64) -> Self {
+        self.aggregate_query = self.aggregate_query.paginate(Pagination::new(0, limit));
+        self
+    }
+
+    /// Alias for `limit(...)`.
+    pub fn take(self, limit: u64) -> Self {
+        self.limit(limit)
+    }
+
+    /// Applies page-based pagination to grouped aggregate rows.
+    pub fn paginate(mut self, request: PageRequest) -> Self {
+        self.aggregate_query = self.aggregate_query.paginate(request.to_pagination());
+        self
+    }
+
+    /// Executes the grouped query and materializes projected rows as DTOs.
+    pub async fn all_as<T>(self) -> Result<Vec<T>, OrmError>
+    where
+        T: FromRow + Send,
+    {
+        let compiled = SqlServerCompiler::compile_aggregate(&self.aggregate_query)?;
+        let shared_connection = self.require_connection()?;
+        let mut connection = shared_connection.lock().await?;
+        connection.fetch_all(compiled).await
+    }
+
+    /// Executes the grouped query and materializes the first DTO, if any.
+    pub async fn first_as<T>(self) -> Result<Option<T>, OrmError>
+    where
+        T: FromRow + Send,
+    {
+        let compiled = SqlServerCompiler::compile_aggregate(&self.aggregate_query)?;
+        let shared_connection = self.require_connection()?;
+        let mut connection = shared_connection.lock().await?;
+        connection.fetch_one(compiled).await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn aggregate_query(&self) -> &AggregateQuery {
+        &self.aggregate_query
+    }
+
+    fn require_connection(&self) -> Result<SharedConnection, OrmError> {
+        self.connection.as_ref().cloned().ok_or_else(|| {
+            OrmError::new("DbSetGroupedQuery requires an initialized shared connection")
+        })
+    }
+}
+
+impl<E: Entity> core::fmt::Debug for DbSetGroupedQuery<E> {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.debug_struct("DbSetGroupedQuery")
+            .field("entity", &E::metadata().rust_name)
+            .field("table", &E::metadata().table)
+            .field("aggregate_query", &self.aggregate_query)
+            .finish()
     }
 }
 
@@ -1378,8 +1638,9 @@ mod tests {
         SqlValue,
     };
     use sql_orm_query::{
-        AggregateExpr, AggregateProjection, ColumnRef, CompiledQuery, Expr, Join, JoinType,
-        OrderBy, Pagination, Predicate, SelectProjection, SelectQuery, SortDirection, TableRef,
+        AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, ColumnRef,
+        CompiledQuery, Expr, Join, JoinType, OrderBy, Pagination, Predicate, SelectProjection,
+        SelectQuery, SortDirection, TableRef,
     };
     use sql_orm_sqlserver::SqlServerCompiler;
 
@@ -1823,6 +2084,11 @@ mod tests {
         fn metadata() -> &'static EntityMetadata {
             &TENANT_ENTITY_METADATA
         }
+    }
+
+    #[allow(non_upper_case_globals)]
+    impl TenantEntity {
+        const tenant_id: EntityColumn<TenantEntity> = EntityColumn::new("tenant_id", "tenant_id");
     }
 
     impl Entity for TenantNavigationRoot {
@@ -3060,6 +3326,119 @@ mod tests {
             compiled.params,
             vec![SqlValue::Bool(true), SqlValue::Bool(true)]
         );
+    }
+
+    #[test]
+    fn grouped_query_builds_aggregate_ast_with_projection_having_order_and_pagination() {
+        let dbset = DbSet::<TestEntity>::disconnected();
+        let grouped = dbset
+            .query()
+            .filter(Predicate::eq(
+                Expr::value(SqlValue::Bool(true)),
+                Expr::value(SqlValue::Bool(true)),
+            ))
+            .group_by(TestEntity::id)
+            .unwrap()
+            .select_aggregate((
+                AggregateProjection::group_key(TestEntity::id),
+                AggregateProjection::count_as("entity_count"),
+            ))
+            .having(AggregatePredicate::gt(
+                AggregateExpr::count_all(),
+                Expr::value(SqlValue::I64(1)),
+            ))
+            .order_by(AggregateOrderBy::desc(AggregateExpr::count_all()))
+            .paginate(PageRequest::new(2, 10));
+
+        let aggregate = grouped.aggregate_query();
+
+        assert_eq!(aggregate.group_by, vec![Expr::from(TestEntity::id)]);
+        assert_eq!(aggregate.projection.len(), 2);
+        assert!(matches!(
+            aggregate.having,
+            Some(AggregatePredicate::Gt(_, _))
+        ));
+        assert_eq!(aggregate.order_by.len(), 1);
+        assert_eq!(aggregate.pagination, Some(Pagination::new(10, 10)));
+
+        let compiled = SqlServerCompiler::compile_aggregate(aggregate).unwrap();
+        assert!(compiled.sql.contains("COUNT(*) AS [entity_count]"));
+        assert!(compiled.sql.contains("GROUP BY [dbo].[test_entities].[id]"));
+        assert!(compiled.sql.contains("HAVING (COUNT(*) > @P3)"));
+        assert!(compiled.sql.contains("ORDER BY COUNT(*) DESC"));
+        assert!(
+            compiled
+                .sql
+                .contains("OFFSET @P4 ROWS FETCH NEXT @P5 ROWS ONLY")
+        );
+        assert_eq!(
+            compiled.params,
+            vec![
+                SqlValue::Bool(true),
+                SqlValue::Bool(true),
+                SqlValue::I64(1),
+                SqlValue::I64(10),
+                SqlValue::I64(10),
+            ]
+        );
+    }
+
+    #[test]
+    fn grouped_query_preserves_root_tenant_and_soft_delete_filters() {
+        let active_tenant = ActiveTenant {
+            column_name: "tenant_id",
+            value: SqlValue::I64(42),
+        };
+        let dbset = DbSet::<TenantEntity>::disconnected();
+        let grouped = dbset
+            .query()
+            .with_active_tenant_for_test(active_tenant)
+            .group_by(TenantEntity::tenant_id)
+            .unwrap()
+            .select_aggregate((
+                AggregateProjection::group_key(TenantEntity::tenant_id),
+                AggregateProjection::count_as("tenant_count"),
+            ));
+
+        let compiled = SqlServerCompiler::compile_aggregate(grouped.aggregate_query()).unwrap();
+
+        assert!(
+            compiled
+                .sql
+                .contains("GROUP BY [sales].[tenant_entities].[tenant_id]")
+        );
+        assert!(
+            compiled
+                .sql
+                .contains("[sales].[tenant_entities].[tenant_id] = @P1")
+        );
+        assert_eq!(compiled.params, vec![SqlValue::I64(42)]);
+    }
+
+    #[test]
+    fn grouped_query_rejects_empty_group_by_early() {
+        let dbset = DbSet::<TestEntity>::disconnected();
+        let error = dbset.query().group_by(Vec::<Expr>::new()).unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "group_by requires at least one group key expression"
+        );
+    }
+
+    #[test]
+    fn grouped_query_debug_mentions_entity_type() {
+        let dbset = DbSet::<TestEntity>::disconnected();
+        let grouped = dbset
+            .query()
+            .group_by(TestEntity::id)
+            .unwrap()
+            .select_aggregate(AggregateProjection::count_as("entity_count"));
+
+        let rendered = format!("{grouped:?}");
+
+        assert!(rendered.contains("DbSetGroupedQuery"));
+        assert!(rendered.contains("test_entities"));
     }
 
     #[test]

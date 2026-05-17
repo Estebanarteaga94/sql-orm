@@ -2,8 +2,9 @@
 
 Status: Etapa 24 in progress. The neutral AST cut exists in `sql-orm-query`;
 SQL Server compilation for aggregate AST and `EXISTS` exists in
-`sql-orm-sqlserver`; scalar public `DbSetQuery` APIs are implemented. Grouped
-aggregate APIs are still pending.
+`sql-orm-sqlserver`; scalar and grouped public `DbSetQuery` APIs are
+implemented. Return-type validation, expanded snapshots, runtime SQL Server
+tests and final public documentation are still pending.
 
 This document defines the public aggregation surface that Etapa 24 should
 implement on top of `DbSetQuery`. It remains a design contract for the
