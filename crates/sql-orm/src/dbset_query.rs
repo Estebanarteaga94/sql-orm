@@ -7,11 +7,11 @@ use crate::{
 };
 use sql_orm_core::{
     ColumnMetadata, Entity, EntityMetadata, FromRow, NavigationKind, OrmError, Row, SqlServerType,
-    SqlValue,
+    SqlTypeMapping, SqlValue,
 };
 use sql_orm_query::{
-    ColumnRef, CountQuery, Expr, Join, JoinType, OrderBy, Pagination, Predicate, SelectProjection,
-    SelectQuery, TableRef,
+    AggregateExpr, AggregateProjection, AggregateQuery, ColumnRef, ExistsQuery, Expr, Join,
+    JoinType, OrderBy, Pagination, Predicate, SelectProjection, SelectQuery, TableRef,
 };
 use sql_orm_sqlserver::SqlServerCompiler;
 
@@ -360,7 +360,9 @@ impl<E: Entity> DbSetQuery<E> {
     where
         E: SoftDeleteEntity + TenantScopedEntity,
     {
-        let compiled = SqlServerCompiler::compile_count(&self.count_query())?;
+        let compiled = SqlServerCompiler::compile_aggregate(
+            &self.scalar_aggregate_query(AggregateProjection::count_as("count"))?,
+        )?;
         let shared_connection = self.require_connection()?;
         let mut connection = shared_connection.lock().await?;
         let row = connection.fetch_one::<CountRow>(compiled).await?;
@@ -369,17 +371,112 @@ impl<E: Entity> DbSetQuery<E> {
             .ok_or_else(|| OrmError::new("count query did not return a row"))
     }
 
-    fn count_query(&self) -> CountQuery
+    /// Executes the query as an `EXISTS` predicate over the effective filters.
+    pub async fn exists(self) -> Result<bool, OrmError>
     where
         E: SoftDeleteEntity + TenantScopedEntity,
     {
-        let effective = self
-            .effective_select_query()
-            .expect("count_query should materialize soft_delete visibility");
-        CountQuery {
+        let compiled = SqlServerCompiler::compile_exists(&self.exists_query()?)?;
+        let shared_connection = self.require_connection()?;
+        let mut connection = shared_connection.lock().await?;
+        let row = connection.fetch_one::<ExistsRow>(compiled).await?;
+
+        row.map(|row| row.value)
+            .ok_or_else(|| OrmError::new("exists query did not return a row"))
+    }
+
+    /// Alias for `exists()`.
+    pub async fn any(self) -> Result<bool, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+    {
+        self.exists().await
+    }
+
+    /// Executes the query as a scalar `SUM(...)` aggregate.
+    pub async fn sum<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+        T: SqlTypeMapping + Send,
+    {
+        self.scalar_aggregate(AggregateExpr::sum(column)).await
+    }
+
+    /// Executes the query as a scalar `AVG(...)` aggregate.
+    pub async fn avg<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+        T: SqlTypeMapping + Send,
+    {
+        self.scalar_aggregate(AggregateExpr::avg(column)).await
+    }
+
+    /// Executes the query as a scalar `MIN(...)` aggregate.
+    pub async fn min<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+        T: SqlTypeMapping + Send,
+    {
+        self.scalar_aggregate(AggregateExpr::min(column)).await
+    }
+
+    /// Executes the query as a scalar `MAX(...)` aggregate.
+    pub async fn max<T>(self, column: impl Into<Expr>) -> Result<Option<T>, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+        T: SqlTypeMapping + Send,
+    {
+        self.scalar_aggregate(AggregateExpr::max(column)).await
+    }
+
+    async fn scalar_aggregate<T>(self, expr: AggregateExpr) -> Result<Option<T>, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+        T: SqlTypeMapping + Send,
+    {
+        let compiled = SqlServerCompiler::compile_aggregate(
+            &self.scalar_aggregate_query(AggregateProjection::expr_as(expr, "value"))?,
+        )?;
+        let shared_connection = self.require_connection()?;
+        let mut connection = shared_connection.lock().await?;
+        let row = connection
+            .fetch_one::<ScalarAggregateRow<T>>(compiled)
+            .await?;
+
+        row.map(|row| row.value)
+            .ok_or_else(|| OrmError::new("scalar aggregate query did not return a row"))
+    }
+
+    fn exists_query(&self) -> Result<ExistsQuery, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+    {
+        let effective = self.effective_select_query()?;
+        Ok(ExistsQuery {
             from: effective.from,
-            predicate: effective.predicate.clone(),
-        }
+            joins: effective.joins,
+            predicate: effective.predicate,
+        })
+    }
+
+    fn scalar_aggregate_query(
+        &self,
+        projection: AggregateProjection,
+    ) -> Result<AggregateQuery, OrmError>
+    where
+        E: SoftDeleteEntity + TenantScopedEntity,
+    {
+        let effective = self.effective_select_query()?;
+        Ok(AggregateQuery {
+            from: effective.from,
+            joins: effective.joins,
+            projection: vec![projection],
+            predicate: effective.predicate,
+            group_by: Vec::new(),
+            having: None,
+            order_by: Vec::new(),
+            pagination: None,
+        })
     }
 
     fn effective_select_query(&self) -> Result<SelectQuery, OrmError>
@@ -1226,6 +1323,43 @@ impl FromRow for CountRow {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct ExistsRow {
+    value: bool,
+}
+
+impl FromRow for ExistsRow {
+    fn from_row<R: Row>(row: &R) -> Result<Self, OrmError> {
+        Ok(Self {
+            value: row.get_required_typed::<bool>("exists")?,
+        })
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct ScalarAggregateRow<T> {
+    value: Option<T>,
+}
+
+impl<T> FromRow for ScalarAggregateRow<T>
+where
+    T: SqlTypeMapping,
+{
+    fn from_row<R: Row>(row: &R) -> Result<Self, OrmError> {
+        let value = row
+            .try_get("value")?
+            .ok_or_else(|| OrmError::new("scalar aggregate result column was not present"))?;
+
+        if value.is_null() {
+            return Ok(Self { value: None });
+        }
+
+        Ok(Self {
+            value: Some(T::from_sql_value(value)?),
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -1244,8 +1378,8 @@ mod tests {
         SqlValue,
     };
     use sql_orm_query::{
-        ColumnRef, CompiledQuery, Expr, Join, JoinType, OrderBy, Pagination, Predicate,
-        SelectProjection, SelectQuery, SortDirection, TableRef,
+        AggregateExpr, AggregateProjection, ColumnRef, CompiledQuery, Expr, Join, JoinType,
+        OrderBy, Pagination, Predicate, SelectProjection, SelectQuery, SortDirection, TableRef,
     };
     use sql_orm_sqlserver::SqlServerCompiler;
 
@@ -2829,6 +2963,149 @@ mod tests {
             error.message(),
             "expected SQL Server COUNT result as i32 or i64"
         );
+    }
+
+    #[test]
+    fn exists_query_preserves_joins_and_effective_filters() {
+        let active_tenant = ActiveTenant {
+            column_name: "tenant_id",
+            value: SqlValue::I64(42),
+        };
+        let dbset = DbSet::<TenantEntity>::disconnected();
+        let query = dbset
+            .query()
+            .with_active_tenant_for_test(active_tenant)
+            .inner_join::<JoinedEntity>(Predicate::eq(
+                Expr::Column(ColumnRef::new(
+                    TableRef::for_entity::<TenantEntity>(),
+                    "tenant_id",
+                    "tenant_id",
+                )),
+                Expr::Column(ColumnRef::new(
+                    TableRef::for_entity::<JoinedEntity>(),
+                    "tenant_id",
+                    "tenant_id",
+                )),
+            ))
+            .filter(Predicate::eq(
+                Expr::Column(ColumnRef::new(
+                    TableRef::for_entity::<TenantEntity>(),
+                    "tenant_id",
+                    "tenant_id",
+                )),
+                Expr::value(SqlValue::I64(7)),
+            ));
+
+        let exists = query.exists_query().unwrap();
+
+        assert_eq!(exists.joins.len(), 1);
+        let compiled = SqlServerCompiler::compile_exists(&exists).unwrap();
+        assert!(compiled.sql.contains("INNER JOIN [dbo].[joined_entities]"));
+        assert!(
+            compiled
+                .sql
+                .contains("[sales].[tenant_entities].[tenant_id] = @P1")
+        );
+        assert!(
+            compiled
+                .sql
+                .contains("[sales].[tenant_entities].[tenant_id] = @P2")
+        );
+        assert_eq!(compiled.params, vec![SqlValue::I64(7), SqlValue::I64(42)]);
+    }
+
+    #[test]
+    fn scalar_aggregate_query_preserves_soft_delete_filter_and_ignores_pagination() {
+        let dbset = DbSet::<SoftDeleteEntityUnderTest>::disconnected();
+        let query = dbset
+            .query()
+            .filter(Predicate::eq(
+                Expr::value(SqlValue::Bool(true)),
+                Expr::value(SqlValue::Bool(true)),
+            ))
+            .order_by(OrderBy::new(
+                TableRef::for_entity::<SoftDeleteEntityUnderTest>(),
+                "deleted_at",
+                SortDirection::Desc,
+            ))
+            .limit(5);
+
+        let aggregate = query
+            .scalar_aggregate_query(AggregateProjection::expr_as(
+                AggregateExpr::max(Expr::Column(ColumnRef::new(
+                    TableRef::for_entity::<SoftDeleteEntityUnderTest>(),
+                    "deleted_at",
+                    "deleted_at",
+                ))),
+                "value",
+            ))
+            .unwrap();
+
+        assert!(aggregate.order_by.is_empty());
+        assert!(aggregate.pagination.is_none());
+        let compiled = SqlServerCompiler::compile_aggregate(&aggregate).unwrap();
+        assert!(
+            compiled
+                .sql
+                .starts_with("SELECT MAX([dbo].[soft_delete_entities].[deleted_at]) AS [value]")
+        );
+        assert!(
+            compiled
+                .sql
+                .contains("[dbo].[soft_delete_entities].[deleted_at] IS NULL")
+        );
+        assert!(!compiled.sql.contains("ORDER BY"));
+        assert!(!compiled.sql.contains("OFFSET"));
+        assert_eq!(
+            compiled.params,
+            vec![SqlValue::Bool(true), SqlValue::Bool(true)]
+        );
+    }
+
+    #[test]
+    fn scalar_aggregate_row_materializes_values_and_nulls() {
+        struct AggregateTestRow {
+            value: Option<SqlValue>,
+        }
+
+        impl Row for AggregateTestRow {
+            fn try_get(&self, column: &str) -> Result<Option<SqlValue>, OrmError> {
+                Ok((column == "value").then(|| self.value.clone()).flatten())
+            }
+        }
+
+        let from_value = super::ScalarAggregateRow::<i64>::from_row(&AggregateTestRow {
+            value: Some(SqlValue::I64(12)),
+        })
+        .unwrap();
+        let from_null = super::ScalarAggregateRow::<i64>::from_row(&AggregateTestRow {
+            value: Some(SqlValue::Null),
+        })
+        .unwrap();
+        let missing = super::ScalarAggregateRow::<i64>::from_row(&AggregateTestRow { value: None })
+            .unwrap_err();
+
+        assert_eq!(from_value.value, Some(12));
+        assert_eq!(from_null.value, None);
+        assert_eq!(
+            missing.message(),
+            "scalar aggregate result column was not present"
+        );
+    }
+
+    #[test]
+    fn exists_row_materializes_bool_result() {
+        struct ExistsTestRow;
+
+        impl Row for ExistsTestRow {
+            fn try_get(&self, column: &str) -> Result<Option<SqlValue>, OrmError> {
+                Ok((column == "exists").then_some(SqlValue::Bool(true)))
+            }
+        }
+
+        let row = super::ExistsRow::from_row(&ExistsTestRow).unwrap();
+
+        assert!(row.value);
     }
 
     #[test]

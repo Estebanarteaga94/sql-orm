@@ -22,6 +22,7 @@ fn entity_derive_ui() {
     tests.pass("tests/ui/tracking_active_record_public_valid.rs");
     tests.pass("tests/ui/query_builder_todo_app_valid.rs");
     tests.pass("tests/ui/query_projection_public_valid.rs");
+    tests.pass("tests/ui/query_aggregates_public_valid.rs");
     tests.pass("tests/ui/from_row_projection_public_valid.rs");
     tests.pass("tests/ui/raw_sql_query_hint_public_valid.rs");
     tests.pass("tests/ui/audit_fields_valid.rs");
