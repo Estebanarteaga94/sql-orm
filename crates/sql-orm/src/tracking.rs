@@ -2058,6 +2058,59 @@ mod tests {
     }
 
     #[test]
+    fn tracking_registry_rejects_persisted_identity_update_collision_with_detached_entry() {
+        let registry = Arc::new(TrackingRegistry::default());
+
+        {
+            let mut existing = Tracked::from_loaded(SnapshotEntity {
+                name: "existing".to_string(),
+            });
+            existing
+                .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(11))
+                .unwrap();
+            existing.current_mut().name = "existing changed".to_string();
+        }
+
+        let mut pending = Tracked::from_added(SnapshotEntity {
+            name: "pending".to_string(),
+        });
+        pending.attach_registry_added(Arc::clone(&registry));
+        let pending_registration = pending.registration_id.expect("registered pending entity");
+
+        let error = registry
+            .update_persisted_identity::<SnapshotEntity>(pending_registration, SqlValue::I64(11))
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "entity `DummyEntity` with primary key value `I64(11)` is already tracked in this context"
+        );
+        assert_eq!(registry.entry_count(), 2);
+
+        let mut reattached_existing = Tracked::from_loaded(SnapshotEntity {
+            name: "fresh database value".to_string(),
+        });
+        reattached_existing
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(11))
+            .unwrap();
+
+        assert_eq!(reattached_existing.current().name, "existing changed");
+
+        registry
+            .update_persisted_identity::<SnapshotEntity>(pending_registration, SqlValue::I64(12))
+            .unwrap();
+
+        let mut duplicate_pending = Tracked::from_loaded(SnapshotEntity {
+            name: "duplicate pending".to_string(),
+        });
+        let duplicate_error = duplicate_pending
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(12))
+            .unwrap_err();
+
+        assert!(duplicate_error.message().contains("live tracked handle"));
+    }
+
+    #[test]
     fn tracking_registry_rejects_persisted_identity_update_for_missing_registration() {
         let registry = TrackingRegistry::default();
 
