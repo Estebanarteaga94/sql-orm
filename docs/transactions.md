@@ -46,6 +46,83 @@ With `pool-bb8`, `db.transaction(...)` is explicitly blocked when the context wa
 
 This remains blocked until pooled transactions can pin one physical SQL Server connection for the full closure.
 
+## Stage 22 Pool Design
+
+The stable implementation for pool-backed transactions must keep the public
+`db.transaction(|tx| async move { ... })` API unchanged. The difference is
+internal: when the parent context is backed by `SharedConnection::Pool`, the
+transaction must acquire one `MssqlPooledConnection` before `BEGIN
+TRANSACTION`, keep that exact connection checked out for the entire closure,
+and issue `COMMIT` or `ROLLBACK` on the same checked-out connection before
+returning it to the pool.
+
+The required internal shape is:
+
+- `SharedConnectionRuntime` keeps the existing tenant, audit, soft-delete and
+  transaction-depth state shared by derived handles.
+- Add a transaction-local pinned connection slot to runtime state. It must be
+  visible only while `db.transaction(...)` is executing and only to connection
+  acquisition from the transaction context.
+- `SharedConnection::lock()` keeps its current behavior outside transactions:
+  direct connections lock the direct mutex, and pool-backed contexts acquire one
+  pooled connection per operation.
+- Inside a pool-backed transaction, `SharedConnection::lock()` must return a
+  guard over the pinned pooled connection instead of acquiring another
+  connection from the pool.
+- `SharedConnection::run_transaction(...)` becomes the single transaction
+  boundary used by the derived inherent `transaction(...)` method and internal
+  `save_changes()` transactions.
+- Direct connections keep the current direct mutex behavior. The direct path is
+  not allowed to regress while pool support is added.
+
+The transaction lifecycle for a pool-backed context is:
+
+1. acquire one pooled connection;
+2. install it as the runtime pinned transaction connection;
+3. issue `BEGIN TRANSACTION`;
+4. increment transaction depth;
+5. run the user closure with a context built from the same shared runtime and
+   tracking registry;
+6. on `Ok`, issue `COMMIT` on the pinned connection;
+7. on `Err`, issue `ROLLBACK` on the pinned connection and return the original
+   closure error when rollback succeeds;
+8. decrement transaction depth, clear the pinned connection slot, and then drop
+   the pooled connection guard.
+
+If `BEGIN` fails, the pinned slot must be cleared and the connection returned to
+the pool without entering transaction depth. If `COMMIT` or `ROLLBACK` fails,
+that database error is returned as `OrmError` after clearing transaction state.
+
+Nested transactions remain unsupported. If `db.transaction(...)` is called
+while `is_transaction_active()` is already true, it must return an explicit
+`OrmError` instead of issuing nested `BEGIN TRANSACTION` or pretending to
+create a savepoint.
+
+Retries remain disabled for queries executed through a transaction context. The
+existing Tiberius transaction helpers already use `MssqlRetryOptions::disabled`
+for fetches through `MssqlTransaction`; the pool-pinned path must preserve the
+same rule for all transaction-scoped reads and writes by routing through the
+same transaction execution helpers or equivalent disabled-retry calls.
+
+Timeouts, tracing and slow-query instrumentation must come from the pinned
+connection's `MssqlConnectionConfig`, exactly as direct transactions do today.
+Tenant, audit and soft-delete runtime values must continue to come from the
+shared runtime carried by the context, not from the pool or physical
+connection. Tracking must continue to use the context's shared
+`TrackingRegistryHandle`, so `save_changes()` inside a pool-backed transaction
+sees the same unit of work as the parent context.
+
+Validation for this design should be added in the implementation task:
+
+- unit coverage proving `lock()` reuses a pinned connection while transaction
+  depth is active and reacquires normally after the transaction ends;
+- tests proving nested transaction calls fail clearly;
+- SQL Server integration coverage for commit, rollback and closure error paths
+  from a pool-backed context;
+- coverage that `save_changes()` inside a pool-backed transaction uses the
+  pinned connection and does not open a second transaction or acquire another
+  pooled connection.
+
 ## No Savepoints
 
 Savepoints are not currently implemented. Nested transaction semantics are not part of the current public API.
