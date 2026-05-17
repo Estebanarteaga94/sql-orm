@@ -1,11 +1,12 @@
 # Tracking Unit Of Work
 
 This document defines the target unit-of-work design for Etapa 21. It is the
-implementation guide for replacing the current wrapper-lifetime registry with a
+implementation guide for replacing wrapper-lifetime persistence with a
 context-owned tracker.
 
-The current implementation still depends on live `Tracked<T>` wrappers. This
-document does not claim that the runtime has already been stabilized.
+The current implementation now keeps pending `Added`, `Modified` and `Deleted`
+work in registry-owned snapshots after wrapper drop. This document does not
+claim that the runtime has already been stabilized.
 
 ## Implementation Status
 
@@ -62,10 +63,10 @@ As of 2026-05-07, the first registry slice is implemented:
   and explicit loads do not register related entities, assignment of single or
   collection navigations to a tracked root does not mark the root `Modified`,
   and `save_changes()` does not persist relationship wrapper mutations.
-- ownership behavior for the current wrapper-backed implementation is covered:
-  cloning a `Tracked<T>` produces a detached wrapper that cannot unregister the
-  original entry, and consuming a registered wrapper with `into_current()`
-  unregisters it through `Drop`.
+- ownership behavior for the current registry-backed implementation is
+  covered: cloning a `Tracked<T>` produces a detached wrapper that cannot
+  unregister the original entry, and consuming a pending registered wrapper
+  with `into_current()` keeps the work in the registry through `Drop`.
 - registry collision behavior is covered when converting an `Added` temporary
   identity to a persisted primary key: duplicate persisted identities return
   `OrmError` and do not replace the temporary entry identity.
@@ -96,10 +97,19 @@ As of 2026-05-07, the first registry slice is implemented:
   `find_tracked(...)`, `remove_tracked(...)`, `save_changes()` and ownership
   operations `clone`, `into_current()` and repeated `detach()`, and rejects
   direct access to internal registry attachment helpers.
+- dropping or consuming a registered `Added`, `Modified` or `Deleted` wrapper
+  now synchronizes the current wrapper value into the registry-owned snapshot,
+  detaches only the handle, and leaves the pending insert/update/delete in the
+  context registry for `save_changes()`.
+- helper paths that accept no-op modifications or sync persisted rows update
+  registry-owned snapshots and state even when the original wrapper has already
+  been dropped.
 
-The registry still stores pointers to live `Tracked<T>` wrappers for snapshots
-and current values. Removing the wrapper-lifetime dependency remains assigned
-to the next ownership/snapshot transition tasks.
+The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
+mutable wrapper changes can be synchronized into the registry-owned current
+snapshot. That pointer is cleared on wrapper drop for pending states; the unit
+of work no longer requires the wrapper to stay alive for `Added`, `Modified`
+or `Deleted` persistence.
 
 As of 2026-05-16, registry diagnostics expose a stable `entry_id` through
 `TrackedEntityRegistration`. This is the first observable step toward owned
@@ -117,16 +127,15 @@ snapshots when they accept or replace the wrapper value. The helpers used by
 `save_changes()` now read current values and change-detection snapshot pairs
 from the registry-owned snapshots. While `DerefMut` is still wrapper-backed,
 those helpers first synchronize the registry current snapshot from the live
-wrapper. Dropping a wrapper still unregisters the entry in this slice, so the
-final wrapper-lifetime dependency remains open.
+wrapper when it is still attached.
 
-As of 2026-05-16, `Added` entries are the first exception to wrapper-drop
-detach semantics: dropping or consuming an `Added` wrapper synchronizes its
-current value into the registry-owned snapshot and detaches only the handle,
-leaving the pending insert in the registry. This is safe because `Added`
-entries do not need a pre-existing persisted snapshot for update comparison.
-`Modified` and `Deleted` still unregister on wrapper drop until mutation and
-delete state become fully registry-owned.
+As of 2026-05-16, `Added`, `Modified` and `Deleted` entries all use
+wrapper-drop handle detach semantics: dropping or consuming the wrapper
+synchronizes its current value into the registry-owned snapshot, clears the
+live pointer and leaves pending work in the registry. `Modified` entries can
+still skip SQL after drop when their persisted update payload is unchanged,
+because no-op acceptance updates registry-owned snapshots/state without
+writing through a dead wrapper pointer.
 
 ## Current Detach And State Policy
 
@@ -139,22 +148,22 @@ The current experimental policy is explicit:
 - `Modified`: `save_changes()` persists through the normal update pipeline.
   `mark_unchanged()` accepts the current value as the new original snapshot and
   returns it to `Unchanged`. `detach_tracked(...)`, `Tracked::detach()`,
-  `clear_tracker()` or dropping the wrapper discards the pending update from
-  the tracker; the wrapper keeps its `Modified` state.
+  or `clear_tracker()` discards the pending update from the tracker; dropping
+  or consuming the wrapper keeps the pending update in the registry.
 - `Added`: `save_changes()` persists through the normal insert pipeline and
   syncs the registry identity to the persisted key. `remove_tracked(...)`
   cancels the pending insert by marking the wrapper `Deleted` and detaching it.
   `mark_modified()` keeps it `Added`; `mark_unchanged()` accepts the current
   value as unchanged. `detach_tracked(...)`, `Tracked::detach()`,
-  `clear_tracker()` or dropping the wrapper discards the pending insert without
-  SQL.
+  or `clear_tracker()` discards the pending insert without SQL; dropping or
+  consuming the wrapper keeps the pending insert in the registry.
 - `Deleted`: `save_changes()` persists through the normal delete pipeline,
   using soft-delete when the entity declares that policy, and unregisters the
   entry after success. `mark_modified()` keeps it `Deleted`; `mark_unchanged()`
   explicitly restores it to `Unchanged` by accepting the current snapshot.
-  `detach_tracked(...)`, `Tracked::detach()`, `clear_tracker()` or dropping the
-  wrapper discards the pending delete from the tracker; the wrapper keeps its
-  `Deleted` state.
+  `detach_tracked(...)`, `Tracked::detach()` or `clear_tracker()` discards the
+  pending delete from the tracker; dropping or consuming the wrapper keeps the
+  pending delete in the registry.
 
 ## Active Record Interop
 
@@ -185,10 +194,10 @@ Stable rules for the first cut:
   tracker cannot observe the external mutation until the stable owned-registry
   identity-map work is completed.
 
-Because the registry is still pointer-backed, dropping a wrapper remains
-equivalent to detach in this slice. This behavior is documented for the current
-experimental implementation only. The stable target remains registry-owned
-snapshots where dropping a handle does not discard pending work.
+Dropping a pending `Added`, `Modified` or `Deleted` wrapper is no longer
+equivalent to detach. The explicit APIs `detach_tracked(...)`,
+`Tracked::detach()` and `clear_tracker()` remain the ways to discard work from
+the current unit of work.
 
 ## Navigation Interop
 
@@ -210,9 +219,10 @@ Current rules:
   many-to-many changes.
 
 The future identity map must be context-owned and shared by tracked roots,
-included entities and explicit loads, but implementing that before the registry
-owns snapshots would preserve the current wrapper-lifetime problem. That work
-remains a separate Etapa 21 task.
+included entities and explicit loads. Registry-owned pending snapshots remove
+the immediate wrapper-lifetime blocker, but identity-map behavior remains a
+separate Etapa 21 task because it needs canonical instance semantics across
+tracking and navigation materialization.
 
 ## Future Relationship Persistence
 
@@ -255,13 +265,15 @@ The stable unit of work must:
 
 ## Current Baseline
 
-Today, `TrackingRegistry` stores raw addresses of `TrackedInner<T>`.
+Today, `TrackingRegistry` owns typed original/current snapshots and stores a
+raw address of `TrackedInner<T>` only while the wrapper is still attached.
 
 That has two important limits:
 
-- dropping `Tracked<T>` unregisters the entry and discards pending work,
-- the registry cannot own original/current snapshots independently of the
-  wrapper.
+- `DerefMut` mutations still occur on the wrapper and must be synchronized
+  into the registry snapshot before the handle is detached,
+- unchanged dropped wrappers are still removed because they carry no pending
+  work.
 
 This is acceptable only while tracking is experimental. Stable tracking must
 move ownership to the context registry.
@@ -414,8 +426,9 @@ of `update_changes()`.
 
 ## Save Pipeline
 
-`save_changes()` remains generated by `#[derive(DbContext)]`, but it should ask
-the shared registry for entries by entity type instead of asking live wrappers.
+`save_changes()` remains generated by `#[derive(DbContext)]` and asks the
+shared registry for entries by entity type instead of depending on wrapper
+lifetime.
 
 Per entity type:
 
@@ -455,7 +468,7 @@ connections:
   outer `db.transaction(...)` is already active, avoiding nested `BEGIN
   TRANSACTION` calls.
 
-This guarantees atomicity for the current pointer-backed `save_changes()`
+This guarantees atomicity for the current registry-backed `save_changes()`
 execution on direct connections. Contexts backed by pools remain blocked for
 transactions until Etapa 22 pins one physical pooled connection for the entire
 transaction closure.

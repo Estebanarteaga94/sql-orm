@@ -2,17 +2,18 @@
 //!
 //! Stability audit status, 2026-04-30: this is the only root-crate public
 //! surface still explicitly marked experimental. It remains implemented but
-//! not stable until the context owns tracked snapshots instead of depending on
-//! live wrappers. The current slice has validated identity registration,
-//! explicit state APIs, no-op change detection, operation ordering,
-//! transaction behavior for direct connections, policy integration and public
-//! compile-time coverage, but ownership remains the blocking contract.
+//! not stable until the remaining identity-map, runtime and documentation
+//! hardening work is complete. The current slice has validated identity
+//! registration, registry-owned pending snapshots after wrapper drop, explicit
+//! state APIs, no-op change detection, operation ordering, transaction
+//! behavior for direct connections, policy integration and public compile-time
+//! coverage.
 //!
 //! This module intentionally defines only the minimal public contracts for the
 //! future tracking pipeline. In this stage it does not:
 //! - replace the explicit `DbSet`/`ActiveRecord` APIs
 //! - infer inserts, updates or deletes globally outside of `Tracked<T>`
-//! - keep dropped wrappers in the unit of work
+//! - keep dropped unchanged wrappers in the unit of work
 //! - support composite primary keys through `save_changes()`; that limit is
 //!   now an explicit first-stable-cut scope rather than an implicit behavior
 //!
@@ -23,10 +24,11 @@
 //! - `Tracked::mark_modified()`, `Tracked::mark_deleted()`,
 //!   `Tracked::mark_unchanged()` and `Tracked::detach()` for explicit state
 //!   transitions on a wrapper
-//! - `DbContext::save_changes()` for explicit persistence of live wrappers
+//! - `DbContext::save_changes()` for explicit persistence of registry entries
 //!
 //! Observable limits in the current stage:
-//! - only wrappers still alive participate in `save_changes()`
+//! - dropped `Added`, `Modified` and `Deleted` wrappers still participate in
+//!   `save_changes()` through registry-owned snapshots
 //! - mutable access marks `Unchanged` entities as `Modified` immediately
 //! - loaded entities are registered with a deterministic identity made from
 //!   entity type, schema, table and single-column primary key value
@@ -37,8 +39,8 @@
 //! - explicit detach removes an entry from the registry without touching the
 //!   database
 //! - clearing the tracker removes every current registry entry
-//! - dropping a wrapper is still equivalent to detach in this experimental
-//!   pointer-backed slice
+//! - dropping an unchanged wrapper is still equivalent to detach in this
+//!   experimental slice
 //! - removing a tracked `Added` entity cancels the pending insert locally
 //! - successful tracked deletes unregister the wrapper from the internal registry
 //! - rowversion conflicts are still surfaced as `OrmError::ConcurrencyConflict`
@@ -83,10 +85,10 @@ pub enum EntityState {
 ///
 /// `Tracked<T>` keeps the original snapshot together with the current value so
 /// later stages can compare and persist changes without relying on runtime
-/// proxies or reflection. The current implementation is still wrapper-backed:
-/// dropping or consuming a registered wrapper removes it from the current
-/// context tracker. Cloning a wrapper copies its visible state and snapshots,
-/// but the clone is detached from the registry.
+/// proxies or reflection. Registry-owned snapshots keep pending `Added`,
+/// `Modified` and `Deleted` work alive after a wrapper is dropped or consumed.
+/// Cloning a wrapper copies its visible state and snapshots, but the clone is
+/// detached from the registry.
 /// Calling [`Tracked::detach`] repeatedly is a no-op after the first detach and
 /// does not reset the visible wrapper state.
 ///
@@ -557,6 +559,16 @@ impl TrackingRegistry {
         }
     }
 
+    fn is_wrapper_attached(&self, registration_id: usize) -> bool {
+        self.state
+            .lock()
+            .expect("tracking registry mutex poisoned")
+            .entries
+            .iter()
+            .find(|entry| entry.registration_id == registration_id)
+            .is_some_and(|entry| entry.wrapper_attached)
+    }
+
     fn state_of(&self, registration_id: usize) -> Option<EntityState> {
         self.state
             .lock()
@@ -840,10 +852,15 @@ impl<E: Clone + Send + Sync + 'static> RegisteredTracked<E> {
 
     pub(crate) fn accept_current(&self) {
         let current = self.current_clone();
-        unsafe {
-            let inner = self.inner_address as *mut TrackedInner<E>;
-            (*inner).original = current.clone();
-            (*inner).state = EntityState::Unchanged;
+        if self
+            .tracking_registry
+            .is_wrapper_attached(self.registration_id)
+        {
+            unsafe {
+                let inner = self.inner_address as *mut TrackedInner<E>;
+                (*inner).original = current.clone();
+                (*inner).state = EntityState::Unchanged;
+            }
         }
         self.tracking_registry
             .set_snapshots(self.registration_id, current.clone(), current);
@@ -853,11 +870,16 @@ impl<E: Clone + Send + Sync + 'static> RegisteredTracked<E> {
 
     pub(crate) fn sync_persisted(&self, persisted: E) {
         let snapshot = persisted.clone();
-        unsafe {
-            let inner = self.inner_address as *mut TrackedInner<E>;
-            (*inner).original = persisted.clone();
-            (*inner).current = persisted;
-            (*inner).state = EntityState::Unchanged;
+        if self
+            .tracking_registry
+            .is_wrapper_attached(self.registration_id)
+        {
+            unsafe {
+                let inner = self.inner_address as *mut TrackedInner<E>;
+                (*inner).original = persisted.clone();
+                (*inner).current = persisted;
+                (*inner).state = EntityState::Unchanged;
+            }
         }
         self.tracking_registry
             .set_snapshots(self.registration_id, snapshot.clone(), snapshot);
@@ -929,7 +951,10 @@ impl<T> Drop for Tracked<T> {
         if let (Some(registration_id), Some(registry)) =
             (self.registration_id.take(), self.tracking_registry.take())
         {
-            if self.inner.state == EntityState::Added {
+            if matches!(
+                self.inner.state,
+                EntityState::Added | EntityState::Modified | EntityState::Deleted
+            ) {
                 registry.detach_wrapper(registration_id);
             } else {
                 registry.unregister(registration_id);
@@ -1497,6 +1522,52 @@ mod tests {
         assert_eq!(registry.entry_count(), 1);
         assert_eq!(registry.registrations()[0].state, EntityState::Added);
         assert_eq!(registered.current_clone().name, "changed before drop");
+    }
+
+    #[test]
+    fn dropping_modified_wrapper_detaches_handle_without_removing_registry_entry() {
+        let registry = Arc::new(TrackingRegistry::default());
+
+        {
+            let mut tracked = Tracked::from_loaded(SnapshotEntity {
+                name: "loaded".to_string(),
+            });
+            tracked.attach_registry(Arc::clone(&registry));
+            tracked.current_mut().name = "changed before drop".to_string();
+
+            assert_eq!(registry.entry_count(), 1);
+            assert_eq!(registry.registrations()[0].state, EntityState::Modified);
+        }
+
+        let registered = registry.tracked_for::<SnapshotEntity>()[0].clone();
+
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(registry.registrations()[0].state, EntityState::Modified);
+        assert_eq!(registered.current_clone().name, "changed before drop");
+        assert!(registered.has_persisted_changes());
+    }
+
+    #[test]
+    fn dropping_deleted_wrapper_detaches_handle_without_removing_registry_entry() {
+        let registry = Arc::new(TrackingRegistry::default());
+
+        {
+            let mut tracked = Tracked::from_loaded(SnapshotEntity {
+                name: "loaded".to_string(),
+            });
+            tracked.attach_registry(Arc::clone(&registry));
+            tracked.current_mut().name = "changed before delete".to_string();
+            tracked.mark_deleted();
+
+            assert_eq!(registry.entry_count(), 1);
+            assert_eq!(registry.registrations()[0].state, EntityState::Deleted);
+        }
+
+        let registered = registry.tracked_for::<SnapshotEntity>()[0].clone();
+
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(registry.registrations()[0].state, EntityState::Deleted);
+        assert_eq!(registered.current_clone().name, "changed before delete");
     }
 
     #[test]

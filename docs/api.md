@@ -168,8 +168,10 @@ Relevant limits:
 
 - `find`, `update`, `delete`, Active Record, and public tracking remain oriented around simple primary keys.
 - `save_changes()` and `Tracked<T>` are experimental.
-- The current tracker still depends on live `Tracked<T>` wrappers; dropping a
-  wrapper detaches its pending work.
+- Pending `Added`, `Modified` and `Deleted` tracking work is held by the
+  context registry after the wrapper is dropped or consumed. Explicit
+  `detach_tracked(...)`, `Tracked::detach()` and `clear_tracker()` still remove
+  work from the current unit of work.
 - Navigation wrapper mutations are not graph update commands. Persist
   relationship changes by updating, deleting or inserting the dependent entity
   or explicit join entity directly.

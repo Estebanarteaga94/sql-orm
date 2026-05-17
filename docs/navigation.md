@@ -460,7 +460,8 @@ Current rules:
 
 The planned stable direction is a context-owned identity map shared by roots,
 includes and explicit loads. That remains future tracking stabilization work
-because the current registry still depends on live `Tracked<T>` wrappers.
+because canonical instance reuse across roots, includes and explicit loads is
+not implemented yet.
 
 Relationship persistence is also future work. Removing an item from a loaded
 collection, assigning a different parent navigation, or filling a navigation

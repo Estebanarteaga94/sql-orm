@@ -23,9 +23,11 @@ tracking:
 
 These APIs are implemented, tested as an experimental cut, and exported from
 the public crate, but they are not yet stable. The current implementation keeps
-registrations tied to live wrappers, marks `Modified` on mutable access instead
-of structural diffing, supports persistence through the existing simple-PK
-CRUD routes, and does not track navigation graphs or relationship changes.
+pending `Added`, `Modified` and `Deleted` work in registry-owned snapshots
+after a wrapper is dropped or consumed, marks `Modified` on mutable access
+before later structural no-op detection, supports persistence through the
+existing simple-PK CRUD routes, and does not track navigation graphs or
+relationship changes.
 
 ## Deferred Or Blocked Surfaces
 
