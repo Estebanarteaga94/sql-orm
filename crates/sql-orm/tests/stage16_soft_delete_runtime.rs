@@ -1,8 +1,9 @@
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use sql_orm::prelude::*;
 use sql_orm::query::CompiledQuery;
 use sql_orm::tiberius::MssqlConnection;
+use tokio::sync::{Mutex, MutexGuard};
 
 const TEST_CONNECTION_ENV: &str = "SQL_ORM_TEST_CONNECTION_STRING";
 const KEEP_TABLES_ENV: &str = "KEEP_TEST_TABLES";
@@ -132,6 +133,7 @@ async fn public_dbcontext_soft_delete_provider_routes_delete_through_update() ->
         return Ok(());
     };
 
+    let _fixture_guard = soft_delete_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -187,6 +189,7 @@ async fn public_active_record_soft_delete_routes_delete_through_update() -> Resu
         return Ok(());
     };
 
+    let _fixture_guard = soft_delete_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -229,6 +232,7 @@ async fn public_save_changes_soft_delete_routes_deleted_tracking_through_update(
         return Ok(());
     };
 
+    let _fixture_guard = soft_delete_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -276,6 +280,7 @@ async fn public_soft_delete_with_rowversion_reports_concurrency_conflict_without
         return Ok(());
     };
 
+    let _fixture_guard = soft_delete_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -340,6 +345,11 @@ fn keep_test_tables() -> bool {
             .as_deref(),
         Some("1" | "true" | "yes" | "on")
     )
+}
+
+async fn soft_delete_fixture_lock() -> MutexGuard<'static, ()> {
+    static FIXTURE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    FIXTURE_LOCK.get_or_init(|| Mutex::new(())).lock().await
 }
 
 async fn reset_test_table(connection_string: &str) -> Result<(), OrmError> {

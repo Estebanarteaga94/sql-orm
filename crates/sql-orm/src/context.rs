@@ -295,6 +295,40 @@ impl SharedConnection {
         }
     }
 
+    #[doc(hidden)]
+    pub async fn run_transaction<F, Fut, T>(&self, operation: F) -> Result<T, OrmError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<T, OrmError>>,
+    {
+        ensure_transactions_supported(self.kind())?;
+
+        {
+            let mut connection = self.lock().await?;
+            connection.begin_transaction_scope().await?;
+        }
+        self.enter_transaction_scope();
+
+        let result = operation().await;
+
+        match result {
+            Ok(value) => {
+                let mut connection = self.lock().await?;
+                let commit_result = connection.commit_transaction().await;
+                self.exit_transaction_scope();
+                commit_result?;
+                Ok(value)
+            }
+            Err(error) => {
+                let mut connection = self.lock().await?;
+                let rollback_result = connection.rollback_transaction().await;
+                self.exit_transaction_scope();
+                rollback_result?;
+                Err(error)
+            }
+        }
+    }
+
     fn kind(&self) -> SharedConnectionKind {
         match self.inner.as_ref() {
             SharedConnectionInner::Direct(_) => SharedConnectionKind::Direct,

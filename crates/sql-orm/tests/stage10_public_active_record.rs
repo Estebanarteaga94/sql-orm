@@ -1,6 +1,8 @@
 use sql_orm::prelude::*;
 use sql_orm::query::CompiledQuery;
 use sql_orm::tiberius::MssqlConnection;
+use std::sync::OnceLock;
+use tokio::sync::{Mutex, MutexGuard};
 
 const TEST_CONNECTION_ENV: &str = "SQL_ORM_TEST_CONNECTION_STRING";
 const KEEP_TABLES_ENV: &str = "KEEP_TEST_TABLES";
@@ -56,6 +58,7 @@ async fn public_active_record_query_roundtrips_against_real_sql_server() -> Resu
         return Ok(());
     };
 
+    let _fixture_guard = active_record_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -107,6 +110,7 @@ async fn public_active_record_find_roundtrips_and_returns_none_when_missing() ->
         return Ok(());
     };
 
+    let _fixture_guard = active_record_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -145,6 +149,7 @@ async fn public_active_record_delete_roundtrips_and_returns_false_when_missing()
         return Ok(());
     };
 
+    let _fixture_guard = active_record_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -186,6 +191,7 @@ async fn public_active_record_save_inserts_and_updates_against_real_sql_server()
         return Ok(());
     };
 
+    let _fixture_guard = active_record_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_test_table(&connection_string).await?;
 
@@ -236,6 +242,7 @@ async fn public_active_record_respects_rowversion_on_save_and_delete() -> Result
         return Ok(());
     };
 
+    let _fixture_guard = active_record_fixture_lock().await;
     let keep_tables = keep_test_tables();
     reset_versioned_test_table(&connection_string).await?;
 
@@ -292,6 +299,11 @@ fn keep_test_tables() -> bool {
             .as_deref(),
         Some("1" | "true" | "yes" | "on")
     )
+}
+
+async fn active_record_fixture_lock() -> MutexGuard<'static, ()> {
+    static FIXTURE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    FIXTURE_LOCK.get_or_init(|| Mutex::new(())).lock().await
 }
 
 async fn reset_test_table(connection_string: &str) -> Result<(), OrmError> {

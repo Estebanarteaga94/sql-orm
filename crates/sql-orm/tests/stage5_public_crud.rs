@@ -1,6 +1,8 @@
 use sql_orm::prelude::*;
 use sql_orm::query::{CompiledQuery, Expr, Predicate, SelectQuery};
 use sql_orm::tiberius::MssqlConnection;
+use std::sync::OnceLock;
+use tokio::sync::{Mutex, MutexGuard};
 
 const TEST_CONNECTION_ENV: &str = "SQL_ORM_TEST_CONNECTION_STRING";
 const KEEP_TABLES_ENV: &str = "KEEP_TEST_TABLES";
@@ -84,6 +86,7 @@ async fn public_dbset_crud_api_roundtrips_against_real_sql_server() -> Result<()
     let keep_tables = keep_test_tables();
     let keep_rows = keep_test_rows();
 
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
     announce_test_table(keep_tables, keep_rows);
 
@@ -208,6 +211,7 @@ async fn public_dbcontext_transaction_commits_on_ok() -> Result<(), OrmError> {
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
     announce_test_table(keep_tables, false);
 
@@ -257,6 +261,7 @@ async fn public_dbcontext_transaction_rolls_back_on_err() -> Result<(), OrmError
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
     announce_test_table(keep_tables, false);
 
@@ -307,6 +312,7 @@ async fn public_dbset_update_uses_rowversion_to_prevent_stale_writes() -> Result
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_versioned_test_table(&connection_string).await?;
 
     let result = async {
@@ -370,6 +376,7 @@ async fn public_dbcontext_save_changes_persists_modified_tracked_entities() -> R
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
 
     let result = async {
@@ -432,6 +439,7 @@ async fn public_dbcontext_save_changes_returns_zero_for_unchanged_tracked_entiti
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
 
     let result = async {
@@ -477,6 +485,7 @@ async fn public_dbcontext_save_changes_persists_added_tracked_entities() -> Resu
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
 
     let result = async {
@@ -534,6 +543,7 @@ async fn public_dbcontext_save_changes_propagates_rowversion_conflicts() -> Resu
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_versioned_test_table(&connection_string).await?;
 
     let result = async {
@@ -593,6 +603,7 @@ async fn public_dbcontext_save_changes_persists_deleted_tracked_entities() -> Re
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
 
     let result = async {
@@ -646,6 +657,7 @@ async fn public_dbcontext_remove_tracked_cancels_pending_added_entity() -> Resul
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
 
     let result = async {
@@ -675,7 +687,7 @@ async fn public_dbcontext_remove_tracked_cancels_pending_added_entity() -> Resul
 }
 
 #[tokio::test]
-async fn public_dbcontext_save_changes_ignores_dropped_tracked_wrappers() -> Result<(), OrmError> {
+async fn public_dbcontext_save_changes_persists_dropped_pending_wrappers() -> Result<(), OrmError> {
     let Some(connection_string) = test_connection_string() else {
         eprintln!(
             "skipping public save_changes dropped-wrapper integration test because {TEST_CONNECTION_ENV} is not set"
@@ -684,6 +696,7 @@ async fn public_dbcontext_save_changes_ignores_dropped_tracked_wrappers() -> Res
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
 
     let result = async {
@@ -707,13 +720,20 @@ async fn public_dbcontext_save_changes_ignores_dropped_tracked_wrappers() -> Res
 
         assert_eq!(registry.entry_count(), 1);
         drop(tracked);
-        assert_eq!(registry.entry_count(), 0);
+        assert_eq!(registry.entry_count(), 1);
 
         let saved = db.save_changes().await?;
-        assert_eq!(saved, 0);
+        assert_eq!(saved, 1);
 
         let persisted = db.users.find(inserted.id).await?;
-        assert_eq!(persisted, Some(inserted));
+        assert_eq!(
+            persisted,
+            Some(PublicCrudUser {
+                id: inserted.id,
+                name: "Dropped Mutation".to_string(),
+                active: true,
+            })
+        );
 
         Ok(())
     }
@@ -735,6 +755,7 @@ async fn public_dbcontext_save_changes_deleted_propagates_rowversion_conflicts()
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_versioned_test_table(&connection_string).await?;
 
     let result = async {
@@ -793,6 +814,7 @@ async fn public_dbcontext_shares_tracking_registry_across_dbsets() -> Result<(),
     };
 
     let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
     reset_test_table(&connection_string).await?;
     reset_versioned_test_table(&connection_string).await?;
     announce_test_table(keep_tables, false);
@@ -881,6 +903,11 @@ fn announce_test_table(keep_tables: bool, keep_rows: bool) {
     } else {
         eprintln!("created public CRUD integration table `{TEST_TABLE_NAME}`");
     }
+}
+
+async fn public_crud_fixture_lock() -> MutexGuard<'static, ()> {
+    static FIXTURE_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+    FIXTURE_LOCK.get_or_init(|| Mutex::new(())).lock().await
 }
 
 async fn reset_test_table(connection_string: &str) -> Result<(), OrmError> {

@@ -1712,7 +1712,17 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                 Fut: ::core::future::Future<Output = Result<T, ::sql_orm::core::OrmError>> + Send,
                 T: Send,
             {
-                <Self as ::sql_orm::DbContext>::transaction(self, operation).await
+                let shared_connection =
+                    <Self as ::sql_orm::DbContext>::shared_connection(self);
+                let transaction_connection = shared_connection.clone();
+                let tracking_registry =
+                    <Self as ::sql_orm::DbContext>::tracking_registry(self);
+
+                shared_connection.run_transaction(|| async move {
+                    let transaction_context =
+                        Self::__from_shared_parts(transaction_connection, tracking_registry);
+                    operation(transaction_context).await
+                }).await
             }
 
             pub async fn health_check(&self) -> Result<(), ::sql_orm::core::OrmError> {
@@ -1792,8 +1802,8 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                 if shared_connection.is_transaction_active() {
                     self.__sql_orm_save_changes_without_transaction().await
                 } else {
-                    self.transaction(|tx| async move {
-                        tx.__sql_orm_save_changes_without_transaction().await
+                    shared_connection.run_transaction(|| async {
+                        self.__sql_orm_save_changes_without_transaction().await
                     }).await
                 }
             }
