@@ -49,7 +49,7 @@ impl AggregateExpr {
 #[derive(Debug, Clone, PartialEq)]
 pub struct AggregateProjection {
     pub expr: AggregateExpr,
-    pub alias: Option<&'static str>,
+    pub alias: &'static str,
 }
 
 impl AggregateProjection {
@@ -57,26 +57,19 @@ impl AggregateProjection {
         let alias = column.column_name();
         Self {
             expr: AggregateExpr::GroupKey(Expr::from(column)),
-            alias: Some(alias),
+            alias,
         }
     }
 
     pub fn group_key_as(expr: impl Into<Expr>, alias: &'static str) -> Self {
         Self {
             expr: AggregateExpr::GroupKey(expr.into()),
-            alias: Some(alias),
+            alias,
         }
     }
 
-    pub fn expr(expr: AggregateExpr) -> Self {
-        Self { expr, alias: None }
-    }
-
-    pub fn expr_as(expr: AggregateExpr, alias: &'static str) -> Self {
-        Self {
-            expr,
-            alias: Some(alias),
-        }
+    pub const fn expr_as(expr: AggregateExpr, alias: &'static str) -> Self {
+        Self { expr, alias }
     }
 
     pub fn count_as(alias: &'static str) -> Self {
@@ -273,11 +266,5 @@ impl AggregateQuery {
     pub fn paginate(mut self, pagination: Pagination) -> Self {
         self.pagination = Some(pagination);
         self
-    }
-}
-
-impl From<AggregateExpr> for AggregateProjection {
-    fn from(value: AggregateExpr) -> Self {
-        Self::expr(value)
     }
 }

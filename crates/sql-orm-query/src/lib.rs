@@ -466,6 +466,31 @@ mod tests {
     }
 
     #[test]
+    fn aggregate_projection_requires_alias_without_changing_select_projection() {
+        let group_key = AggregateProjection::group_key(Order::customer_id);
+        let expression_group_key = AggregateProjection::group_key_as(
+            Expr::function("YEAR", vec![Expr::from(Customer::created_at)]),
+            "created_year",
+        );
+        let aggregate = AggregateProjection::sum_as(Order::total_cents, "total_cents");
+
+        assert_eq!(group_key.alias, "customer_id");
+        assert_eq!(expression_group_key.alias, "created_year");
+        assert_eq!(aggregate.alias, "total_cents");
+        assert_eq!(
+            aggregate,
+            AggregateProjection::expr_as(
+                AggregateExpr::Sum(Expr::from(Order::total_cents)),
+                "total_cents"
+            )
+        );
+
+        let ordinary_projection =
+            SelectProjection::expr(Expr::function("LOWER", vec![Expr::from(Customer::email)]));
+        assert_eq!(ordinary_projection.alias, None);
+    }
+
+    #[test]
     fn aggregate_query_captures_grouping_having_and_projection_without_sql_rendering() {
         let query = AggregateQuery::from_entity::<Order>()
             .inner_join::<Customer>(Predicate::eq(
