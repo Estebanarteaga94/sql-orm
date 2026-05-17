@@ -96,6 +96,11 @@ impl crate::SqlServerCompiler {
                 "SQL Server update compilation requires at least one change",
             ));
         }
+        if query.predicate.is_none() && !query.allow_all_rows {
+            return Err(OrmError::new(
+                "SQL Server update compilation requires a WHERE predicate or explicit allow_all_rows()",
+            ));
+        }
 
         let mut parameters = ParameterBuilder::default();
         let assignments = compile_assignments(&query.changes, &mut parameters)?;
@@ -114,6 +119,12 @@ impl crate::SqlServerCompiler {
     }
 
     pub fn compile_delete(query: &DeleteQuery) -> Result<CompiledQuery, OrmError> {
+        if query.predicate.is_none() && !query.allow_all_rows {
+            return Err(OrmError::new(
+                "SQL Server delete compilation requires a WHERE predicate or explicit allow_all_rows()",
+            ));
+        }
+
         let mut parameters = ParameterBuilder::default();
         let mut sql = format!("DELETE FROM {}", quote_table_ref(&query.from)?);
 
@@ -1202,6 +1213,46 @@ mod tests {
                 SqlValue::I64(7),
             ]
         );
+    }
+
+    #[test]
+    fn rejects_update_and_delete_without_predicate_unless_explicitly_allowed() {
+        let update = UpdateQuery::for_entity::<Customer, _>(&UpdateCustomer {
+            email: Some("all@example.com".to_string()),
+            active: Some(true),
+        });
+        let update_error = SqlServerCompiler::compile_update(&update).unwrap_err();
+
+        assert_eq!(
+            update_error.message(),
+            "SQL Server update compilation requires a WHERE predicate or explicit allow_all_rows()"
+        );
+
+        let compiled_update =
+            SqlServerCompiler::compile_update(&update.clone().allow_all_rows()).unwrap();
+        assert_eq!(
+            compiled_update.sql,
+            "UPDATE [sales].[customers] SET [email] = @P1, [active] = @P2 OUTPUT INSERTED.*"
+        );
+        assert_eq!(
+            compiled_update.params,
+            vec![
+                SqlValue::String("all@example.com".to_string()),
+                SqlValue::Bool(true),
+            ]
+        );
+
+        let delete = DeleteQuery::from_entity::<Customer>();
+        let delete_error = SqlServerCompiler::compile_delete(&delete).unwrap_err();
+
+        assert_eq!(
+            delete_error.message(),
+            "SQL Server delete compilation requires a WHERE predicate or explicit allow_all_rows()"
+        );
+
+        let compiled_delete = SqlServerCompiler::compile_delete(&delete.allow_all_rows()).unwrap();
+        assert_eq!(compiled_delete.sql, "DELETE FROM [sales].[customers]");
+        assert!(compiled_delete.params.is_empty());
     }
 
     #[test]

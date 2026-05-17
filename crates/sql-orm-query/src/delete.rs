@@ -6,6 +6,7 @@ use sql_orm_core::Entity;
 pub struct DeleteQuery {
     pub from: TableRef,
     pub predicate: Option<Predicate>,
+    pub allow_all_rows: bool,
 }
 
 impl DeleteQuery {
@@ -13,6 +14,7 @@ impl DeleteQuery {
         Self {
             from: TableRef::for_entity::<E>(),
             predicate: None,
+            allow_all_rows: false,
         }
     }
 
@@ -21,6 +23,11 @@ impl DeleteQuery {
             Some(existing) => Predicate::and(vec![existing, predicate]),
             None => predicate,
         });
+        self
+    }
+
+    pub const fn allow_all_rows(mut self) -> Self {
+        self.allow_all_rows = true;
         self
     }
 }

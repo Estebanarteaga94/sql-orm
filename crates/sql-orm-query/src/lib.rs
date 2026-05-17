@@ -583,8 +583,22 @@ mod tests {
         assert_eq!(update.table, TableRef::new("sales", "customers"));
         assert_eq!(update.changes.len(), 1);
         assert!(update.predicate.is_some());
+        assert!(!update.allow_all_rows);
+        assert!(
+            UpdateQuery::for_entity::<Customer, _>(&UpdateCustomer {
+                email: Some("ana.maria@example.com".to_string()),
+            })
+            .allow_all_rows()
+            .allow_all_rows
+        );
         assert_eq!(delete.from, TableRef::new("sales", "customers"));
         assert!(delete.predicate.is_some());
+        assert!(!delete.allow_all_rows);
+        assert!(
+            DeleteQuery::from_entity::<Customer>()
+                .allow_all_rows()
+                .allow_all_rows
+        );
         assert_eq!(count.from, TableRef::new("sales", "customers"));
         assert!(count.predicate.is_some());
         assert_eq!(exists.from, TableRef::new("sales", "customers"));
