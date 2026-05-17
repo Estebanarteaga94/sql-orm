@@ -34,7 +34,9 @@
 //!   entity type, schema, table and single-column primary key value
 //! - reloading a detached loaded identity reattaches to the registry-owned
 //!   snapshot; loading the same identity while another wrapper is still
-//!   attached returns `OrmError` instead of keeping silent duplicates
+//!   attached returns `OrmError` instead of keeping silent duplicates. This is
+//!   the first stable-cut public policy: one live `Tracked<T>` handle per
+//!   persisted identity per context.
 //! - added entities use temporary local identities until a successful insert
 //!   returns their persisted primary key
 //! - explicit detach removes an entry from the registry without touching the
@@ -481,11 +483,7 @@ impl TrackingRegistry {
             .find(|entry| entry.identity == identity)
         {
             if entry.wrapper_attached {
-                return Err(OrmError::new(format!(
-                    "entity `{}` with primary key value `{:?}` is already tracked in this context",
-                    E::metadata().rust_name,
-                    key
-                )));
+                return Err(duplicate_live_identity_error::<E>(&key));
             }
 
             let Some(snapshots) = entry.snapshots.downcast_ref::<TrackingSnapshots<E>>() else {
@@ -944,6 +942,14 @@ impl<E: EntityPersist + Clone + Send + Sync + 'static> RegisteredTracked<E> {
                 E::has_persisted_changes(&inner.original, &inner.current)
             })
     }
+}
+
+fn duplicate_live_identity_error<E: Entity>(key: &SqlValue) -> OrmError {
+    OrmError::new(format!(
+        "entity `{}` with primary key value `{:?}` already has a live tracked handle in this context; detach or drop the existing handle before loading it again",
+        E::metadata().rust_name,
+        key
+    ))
 }
 
 unsafe fn sync_current_snapshot_from_wrapper<E: Clone + Send + Sync + 'static>(
@@ -1666,7 +1672,10 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(registry.entry_count(), 1);
-        assert!(error.message().contains("already tracked"));
+        assert_eq!(
+            error.message(),
+            "entity `DummyEntity` with primary key value `I64(7)` already has a live tracked handle in this context; detach or drop the existing handle before loading it again"
+        );
     }
 
     #[test]
@@ -1684,7 +1693,10 @@ mod tests {
                 .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
                 .unwrap_err();
 
-            assert!(error.message().contains("already tracked"));
+            assert_eq!(
+                error.message(),
+                "entity `DummyEntity` with primary key value `I64(7)` already has a live tracked handle in this context; detach or drop the existing handle before loading it again"
+            );
             assert_eq!(duplicate.state(), EntityState::Unchanged);
             assert_eq!(registry.entry_count(), 1);
         }
@@ -1739,7 +1751,7 @@ mod tests {
             .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(11))
             .unwrap_err();
 
-        assert!(error.message().contains("already tracked"));
+        assert!(error.message().contains("live tracked handle"));
     }
 
     #[test]
@@ -1765,7 +1777,7 @@ mod tests {
         let duplicate_error = duplicate
             .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(11))
             .unwrap_err();
-        assert!(duplicate_error.message().contains("already tracked"));
+        assert!(duplicate_error.message().contains("live tracked handle"));
 
         registry
             .update_persisted_identity::<DummyEntity>(pending_registration, SqlValue::I64(12))
@@ -1775,7 +1787,11 @@ mod tests {
         let second_duplicate_error = second_duplicate
             .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(12))
             .unwrap_err();
-        assert!(second_duplicate_error.message().contains("already tracked"));
+        assert!(
+            second_duplicate_error
+                .message()
+                .contains("live tracked handle")
+        );
     }
 
     #[test]

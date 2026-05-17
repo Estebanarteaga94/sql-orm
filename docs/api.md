@@ -259,8 +259,11 @@ whose mutations are translated into link-table updates.
 The identity map has an initial tracking-focused cut: if `find_tracked(...)`
 loads a persisted identity whose previous wrapper was dropped but whose entry
 remains in the context registry, the returned wrapper reattaches to the
-registry-owned snapshot instead of creating a duplicate. Multiple live wrappers
-for the same persisted identity still return an error. `load_collection_tracked(...)`
+registry-owned snapshot instead of creating a duplicate. The first stable-cut
+policy permits only one live `Tracked<T>` handle for the same persisted
+identity in one context; attempting to load another live handle returns an
+`OrmError` and asks the caller to detach or drop the existing handle first.
+`load_collection_tracked(...)`
 also consults those snapshots for already tracked related rows. `include(...)`,
 `include_many(...)` and ordinary `load_collection(...)` now reuse those
 registry-owned related snapshots when a related entity with the same simple

@@ -99,20 +99,18 @@ Minimum accepted key:
 - table,
 - primary key values in declared metadata order.
 
-Stable behavior must define what happens when the same entity identity is
-tracked twice in one context. Acceptable outcomes are:
+Stable behavior must avoid silent duplicate in-memory entries for the same
+persisted row. The first stable-cut policy is:
 
-- return or reuse the existing tracked entry,
-- merge into the existing entry using documented rules,
-- or reject the duplicate with a clear `OrmError`.
-
-Silent duplicate in-memory entries for the same persisted row are not
-acceptable for a stable tracker.
-
-The current implementation has the first safe reuse rule: when the existing
-entry is detached because its wrapper was dropped, `find_tracked(...)`
-reattaches a new wrapper to the registry-owned snapshots. If another live
-wrapper is still attached, duplicate tracking is rejected with `OrmError`.
+- one live `Tracked<T>` handle is allowed per persisted identity per context;
+- if the existing registry entry still exists but its live wrapper was dropped
+  or consumed, `find_tracked(...)` reattaches a new wrapper to the
+  registry-owned snapshots;
+- if another live wrapper is still attached, `find_tracked(...)` rejects the
+  duplicate with a clear `OrmError` telling the caller to detach or drop the
+  existing handle before loading the same identity again;
+- navigation materialization may reuse registry-owned snapshots for related
+  entities, but it does not create additional live tracked handles.
 
 ## State Transitions
 

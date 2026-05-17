@@ -107,7 +107,7 @@ As of 2026-05-07, the first registry slice is implemented:
 - the first identity-map cut can reattach a detached loaded identity through
   `find_tracked(...)`: the new wrapper receives the registry-owned
   original/current snapshots and state, while a second live wrapper for the
-  same identity still returns the existing duplicate-tracking `OrmError`.
+  same identity returns the documented duplicate live-handle `OrmError`.
 - `load_collection_tracked(...)` now consults the registry for related entities
   that are already tracked and attaches their registry-owned current snapshots
   to the navigation collection, without registering newly materialized related
@@ -384,20 +384,29 @@ Stable behavior must avoid duplicate persisted identities in one context.
 
 Rules:
 
+- the first stable cut permits only one live `Tracked<T>` handle for the same
+  persisted identity in one context.
 - `find_tracked(id)` reattaches a detached registry entry for the same
   persisted identity and returns a wrapper initialized from the registry-owned
   snapshots.
 - `find_tracked(id)` returns an error if another live wrapper is still attached
-  to the same persisted identity.
+  to the same persisted identity; callers must detach or drop that wrapper
+  before loading the same identity again.
+- navigation materialization through `include(...)`, `include_many(...)`,
+  `load_collection(...)` and `load_collection_tracked(...)` may clone a
+  registry-owned current snapshot for related rows that are already tracked,
+  but it does not create a second live tracked handle.
 - `add_tracked(entity)` uses a temporary identity until insert when the entity
   has an identity/generated key.
-- if `add_tracked(entity)` receives an explicit non-default primary key that is
-  already tracked, it fails before registering.
+- persisted identity collisions discovered after insert/update of a temporary
+  entry fail without mutating the existing entry.
 - identity comparison uses entity type, schema, table and primary key value.
 
-Multiple live handles for the same persisted row remain deferred because they
-require explicit canonical mutation semantics over heterogeneous registry
-entries. Reattaching detached entries is the first safe identity-map slice.
+Supporting multiple live handles for the same persisted row remains outside
+the first stable cut because it would require explicit canonical mutation
+semantics over heterogeneous registry entries. The supported policy is to
+reattach registry entries whose previous live wrapper was dropped or consumed,
+and reject duplicate live handles.
 
 ## State Ownership
 

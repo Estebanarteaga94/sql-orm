@@ -136,13 +136,15 @@ behavior, many-to-many join rows and conflicts with separately tracked
 entities. Until that exists, persist relationship changes through ordinary
 `DbSet` operations on the dependent entity or explicit join entity.
 
-The future stable graph-tracking direction is a context-owned identity map keyed
-by entity type and primary-key values. `find_tracked(...)` can already
-reattach detached entries, and `load_collection_tracked(...)` can reuse
-registry-owned snapshots for related rows that are already tracked. Full
-canonical reuse for root queries, includes and ordinary explicit loads remains
-tracking stabilization work and must not move SQL generation or execution out
-of their current crates.
+The first stable-cut identity-map policy is context-owned and keyed by entity
+type and primary-key values. `find_tracked(...)` can reattach registry entries
+that still exist after their previous wrapper was dropped or consumed, but a
+second live `Tracked<T>` handle for the same persisted identity in one context
+is rejected with `OrmError`; detach or drop the existing handle before loading
+it again. Navigation materialization through includes and explicit collection
+loads can reuse registry-owned snapshots for related rows that are already
+tracked, but it does not register graphs or move SQL generation or execution
+out of their current crates.
 
 ## Query AST
 

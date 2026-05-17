@@ -578,12 +578,14 @@ impl<E: Entity> DbSet<E> {
     /// The loaded row is registered in this context's tracker using entity
     /// type, schema, table and primary key value. If that identity already has
     /// a detached registry entry, the returned wrapper reattaches to the
-    /// registry-owned snapshot instead of creating a duplicate. Tracking the
-    /// same persisted identity while another wrapper is still attached returns
-    /// `OrmError`. Composite primary keys are rejected with a stable tracking
-    /// error in the first stable cut. Included navigation graphs are not
-    /// registered automatically; use explicit tracking entry points for every
-    /// entity that should participate in `save_changes()`.
+    /// registry-owned snapshot instead of creating a duplicate. The public
+    /// first-stable-cut policy allows only one live `Tracked<E>` handle for the
+    /// same persisted identity in one context: loading that identity while
+    /// another wrapper is still attached returns `OrmError`. Composite primary
+    /// keys are rejected with a stable tracking error in the first stable cut.
+    /// Included navigation graphs are not registered automatically; use
+    /// explicit tracking entry points for every entity that should participate
+    /// in `save_changes()`.
     pub async fn find_tracked<K>(&self, key: K) -> Result<Option<Tracked<E>>, OrmError>
     where
         E: Clone + FromRow + Send + SoftDeleteEntity + TenantScopedEntity,
