@@ -61,7 +61,7 @@ blocked surfaces and adding typed aggregations. These items are tracked in
 - Keep relationship graph persistence out of the first stable tracking cut until dependent insert/delete, foreign-key move, optional relationship, many-to-many join-row and conflict semantics are defined.
 - Integrate stable `save_changes()` with transaction semantics, optimistic concurrency, `soft_delete`, `tenant`, audit providers, Active Record, explicit state APIs, primary-key limits, public tests, rustdoc, and final documentation.
 - The wrapper-lifetime blocker for pending `Added`, `Modified`, and `Deleted` work has been removed, but the public experimental label remains until final Stage 21 validation and runtime coverage are recorded.
-- Revalidate `examples/todo-app` against a real SQL Server before removing any `Pending verification` documentation.
+- `examples/todo-app` was revalidated against real SQL Server on 2026-05-17 using local `tempdb`: fixture setup, ignored smoke test, HTTP read endpoints and migration script apply passed.
 
 ### Etapa 22: Transactions From Pool
 
@@ -201,7 +201,8 @@ Initial experimental code-first ORM release for Rust and SQL Server, built on to
 - `trybuild` covers public derives and macro errors.
 - SQL snapshots cover compiled queries and migrations.
 - Real SQL Server tests depend on `SQL_ORM_TEST_CONNECTION_STRING`.
-- The `todo-app` example has a reproducible smoke flow using `DATABASE_URL`.
+- The `todo-app` example has a reproducible smoke flow using `DATABASE_URL`;
+  the latest recorded local SQL Server validation passed on 2026-05-17.
 
 ### Reference Documentation
 

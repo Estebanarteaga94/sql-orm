@@ -650,7 +650,11 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 - [Todo app example](examples/todo-app/README.md)
 
 > [!NOTE]
-> Real SQL Server validation depends on a current `SQL_ORM_TEST_CONNECTION_STRING` or `DATABASE_URL`; rerun the integration tests and smoke flow before treating a release candidate as freshly validated.
+> Last real SQL Server validation for the `todo-app` smoke flow was run on
+> 2026-05-17 against local `tempdb` with `DATABASE_URL`: fixture setup, ignored
+> smoke test, HTTP read endpoints and migration script apply all passed. Rerun
+> the integration tests and smoke flow before treating a future release
+> candidate as freshly validated.
 
 ---
 

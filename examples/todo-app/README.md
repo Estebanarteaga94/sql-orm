@@ -11,7 +11,7 @@ Current state:
 5. Exposes reusable example queries through the real consumer surface (`db.todo_lists.query()...`, `db.todo_items.query()...`).
 6. Exposes the derived `TodoAppDbContext`, a real `GET /health` HTTP endpoint, and minimal read endpoints for lists and items.
 7. Integrates `MssqlPool` and `TodoAppDbContext::from_pool(...)` in `main.rs`, reusing the example operational configuration.
-8. Has been validated against real SQL Server with a reproducible fixture and HTTP smoke flow.
+8. Has been validated against real SQL Server with a reproducible fixture and HTTP smoke flow. The latest recorded validation was run on 2026-05-17 against local `tempdb`.
 
 The next backlog stage is no longer specific to the example itself; it belongs to project release and public documentation work.
 

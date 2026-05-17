@@ -620,84 +620,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sql-orm"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "sql-orm-core",
- "sql-orm-macros",
- "sql-orm-migrate",
- "sql-orm-query",
- "sql-orm-sqlserver",
- "sql-orm-tiberius",
- "rust_decimal",
- "tokio",
- "uuid",
-]
-
-[[package]]
-name = "sql-orm-core"
-version = "0.1.0"
-dependencies = [
- "chrono",
- "rust_decimal",
- "uuid",
-]
-
-[[package]]
-name = "sql-orm-macros"
-version = "0.1.0"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.117",
-]
-
-[[package]]
-name = "sql-orm-migrate"
-version = "0.1.0"
-dependencies = [
- "sql-orm-core",
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "sql-orm-query"
-version = "0.1.0"
-dependencies = [
- "sql-orm-core",
-]
-
-[[package]]
-name = "sql-orm-sqlserver"
-version = "0.1.0"
-dependencies = [
- "sql-orm-core",
- "sql-orm-migrate",
- "sql-orm-query",
-]
-
-[[package]]
-name = "sql-orm-tiberius"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "bb8",
- "chrono",
- "futures-io",
- "sql-orm-core",
- "sql-orm-query",
- "sql-orm-sqlserver",
- "rust_decimal",
- "tiberius",
- "tokio",
- "tokio-util",
- "tracing",
- "uuid",
-]
-
-[[package]]
 name = "nu-ansi-term"
 version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1174,6 +1096,84 @@ dependencies = [
 ]
 
 [[package]]
+name = "sql-orm"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rust_decimal",
+ "sql-orm-core",
+ "sql-orm-macros",
+ "sql-orm-migrate",
+ "sql-orm-query",
+ "sql-orm-sqlserver",
+ "sql-orm-tiberius",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "sql-orm-core"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "rust_decimal",
+ "uuid",
+]
+
+[[package]]
+name = "sql-orm-macros"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.117",
+]
+
+[[package]]
+name = "sql-orm-migrate"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "sql-orm-core",
+]
+
+[[package]]
+name = "sql-orm-query"
+version = "0.1.0"
+dependencies = [
+ "sql-orm-core",
+]
+
+[[package]]
+name = "sql-orm-sqlserver"
+version = "0.1.0"
+dependencies = [
+ "sql-orm-core",
+ "sql-orm-migrate",
+ "sql-orm-query",
+]
+
+[[package]]
+name = "sql-orm-tiberius"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "bb8",
+ "chrono",
+ "futures-io",
+ "rust_decimal",
+ "sql-orm-core",
+ "sql-orm-query",
+ "sql-orm-sqlserver",
+ "tiberius",
+ "tokio",
+ "tokio-util",
+ "tracing",
+ "uuid",
+]
+
+[[package]]
 name = "syn"
 version = "1.0.109"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1286,8 +1286,8 @@ name = "todo-app"
 version = "0.1.0"
 dependencies = [
  "axum",
- "sql-orm",
  "serde",
+ "sql-orm",
  "tokio",
  "tracing-subscriber",
 ]

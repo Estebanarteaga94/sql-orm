@@ -46,12 +46,13 @@ These surfaces are documented as unavailable or blocked, not experimental:
 | Composite primary key persistence | Metadata supports composite PKs, but public CRUD, Active Record, and tracking persistence remain centered on simple primary keys. | Future persistence hardening |
 | Automatic policy filters over manually joined entities | Not available; `soft_delete` and `tenant` automatic filters apply to root entities and selected include predicates, not arbitrary manual joins. | Future policy/query design |
 
-## Pending Verification
+## SQL Server Example Verification
 
-`README.md` still marks fresh validation of `examples/todo-app` against real SQL
-Server as pending. Historical validation exists in `docs/worklog.md`, but the
-warning should remain until a current session reruns the example with a real
-connection string and records the evidence.
+`examples/todo-app` was revalidated against real SQL Server on 2026-05-17 using
+local `tempdb`. The current recorded evidence covers fixture setup with
+`sqlcmd`, the ignored smoke test using `DATABASE_URL`, HTTP read endpoints, and
+the migration script apply path. Future release candidates should rerun the
+same flow before claiming fresh validation.
 
 ## Rustdoc Findings
 
@@ -70,8 +71,8 @@ items above as stable.
 
 The audited documents are consistent with the current implementation:
 
-- `README.md` lists the current limits and keeps `todo-app` validation marked
-  as pending.
+- `README.md` lists the current limits and records the latest real SQL Server
+  validation date for `todo-app`.
 - `CHANGELOG.md` separates `0.1.0` available features from `0.2.0` planned
   stabilization, transactions-from-pool, downgrade, and aggregations work.
 - `docs/api.md` and `docs/core-concepts.md` mark tracking as experimental and
