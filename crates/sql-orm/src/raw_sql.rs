@@ -332,6 +332,11 @@ fn analyze_placeholders(sql: &str) -> Result<RawPlaceholderPlan, OrmError> {
     let mut placeholders = BTreeSet::new();
 
     while index + 2 < bytes.len() {
+        if let Some(next_index) = skip_sql_non_code(bytes, index) {
+            index = next_index;
+            continue;
+        }
+
         if bytes[index] == b'@' && bytes[index + 1] == b'P' && bytes[index + 2].is_ascii_digit() {
             index += 2;
             let start = index;
@@ -366,6 +371,88 @@ fn analyze_placeholders(sql: &str) -> Result<RawPlaceholderPlan, OrmError> {
     }
 
     Ok(RawPlaceholderPlan { max_index })
+}
+
+fn skip_sql_non_code(bytes: &[u8], index: usize) -> Option<usize> {
+    match bytes[index] {
+        b'\'' => Some(skip_quoted_string(bytes, index)),
+        b'[' => Some(skip_bracket_identifier(bytes, index)),
+        b'"' => Some(skip_double_quoted_identifier(bytes, index)),
+        b'-' if index + 1 < bytes.len() && bytes[index + 1] == b'-' => {
+            Some(skip_line_comment(bytes, index))
+        }
+        b'/' if index + 1 < bytes.len() && bytes[index + 1] == b'*' => {
+            Some(skip_block_comment(bytes, index))
+        }
+        _ => None,
+    }
+}
+
+fn skip_quoted_string(bytes: &[u8], mut index: usize) -> usize {
+    index += 1;
+    while index < bytes.len() {
+        if bytes[index] == b'\'' {
+            index += 1;
+            if index < bytes.len() && bytes[index] == b'\'' {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        index += 1;
+    }
+    index
+}
+
+fn skip_bracket_identifier(bytes: &[u8], mut index: usize) -> usize {
+    index += 1;
+    while index < bytes.len() {
+        if bytes[index] == b']' {
+            index += 1;
+            if index < bytes.len() && bytes[index] == b']' {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        index += 1;
+    }
+    index
+}
+
+fn skip_double_quoted_identifier(bytes: &[u8], mut index: usize) -> usize {
+    index += 1;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            index += 1;
+            if index < bytes.len() && bytes[index] == b'"' {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        index += 1;
+    }
+    index
+}
+
+fn skip_line_comment(bytes: &[u8], mut index: usize) -> usize {
+    index += 2;
+    while index < bytes.len() && !matches!(bytes[index], b'\n' | b'\r') {
+        index += 1;
+    }
+    index
+}
+
+fn skip_block_comment(bytes: &[u8], mut index: usize) -> usize {
+    index += 2;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'*' && bytes[index + 1] == b'/' {
+            return index + 2;
+        }
+        index += 1;
+    }
+    bytes.len()
 }
 
 fn contains_top_level_option_clause(sql: &str) -> bool {
@@ -518,6 +605,40 @@ mod tests {
         let error = validate_raw_sql_parameters("SELECT @P0", 0).unwrap_err();
 
         assert!(error.message().contains("start at @P1"));
+    }
+
+    #[test]
+    fn ignores_placeholder_text_inside_sql_non_code_regions() {
+        let sql = r#"
+            SELECT @P1 AS value,
+                   '@P2 literal '' @P3 escaped quote' AS string_value,
+                   [@P4 identifier] AS bracket_identifier,
+                   "@P5 quoted identifier" AS quoted_identifier
+            -- @P6 line comment
+            /* @P7 block comment */
+            WHERE label = @P1
+        "#;
+
+        validate_raw_sql_parameters(sql, 1).unwrap();
+    }
+
+    #[test]
+    fn ignores_placeholder_text_in_raw_sql_without_parameters() {
+        let sql = r#"
+            SELECT '@P1 is documentation' AS literal,
+                   [@P2 is an identifier] AS identifier
+            -- @P3 is a comment
+            /* @P4 is also a comment */
+        "#;
+
+        validate_raw_sql_parameters(sql, 0).unwrap();
+    }
+
+    #[test]
+    fn counts_placeholders_after_ignored_sql_regions() {
+        let sql = "SELECT '@P1 ignored' AS label -- @P2 ignored\nWHERE id = @P1 AND code = @P2";
+
+        validate_raw_sql_parameters(sql, 2).unwrap();
     }
 
     #[test]

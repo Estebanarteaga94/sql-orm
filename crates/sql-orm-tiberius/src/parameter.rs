@@ -165,6 +165,11 @@ fn sql_parameter_plan(sql: &str) -> Result<usize, OrmError> {
     let mut placeholders = BTreeSet::new();
 
     while index + 2 < bytes.len() {
+        if let Some(next_index) = skip_sql_non_code(bytes, index) {
+            index = next_index;
+            continue;
+        }
+
         if bytes[index] == b'@' && bytes[index + 1] == b'P' && bytes[index + 2].is_ascii_digit() {
             index += 2;
             let start = index;
@@ -201,6 +206,88 @@ fn sql_parameter_plan(sql: &str) -> Result<usize, OrmError> {
     }
 
     Ok(max_index)
+}
+
+fn skip_sql_non_code(bytes: &[u8], index: usize) -> Option<usize> {
+    match bytes[index] {
+        b'\'' => Some(skip_quoted_string(bytes, index)),
+        b'[' => Some(skip_bracket_identifier(bytes, index)),
+        b'"' => Some(skip_double_quoted_identifier(bytes, index)),
+        b'-' if index + 1 < bytes.len() && bytes[index + 1] == b'-' => {
+            Some(skip_line_comment(bytes, index))
+        }
+        b'/' if index + 1 < bytes.len() && bytes[index + 1] == b'*' => {
+            Some(skip_block_comment(bytes, index))
+        }
+        _ => None,
+    }
+}
+
+fn skip_quoted_string(bytes: &[u8], mut index: usize) -> usize {
+    index += 1;
+    while index < bytes.len() {
+        if bytes[index] == b'\'' {
+            index += 1;
+            if index < bytes.len() && bytes[index] == b'\'' {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        index += 1;
+    }
+    index
+}
+
+fn skip_bracket_identifier(bytes: &[u8], mut index: usize) -> usize {
+    index += 1;
+    while index < bytes.len() {
+        if bytes[index] == b']' {
+            index += 1;
+            if index < bytes.len() && bytes[index] == b']' {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        index += 1;
+    }
+    index
+}
+
+fn skip_double_quoted_identifier(bytes: &[u8], mut index: usize) -> usize {
+    index += 1;
+    while index < bytes.len() {
+        if bytes[index] == b'"' {
+            index += 1;
+            if index < bytes.len() && bytes[index] == b'"' {
+                index += 1;
+                continue;
+            }
+            break;
+        }
+        index += 1;
+    }
+    index
+}
+
+fn skip_line_comment(bytes: &[u8], mut index: usize) -> usize {
+    index += 2;
+    while index < bytes.len() && !matches!(bytes[index], b'\n' | b'\r') {
+        index += 1;
+    }
+    index
+}
+
+fn skip_block_comment(bytes: &[u8], mut index: usize) -> usize {
+    index += 2;
+    while index + 1 < bytes.len() {
+        if bytes[index] == b'*' && bytes[index + 1] == b'/' {
+            return index + 2;
+        }
+        index += 1;
+    }
+    bytes.len()
 }
 
 #[cfg(test)]
@@ -297,6 +384,39 @@ mod tests {
         let prepared = PreparedQuery::from_compiled(CompiledQuery::new(
             "SELECT @P1 WHERE owner_id = @P1",
             vec![SqlValue::I64(7)],
+        ));
+
+        assert!(prepared.validate_parameter_count().is_ok());
+    }
+
+    #[test]
+    fn ignores_placeholders_inside_sql_non_code_regions() {
+        let prepared = PreparedQuery::from_compiled(CompiledQuery::new(
+            r#"
+                SELECT @P1 AS value,
+                       '@P2 literal '' @P3 escaped quote' AS string_value,
+                       [@P4 identifier] AS bracket_identifier,
+                       "@P5 quoted identifier" AS quoted_identifier
+                -- @P6 line comment
+                /* @P7 block comment */
+                WHERE id = @P1
+            "#,
+            vec![SqlValue::I64(7)],
+        ));
+
+        assert!(prepared.validate_parameter_count().is_ok());
+    }
+
+    #[test]
+    fn ignores_placeholder_text_when_no_parameters_are_bound() {
+        let prepared = PreparedQuery::from_compiled(CompiledQuery::new(
+            r#"
+                SELECT '@P1 literal' AS literal,
+                       [@P2 identifier] AS identifier
+                -- @P3 comment
+                /* @P4 comment */
+            "#,
+            vec![],
         ));
 
         assert!(prepared.validate_parameter_count().is_ok());
