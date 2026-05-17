@@ -1,7 +1,7 @@
 # Stability Audit
 
-This audit records the public surfaces still marked as experimental, pending
-verification, deferred, planned, or explicitly unavailable as of 2026-04-30.
+This audit records the public surfaces that remain deferred, blocked, or
+explicitly unavailable as of the `0.2.0-rc.1` pre-release on 2026-05-17.
 It is based on `README.md`, `CHANGELOG.md`, `docs/context.md`,
 `docs/core-concepts.md`, `docs/api.md`, and public rustdoc in the root crate.
 

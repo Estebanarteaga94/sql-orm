@@ -93,7 +93,9 @@ Use `sql-orm` if you want:
 > SQL Server is currently the only supported backend.
 
 > [!WARNING]
-> This project is still `0.1.0`. Some APIs are experimental or intentionally limited. See [Current Limits](#current-limits).
+> This project is currently published as the `0.2.0-rc.1` pre-release. The
+> release candidate has full workspace validation for the documented surface,
+> but keeps explicit limits listed in [Current Limits](#current-limits).
 
 ---
 

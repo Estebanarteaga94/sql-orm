@@ -353,8 +353,8 @@ field access performs I/O.
 
 ### Change Tracking Boundary
 
-Navigation loading and experimental `Tracked<T>` are intentionally connected
-only at the root entity for this cut:
+Navigation loading and stable explicit `Tracked<T>` are intentionally connected
+only through the current context registry and the root entity for this cut:
 
 - `include(...)` and `include_many(...)` materialize ordinary entity values;
   they do not automatically register the root or included entities in the
@@ -363,6 +363,9 @@ only at the root entity for this cut:
   root without changing its state from `Unchanged` to `Modified`. If a related
   row is already tracked in the same context, the collection receives the
   registry-owned current snapshot for that identity.
+- `include(...)`, `include_many(...)` and ordinary `load_collection(...)` also
+  reuse registry-owned snapshots for related rows that are already tracked in
+  the same context.
 - Related entities loaded into `Navigation<T>`, `Collection<T>`,
   `LazyNavigation<T>` or `LazyCollection<T>` are not automatically tracked.
 - Mutating a navigation field through `tracked.current_mut()` still follows the
@@ -370,21 +373,22 @@ only at the root entity for this cut:
   does not persist relationship graph changes as inserts, deletes, FK updates
   or many-to-many updates.
 
-The stable identity-map behavior belongs to the future tracking stabilization
-work. Until then, navigation loading avoids pretending that graph identity or
-relationship persistence is already solved.
+This is identity-map reuse, not graph tracking. Navigation loading avoids
+pretending that relationship persistence is solved: changes to wrappers are not
+translated into dependent inserts/deletes, foreign-key moves or many-to-many
+link updates.
 
-### Future Identity Map Design
+### Identity Map Design
 
-The stable navigation/tracking integration should be built around one identity
-map owned by the context. The key must be deterministic:
+The navigation/tracking integration is built around one identity map owned by
+the context. The key is deterministic:
 
 ```text
 (entity Rust type, schema, table, primary-key column values)
 ```
 
-For root queries, includes and explicit loads, materialization should consult
-that identity map before returning or attaching an entity:
+For tracked root queries and navigation loading, materialization can consult
+that identity map before returning or attaching a related entity:
 
 1. Build the entity from the row using `FromRow`.
 2. Compute its identity key from metadata and primary-key values.
@@ -392,29 +396,16 @@ that identity map before returning or attaching an entity:
 4. Insert one tracked instance when the key is new.
 5. Attach navigation wrappers to those canonical instances.
 
-This future path must avoid duplicate in-memory instances for the same entity
-inside one context, including repeated includes and split-query collection
-loads. It must also preserve the current explicitness rules: raw SQL does not
-join the identity map automatically, and disconnected entities remain plain
+This path avoids stale related values when a matching tracked snapshot already
+exists in the same context. It preserves the current explicitness rules: raw
+SQL does not join the identity map automatically, newly materialized related
+rows are not registered automatically, and disconnected entities remain plain
 values unless the caller explicitly tracks them.
 
-Relationship persistence remains a separate policy decision. The first stable
-identity map should define navigation identity and graph materialization, but
-should not infer FK updates, dependent inserts/deletes, or many-to-many changes
-from wrapper mutations until `save_changes()` has explicit relationship-state
-rules.
-
-The minimum implementation guardrails are:
-
-- support simple primary keys first, or reject composite keys with clear errors;
-- preserve `tenant`, `soft_delete`, rowversion and audit behavior on canonical
-  tracked entities;
-- define attach/detach behavior before exposing graph tracking as stable;
-- ensure included entities loaded through different aliases still resolve to
-  one canonical instance when their identity key is equal;
-- keep query compilation in `sql-orm-sqlserver` and execution in
-  `sql-orm-tiberius`; the identity map belongs in the public/runtime
-  `sql-orm` layer.
+Relationship persistence remains a separate policy decision. The current
+identity-map cut defines snapshot reuse for already tracked identities, but it
+does not infer FK updates, dependent inserts/deletes, or many-to-many changes
+from wrapper mutations.
 
 ### Opt-In Lazy Loading
 
@@ -422,7 +413,7 @@ Lazy loading is not a default behavior. The first executable cut is limited to
 opt-in wrapper state and explicit loading integration. Normal entity field
 access never performs I/O.
 
-The planned shape is explicit at both the entity type and call site:
+The shape is explicit at the entity type:
 
 ```rust
 #[derive(Entity, Debug, Clone)]
@@ -479,7 +470,8 @@ manual shapes.
 
 #### Required Guardrails Before Implementation
 
-A broader lazy-loading implementation must provide all of these guardrails:
+A broader automatic lazy-loading implementation would need all of these
+guardrails before becoming available:
 
 - Opt-in field types only; existing `Navigation<T>` and `Collection<T>` must not become lazy by default.
 - No query from `Deref`, `as_ref`, `as_slice`, `Debug`, `Clone`, serialization or equality operations.

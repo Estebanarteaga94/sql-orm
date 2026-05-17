@@ -46,15 +46,16 @@ blocked surfaces and adding typed aggregations. These items are tracked in
 - Keep direct many-to-many navigation deferred; the supported shape is an
   explicit join entity with ordinary foreign keys and supported `belongs_to` /
   `has_many` navigations.
-- Implement split-query loading for large `has_many` collections if it becomes
-  part of the release scope; the current `split_query()` builder returns a
-  clear not-implemented error.
+- Split-query loading for large `has_many` collections remains deferred; the
+  current `split_query()` builder returns a clear not-implemented error.
 - Keep lazy loading as opt-in state only unless a future explicit async loader
   with a context-bearing value is designed and validated.
 
 ### Etapa 21: Tracking Stabilization
 
-- Audit public surfaces marked as experimental, pending verification, or deferred. Initial inventory is recorded in `docs/stability-audit.md`.
+- Audit public surfaces that had been marked as experimental, pending
+  verification, or deferred. Initial inventory is recorded in
+  `docs/stability-audit.md`.
 - Define stability criteria for `Tracked<T>`, `EntityState`, `find_tracked`, `add_tracked`, `remove_tracked`, and `save_changes()`. The criteria are recorded in `docs/tracking-stability.md`.
 - Replace the current experimental tracking assumptions with stable unit-of-work guarantees, transaction behavior, policy integration, and public tests. The stable explicit tracking surface now covers deterministic identity registration, registry-owned pending `Added`/`Modified`/`Deleted` snapshots after wrapper drop or consume, reattaching detached loaded identities from registry snapshots, rejecting persisted identity collisions against live or detached entries, stable missing-registration error precedence during persisted identity sync, preserving the tracking registry when `save_changes()` opens its internal transaction, reusing already tracked related snapshots in `load_collection_tracked(...)`, `load_collection(...)`, `include(...)` and `include_many(...)`, explicit detach/clear behavior, structural no-op detection for `Modified` entities, deterministic `save_changes()` operation ordering for simple foreign keys, no-op phase short-circuits, registry idempotency, tenant/audit runtime coverage for `save_changes()`, public trybuild coverage, and generated rustdoc for `save_changes()`.
 - The first stable-cut identity-map policy is explicit: one live `Tracked<T>` handle per persisted identity per context; detached entries may be reattached, duplicate live handles are rejected with `OrmError`, and registry-owned snapshots can be accepted or replaced after persistence without requiring the original wrapper to stay alive.

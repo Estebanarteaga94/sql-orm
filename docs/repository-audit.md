@@ -1,6 +1,6 @@
 # Repository Audit
 
-This audit records the repository state before writing broader conceptual documentation. It is based on the workspace manifests, public crate exports, implementation modules, tests, examples and existing docs reviewed on 2026-04-26.
+This audit records the repository state for the `0.2.0-rc.1` pre-release. It is based on the workspace manifests, public crate exports, implementation modules, tests, examples and existing docs reviewed on 2026-05-17.
 
 The master plan requested as `plan_orm_sqlserver_tiberius_code_first.md` is not present at the repository root. The active plan file is `docs/plan_orm_sqlserver_tiberius_code_first.md`.
 
@@ -29,6 +29,7 @@ Verified public derives:
 - `DbContext`
 - `Insertable`
 - `Changeset`
+- `FromRow`
 - `AuditFields`
 - `SoftDeleteFields`
 - `TenantContext`
@@ -37,6 +38,7 @@ Verified model and metadata contracts:
 
 - `Entity`, `EntityMetadata`, `ColumnMetadata`, `EntityColumn`
 - `PrimaryKeyMetadata`, `IdentityMetadata`, `IndexMetadata`, `ForeignKeyMetadata`
+- `NavigationMetadata`, `NavigationKind`
 - `EntityPolicy`, `EntityPolicyMetadata`
 - `SqlServerType`, `SqlTypeMapping`, `SqlValue`, `ColumnValue`
 - `Row`, `FromRow`, `Insertable`, `Changeset`, `OrmError`
@@ -51,13 +53,19 @@ Verified runtime/query API in the root crate:
 - `DbContext::save_changes()`
 - `DbSet::find`, `insert`, `update`, `delete`, `query`, `query_with`
 - `DbSet::find_tracked`, `add_tracked`, `remove_tracked`
+- `DbSet::load_collection`, `load_collection_tracked`
 - `DbSetQuery::filter`, `order_by`, `limit`, `take`, `paginate`, `count`
+- `DbSetQuery::exists`, `any`, `sum`, `avg`, `min`, `max`, `group_by`
 - `DbSetQuery::inner_join`, `left_join`, `join`
+- `DbSetQuery::try_inner_join_navigation`, `try_left_join_navigation`, and `_as` variants
+- `DbSetQuery::include`, `include_as`, `include_many`, `include_many_as`
 - `DbSetQuery::select`, `all_as::<T>()`, `first_as::<T>()`
 - `DbSetQuery::with_deleted`, `only_deleted`
+- `DbSetGroupedQuery::select_aggregate`, `try_select_aggregate`, `having`, `order_by`, `all_as::<T>()`, `first_as::<T>()`
 - `ActiveRecord`, `EntityPersist`, `EntityPrimaryKey`
 - `MigrationModelSource`, `model_snapshot_from_source`, `model_snapshot_json_from_source`
 - `SoftDeleteProvider`, `SoftDeleteContext`, `SoftDeleteRequestValues`
+- `AuditProvider`, `AuditContext`, `AuditRequestValues`
 - `TenantScopedEntity`, `ActiveTenant`
 
 Verified advanced module exports:
@@ -79,16 +87,19 @@ The following features are implemented in code and have tests or implementation 
 - Generated `Insertable` and `Changeset` models.
 - `DbContext` and typed `DbSet<T>` access from the public crate.
 - CRUD over simple primary keys: `find`, `insert`, `update`, `delete`.
-- Query builder over an AST with filters, logical predicate composition, ordering, pagination, limits, joins and counts.
-- SQL Server compiler for select, insert, update, delete, count, joins, projection aliases, parameters and migration operations.
+- Query builder over an AST with filters, logical predicate composition, ordering, pagination, limits, joins, counts, scalar aggregates and grouped aggregates.
+- SQL Server compiler for select, insert, update, delete, count, exists, scalar aggregates, grouped aggregates, joins, projection aliases, parameters and migration operations.
 - Tiberius execution adapter with connection-string parsing, parameter binding, row mapping, health checks, transactions, timeouts, tracing, slow-query options, retry options and optional pooling.
 - Raw SQL typed queries and commands through `raw<T>()` and `raw_exec()`.
 - Typed projections through `select(...)`, `all_as::<T>()` and `first_as::<T>()`.
+- Typed scalar aggregations through `count()`, `exists()`, `any()`, `sum()`, `avg()`, `min()` and `max()`.
+- Grouped aggregate DTOs through `group_by(...).select_aggregate(...).all_as::<T>()`.
 - Active Record convenience methods built over `DbSet`.
-- Experimental change tracking with `Tracked<T>` and `save_changes()`.
+- Stable explicit change tracking with `Tracked<T>` and `save_changes()` for entities with simple primary keys.
 - Optimistic concurrency conflict reporting through `OrmError::ConcurrencyConflict` for rowversion-aware routes.
 - Entity policies for audit metadata/schema, soft-delete runtime behavior and opt-in tenant filtering.
-- Migration snapshots, diff operations, SQL Server DDL generation, scaffold filesystem helpers and CLI commands.
+- Navigation metadata, explicit navigation joins, eager loading for one `belongs_to` / `has_one`, join-based `has_many` loading and explicit collection loading.
+- Migration snapshots, diff operations, SQL Server DDL generation, scaffold filesystem helpers, update scripts and explicit-target downgrade scripts.
 - `examples/todo-app` as a real external example crate with domain, context, HTTP wiring, snapshot exporter and migration artifacts.
 
 ## Incomplete Or Explicitly Limited Features
@@ -103,8 +114,8 @@ These items exist only with explicit limits or partial scope:
 - `raw<T>()` and `raw_exec()` do not apply ORM filters for `tenant` or `soft_delete`. The caller must write those predicates manually.
 - Soft-delete automatic read filters apply to the root entity of `DbSetQuery<E>`, not to every manually joined entity.
 - Query aliases for multiple references to the same table are supported through explicit aliases. Fully automatic alias assignment is still not implemented.
-- Navigation properties expose metadata, explicit navigation joins, single-navigation includes, join-based collection includes and explicit collection loading. Graph tracking, direct many-to-many, split-query execution and automatic lazy loading remain limited or deferred.
-- High-level aggregate projection APIs are not implemented. Low-level expression functions exist, but typed aggregate ergonomics are not a public feature.
+- Navigation properties expose metadata, explicit navigation joins, single-navigation includes, join-based collection includes and explicit collection loading. Relationship graph persistence, direct many-to-many, split-query execution and automatic lazy loading remain limited or deferred.
+- Typed aggregations are implemented for scalar and grouped DTO queries. Window functions, rollups, cubes and distinct aggregates remain outside the current cut.
 - Audit policy columns are not visible entity fields and do not generate column symbols. Audited entities expose audit-owned columns through `AuditEntity::audit_policy()`.
 - `AuditProvider` has a public runtime contract, is transported through contexts, and is applied to insert/update paths when audited entities have missing audit-owned values.
 - Migration rollback generation is available only when operation payloads are reversible. Some destructive operations still require manual `down.sql`.
@@ -118,7 +129,7 @@ The following should not be documented as available behavior:
 - Field-level access or generated symbols for policy-contributed audit columns such as `Todo::created_at`.
 - Direct many-to-many navigation, automatic nested includes, automatic lazy loading and stable graph tracking.
 - Fully automatic table alias assignment for self-joins or repeated table joins.
-- High-level typed aggregate builder APIs.
+- Window functions, rollups, cubes and distinct aggregate APIs.
 - Complete composite-primary-key persistence across all public CRUD, Active Record and tracking paths.
 - A Rust `migration.rs` migration API parallel to the current SQL/snapshot artifact flow.
 - Database backends other than SQL Server.
@@ -129,7 +140,7 @@ The following should not be documented as available behavior:
 
 `Entity -> EntityMetadata -> Query AST -> SQL Server SQL -> Tiberius execution -> Row -> Entity or DTO`
 
-It should avoid presenting planned-only behavior as shipped. Claims about direct many-to-many navigation, automatic lazy loading, graph tracking, multi-database abstractions, aggregate builders and composite primary key CRUD should be marked as unavailable or pending verification unless the implementation changes first.
+It should avoid presenting planned-only behavior as shipped. Claims about direct many-to-many navigation, automatic lazy loading, relationship graph persistence, multi-database abstractions, advanced aggregate SQL shapes and composite primary key CRUD should be marked as unavailable unless a future implementation changes those limits.
 
 The public README can safely link to this audit and to `docs/core-concepts.md` once created, but should not duplicate the full inventory.
 

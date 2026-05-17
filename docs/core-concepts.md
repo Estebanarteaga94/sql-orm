@@ -391,8 +391,7 @@ Important limits:
 
 These are intentional limits of the current implementation:
 
-For the current audited inventory of pending verification, deferred, and
-blocked public surfaces, see
+For the current audited inventory of deferred and blocked public surfaces, see
 [Stability audit](stability-audit.md).
 For the criteria used to stabilize `Tracked<T>` and `save_changes()`, see
 [Tracking stability criteria](tracking-stability.md).
@@ -405,11 +404,12 @@ For the criteria used to stabilize `Tracked<T>` and `save_changes()`, see
   closure.
 - Navigation properties are implemented for metadata, inferred explicit joins,
   single-navigation includes, join-based `has_many` includes, and explicit
-  `has_many` collection loading; automatic relationship persistence and graph
-  tracking are not implemented.
+  `has_many` collection loading; automatic relationship persistence is not
+  implemented.
 - Table aliases are implemented for explicit aliases, repeated joins and
   self-joins; fully automatic alias assignment is not implemented.
-- High-level typed aggregate builders are not implemented.
+- Typed scalar and grouped aggregate builders are implemented; window
+  functions, rollups, cubes and distinct aggregate APIs are not implemented.
 - Lazy navigation wrappers are state containers only and never query by
   themselves.
 - `migration.rs` is not implemented.

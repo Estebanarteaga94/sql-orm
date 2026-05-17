@@ -189,9 +189,8 @@ Relevant limits:
   soft-delete paths, disables retry while the transaction is active, and clears
   the pinned slot after commit, rollback or transaction setup errors.
 
-The current inventory of pending verification, deferred, and blocked public
-surfaces is tracked in [Stability audit](stability-audit.md). The criteria used
-to stabilize tracking are tracked in
+The current inventory of deferred and blocked public surfaces is tracked in
+[Stability audit](stability-audit.md). The criteria used to stabilize tracking are tracked in
 [Tracking stability criteria](tracking-stability.md).
 
 ## Query Builder
