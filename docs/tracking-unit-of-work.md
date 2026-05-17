@@ -113,10 +113,12 @@ registry-owned state.
 As of 2026-05-16, registry entries also own typed original/current snapshot
 clones captured at registration time. `mark_unchanged()`, immediate tracked
 save and successful tracked persistence helpers synchronize those owned
-snapshots when they accept or replace the wrapper value. `save_changes()` still
-uses live wrapper pointers for current values and change detection; adapting it
-to read registry-owned snapshots remains the next task. Dropping a wrapper
-still unregisters the entry in this slice.
+snapshots when they accept or replace the wrapper value. The helpers used by
+`save_changes()` now read current values and change-detection snapshot pairs
+from the registry-owned snapshots. While `DerefMut` is still wrapper-backed,
+those helpers first synchronize the registry current snapshot from the live
+wrapper. Dropping a wrapper still unregisters the entry in this slice, so the
+final wrapper-lifetime dependency remains open.
 
 ## Current Detach And State Policy
 
