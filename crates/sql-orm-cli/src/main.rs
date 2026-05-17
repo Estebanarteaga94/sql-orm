@@ -724,14 +724,18 @@ mod tests {
         CliCommand, DatabaseDowngradeOptions, DatabaseUpdateOptions, MigrationAddOptions,
         build_migration_plan, first_destructive_migration_operation, parse_command, run,
     };
-    use sql_orm_core::SqlServerType;
+    use sql_orm_core::{FromRow, OrmError, Row, SqlServerType};
     use sql_orm_migrate::{
         AlterColumn, ColumnSnapshot, DropColumn, DropTable, MigrationOperation, ModelSnapshot,
         SchemaSnapshot, TableSnapshot, read_model_snapshot,
     };
+    use sql_orm_query::CompiledQuery;
+    use sql_orm_tiberius::MssqlConnection;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    const TEST_CONNECTION_ENV: &str = "SQL_ORM_TEST_CONNECTION_STRING";
 
     fn temp_project_root() -> PathBuf {
         let unique = SystemTime::now()
@@ -753,6 +757,34 @@ mod tests {
             "{ \"schemas\": [] }",
         )
         .unwrap();
+    }
+
+    fn test_connection_string() -> Option<String> {
+        std::env::var(TEST_CONNECTION_ENV)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    }
+
+    fn unique_test_suffix() -> String {
+        SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos()
+            .to_string()
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct CountRow {
+        count: i32,
+    }
+
+    impl FromRow for CountRow {
+        fn from_row<R: Row>(row: &R) -> Result<Self, OrmError> {
+            Ok(Self {
+                count: row.get_required_typed::<i32>("count")?,
+            })
+        }
     }
 
     fn test_column(
@@ -1693,5 +1725,229 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("--connection-string requires --execute"));
+    }
+
+    #[test]
+    fn database_downgrade_execute_roundtrips_against_real_sql_server() -> Result<(), OrmError> {
+        let Some(connection_string) = test_connection_string() else {
+            eprintln!(
+                "skipping database downgrade integration test because {TEST_CONNECTION_ENV} is not set"
+            );
+            return Ok(());
+        };
+
+        let root = temp_project_root();
+        let suffix = unique_test_suffix();
+        let schema = format!("stage23_downgrade_{suffix}");
+        let table = "items";
+        let first_migration = format!("100_{suffix}_create_items");
+        let second_migration = format!("200_{suffix}_add_description");
+
+        write_cli_migration(
+            &root,
+            &first_migration,
+            &format!(
+                "CREATE SCHEMA [{schema}];\nCREATE TABLE [{schema}].[{table}] ([id] bigint NOT NULL CONSTRAINT [pk_{schema}_{table}] PRIMARY KEY);"
+            ),
+            &format!("DROP TABLE [{schema}].[{table}];\nDROP SCHEMA [{schema}];"),
+        );
+        write_cli_migration(
+            &root,
+            &second_migration,
+            &format!("ALTER TABLE [{schema}].[{table}] ADD [description] nvarchar(120) NULL;"),
+            &format!("ALTER TABLE [{schema}].[{table}] DROP COLUMN [description];"),
+        );
+
+        let update_result = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "update".to_string(),
+                "--execute".to_string(),
+                "--connection-string".to_string(),
+                connection_string.clone(),
+            ],
+            &root,
+        );
+        if let Err(error) = update_result {
+            cleanup_downgrade_runtime_artifacts(
+                &connection_string,
+                &schema,
+                table,
+                &[&first_migration, &second_migration],
+            )?;
+            return Err(OrmError::new(error));
+        }
+
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|error| OrmError::new(format!("failed to create async runtime: {error}")))?;
+        runtime.block_on(async {
+            assert_eq!(
+                column_count(&connection_string, &schema, table, "description").await?,
+                1
+            );
+            assert_eq!(
+                migration_history_count(&connection_string, &[&first_migration, &second_migration])
+                    .await?,
+                2
+            );
+            Ok::<(), OrmError>(())
+        })?;
+
+        let downgrade_result = run(
+            vec![
+                "sql-orm-cli".to_string(),
+                "database".to_string(),
+                "downgrade".to_string(),
+                "--target".to_string(),
+                first_migration.clone(),
+                "--execute".to_string(),
+                "--connection-string".to_string(),
+                connection_string.clone(),
+            ],
+            &root,
+        );
+        if let Err(error) = downgrade_result {
+            cleanup_downgrade_runtime_artifacts(
+                &connection_string,
+                &schema,
+                table,
+                &[&first_migration, &second_migration],
+            )?;
+            return Err(OrmError::new(error));
+        }
+
+        let validation = runtime.block_on(async {
+            assert_eq!(
+                column_count(&connection_string, &schema, table, "description").await?,
+                0
+            );
+            assert_eq!(table_count(&connection_string, &schema, table).await?, 1);
+            assert_eq!(
+                migration_history_count(&connection_string, &[&first_migration]).await?,
+                1
+            );
+            assert_eq!(
+                migration_history_count(&connection_string, &[&second_migration]).await?,
+                0
+            );
+            Ok::<(), OrmError>(())
+        });
+
+        cleanup_downgrade_runtime_artifacts(
+            &connection_string,
+            &schema,
+            table,
+            &[&first_migration, &second_migration],
+        )?;
+
+        validation
+    }
+
+    fn cleanup_downgrade_runtime_artifacts(
+        connection_string: &str,
+        schema: &str,
+        table: &str,
+        migration_ids: &[&str],
+    ) -> Result<(), OrmError> {
+        let runtime = tokio::runtime::Runtime::new()
+            .map_err(|error| OrmError::new(format!("failed to create async runtime: {error}")))?;
+        runtime.block_on(async {
+            let mut connection = MssqlConnection::connect(connection_string).await?;
+            connection
+                .execute(CompiledQuery::new(
+                    format!(
+                        "IF OBJECT_ID(N'[{schema}].[{table}]', N'U') IS NOT NULL DROP TABLE [{schema}].[{table}];"
+                    ),
+                    vec![],
+                ))
+                .await?;
+            connection
+                .execute(CompiledQuery::new(
+                    format!(
+                        "IF SCHEMA_ID(N'{schema}') IS NOT NULL EXEC(N'DROP SCHEMA [{schema}]');"
+                    ),
+                    vec![],
+                ))
+                .await?;
+
+            if !migration_ids.is_empty() {
+                let ids = migration_ids
+                    .iter()
+                    .map(|id| format!("N'{}'", id.replace('\'', "''")))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                connection
+                    .execute(CompiledQuery::new(
+                        format!(
+                            "IF OBJECT_ID(N'[dbo].[__sql_orm_migrations]', N'U') IS NOT NULL DELETE FROM [dbo].[__sql_orm_migrations] WHERE [id] IN ({ids});"
+                        ),
+                        vec![],
+                    ))
+                    .await?;
+            }
+
+            Ok(())
+        })
+    }
+
+    async fn table_count(
+        connection_string: &str,
+        schema: &str,
+        table: &str,
+    ) -> Result<i32, OrmError> {
+        fetch_count(
+            connection_string,
+            format!(
+                "SELECT CAST(COUNT(*) AS int) AS [count] FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = N'{schema}' AND TABLE_NAME = N'{table}'"
+            ),
+        )
+        .await
+    }
+
+    async fn column_count(
+        connection_string: &str,
+        schema: &str,
+        table: &str,
+        column: &str,
+    ) -> Result<i32, OrmError> {
+        fetch_count(
+            connection_string,
+            format!(
+                "SELECT CAST(COUNT(*) AS int) AS [count] FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'{schema}' AND TABLE_NAME = N'{table}' AND COLUMN_NAME = N'{column}'"
+            ),
+        )
+        .await
+    }
+
+    async fn migration_history_count(
+        connection_string: &str,
+        migration_ids: &[&str],
+    ) -> Result<i32, OrmError> {
+        if migration_ids.is_empty() {
+            return Ok(0);
+        }
+
+        let ids = migration_ids
+            .iter()
+            .map(|id| format!("N'{}'", id.replace('\'', "''")))
+            .collect::<Vec<_>>()
+            .join(", ");
+        fetch_count(
+            connection_string,
+            format!(
+                "SELECT CAST(COUNT(*) AS int) AS [count] FROM [dbo].[__sql_orm_migrations] WHERE [id] IN ({ids})"
+            ),
+        )
+        .await
+    }
+
+    async fn fetch_count(connection_string: &str, sql: String) -> Result<i32, OrmError> {
+        let mut connection = MssqlConnection::connect(connection_string).await?;
+        let row = connection
+            .fetch_one::<CountRow>(CompiledQuery::new(sql, vec![]))
+            .await?
+            .ok_or_else(|| OrmError::new("count query did not return a row"))?;
+        Ok(row.count)
     }
 }
