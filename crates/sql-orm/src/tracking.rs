@@ -145,8 +145,10 @@ struct TrackingRegistration {
     entity_type_id: TypeId,
     entity_rust_name: &'static str,
     inner_address: usize,
+    wrapper_attached: bool,
     state: EntityState,
     snapshots: Box<dyn Any + Send + Sync>,
+    sync_current_from_wrapper: unsafe fn(&mut Box<dyn Any + Send + Sync>, usize),
 }
 
 impl fmt::Debug for TrackingRegistration {
@@ -157,6 +159,7 @@ impl fmt::Debug for TrackingRegistration {
             .field("entity_type_id", &self.entity_type_id)
             .field("entity_rust_name", &self.entity_rust_name)
             .field("inner_address", &self.inner_address)
+            .field("wrapper_attached", &self.wrapper_attached)
             .field("state", &self.state)
             .finish_non_exhaustive()
     }
@@ -507,6 +510,23 @@ impl TrackingRegistry {
         }
     }
 
+    pub(crate) fn detach_wrapper(&self, registration_id: usize) {
+        let mut state = self.state.lock().expect("tracking registry mutex poisoned");
+        if let Some(entry) = state
+            .entries
+            .iter_mut()
+            .find(|entry| entry.registration_id == registration_id)
+        {
+            if entry.wrapper_attached {
+                unsafe {
+                    (entry.sync_current_from_wrapper)(&mut entry.snapshots, entry.inner_address);
+                }
+            }
+            entry.wrapper_attached = false;
+            entry.inner_address = 0;
+        }
+    }
+
     pub(crate) fn set_snapshots<E: Clone + Send + Sync + 'static>(
         &self,
         registration_id: usize,
@@ -523,19 +543,17 @@ impl TrackingRegistry {
         }
     }
 
-    fn set_current_snapshot<E: Clone + Send + Sync + 'static>(
-        &self,
-        registration_id: usize,
-        current: E,
-    ) {
+    fn sync_current_snapshot_from_wrapper(&self, registration_id: usize) {
         let mut state = self.state.lock().expect("tracking registry mutex poisoned");
-        if let Some(snapshots) = state
+        if let Some(entry) = state
             .entries
             .iter_mut()
             .find(|entry| entry.registration_id == registration_id)
-            .and_then(|entry| entry.snapshots.downcast_mut::<TrackingSnapshots<E>>())
+            .filter(|entry| entry.wrapper_attached)
         {
-            snapshots.current = current;
+            unsafe {
+                (entry.sync_current_from_wrapper)(&mut entry.snapshots, entry.inner_address);
+            }
         }
     }
 
@@ -768,11 +786,13 @@ impl TrackingRegistryState {
             entity_type_id: TypeId::of::<E>(),
             entity_rust_name: E::metadata().rust_name,
             inner_address: tracked.inner.as_ref() as *const TrackedInner<E> as usize,
+            wrapper_attached: true,
             state: tracked.inner.state,
             snapshots: Box::new(TrackingSnapshots::<E> {
                 original: tracked.inner.original.clone(),
                 current: tracked.inner.current.clone(),
             }),
+            sync_current_from_wrapper: sync_current_snapshot_from_wrapper::<E>,
         });
         registration_id
     }
@@ -814,13 +834,8 @@ impl<E: Clone + Send + Sync + 'static> RegisteredTracked<E> {
     }
 
     fn sync_current_snapshot_from_wrapper(&self) {
-        let current = unsafe {
-            (&*(self.inner_address as *const TrackedInner<E>))
-                .current
-                .clone()
-        };
         self.tracking_registry
-            .set_current_snapshot(self.registration_id, current);
+            .sync_current_snapshot_from_wrapper(self.registration_id);
     }
 
     pub(crate) fn accept_current(&self) {
@@ -864,6 +879,17 @@ impl<E: EntityPersist + Clone + Send + Sync + 'static> RegisteredTracked<E> {
     }
 }
 
+unsafe fn sync_current_snapshot_from_wrapper<E: Clone + Send + Sync + 'static>(
+    snapshots: &mut Box<dyn Any + Send + Sync>,
+    inner_address: usize,
+) {
+    let Some(snapshots) = snapshots.downcast_mut::<TrackingSnapshots<E>>() else {
+        return;
+    };
+    let inner = unsafe { &*(inner_address as *const TrackedInner<E>) };
+    snapshots.current = inner.current.clone();
+}
+
 impl<T: Clone> Clone for Tracked<T> {
     fn clone(&self) -> Self {
         Self {
@@ -903,7 +929,11 @@ impl<T> Drop for Tracked<T> {
         if let (Some(registration_id), Some(registry)) =
             (self.registration_id.take(), self.tracking_registry.take())
         {
-            registry.unregister(registration_id);
+            if self.inner.state == EntityState::Added {
+                registry.detach_wrapper(registration_id);
+            } else {
+                registry.unregister(registration_id);
+            }
         }
     }
 }
@@ -1446,6 +1476,27 @@ mod tests {
                 .name,
             "changed"
         );
+    }
+
+    #[test]
+    fn dropping_added_wrapper_detaches_handle_without_removing_registry_entry() {
+        let registry = Arc::new(TrackingRegistry::default());
+
+        {
+            let mut tracked = Tracked::from_added(SnapshotEntity {
+                name: "new".to_string(),
+            });
+            tracked.attach_registry_added(Arc::clone(&registry));
+            tracked.current_mut().name = "changed before drop".to_string();
+
+            assert_eq!(registry.entry_count(), 1);
+        }
+
+        let registered = registry.tracked_for::<SnapshotEntity>()[0].clone();
+
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(registry.registrations()[0].state, EntityState::Added);
+        assert_eq!(registered.current_clone().name, "changed before drop");
     }
 
     #[test]

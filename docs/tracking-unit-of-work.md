@@ -120,6 +120,14 @@ those helpers first synchronize the registry current snapshot from the live
 wrapper. Dropping a wrapper still unregisters the entry in this slice, so the
 final wrapper-lifetime dependency remains open.
 
+As of 2026-05-16, `Added` entries are the first exception to wrapper-drop
+detach semantics: dropping or consuming an `Added` wrapper synchronizes its
+current value into the registry-owned snapshot and detaches only the handle,
+leaving the pending insert in the registry. This is safe because `Added`
+entries do not need a pre-existing persisted snapshot for update comparison.
+`Modified` and `Deleted` still unregister on wrapper drop until mutation and
+delete state become fully registry-owned.
+
 ## Current Detach And State Policy
 
 The current experimental policy is explicit:

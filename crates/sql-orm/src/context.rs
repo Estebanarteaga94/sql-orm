@@ -3184,7 +3184,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn dropping_added_entry_discards_pending_insert_before_save_phase_validation() {
+    async fn dropping_added_entry_keeps_pending_insert_for_registry_owned_entry() {
         let dbset = DbSet::<CompositeKeyEntity>::disconnected();
         let registry = dbset.tracking_registry();
 
@@ -3195,14 +3195,17 @@ mod tests {
             assert_eq!(registry.entry_count(), 1);
         }
 
-        let added_saved = dbset.save_tracked_added().await.unwrap();
+        let error = dbset.save_tracked_added().await.unwrap_err();
 
-        assert_eq!(added_saved, 0);
-        assert_eq!(registry.entry_count(), 0);
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(
+            error.message(),
+            "change tracking currently supports only entities with a single primary key column"
+        );
     }
 
     #[tokio::test]
-    async fn into_current_on_added_entry_discards_pending_insert_before_save_phase_validation() {
+    async fn into_current_on_added_entry_keeps_pending_insert_for_registry_owned_entry() {
         let dbset = DbSet::<CompositeKeyEntity>::disconnected();
         let registry = dbset.tracking_registry();
         let tracked = dbset.add_tracked(CompositeKeyEntity);
@@ -3211,10 +3214,13 @@ mod tests {
         assert_eq!(registry.entry_count(), 1);
 
         let _current = tracked.into_current();
-        let added_saved = dbset.save_tracked_added().await.unwrap();
+        let error = dbset.save_tracked_added().await.unwrap_err();
 
-        assert_eq!(added_saved, 0);
-        assert_eq!(registry.entry_count(), 0);
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(
+            error.message(),
+            "change tracking currently supports only entities with a single primary key column"
+        );
     }
 
     #[tokio::test]
