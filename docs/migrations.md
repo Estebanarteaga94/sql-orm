@@ -126,6 +126,54 @@ Connection-string resolution order for `--execute`:
 
 The generated script uses a `__sql_orm_migrations` history table. It records migration identity and checksum. Editing an already-applied migration is treated as drift and should fail intentionally.
 
+## Planned Database Downgrade
+
+`database downgrade` is the next migration workflow planned for Etapa 23. It must be built on the artifacts that already exist today:
+
+- local migration directories under `migrations/`;
+- `down.sql` for rollback SQL;
+- `up.sql` checksums;
+- `model_snapshot.json` for local ordering and identity;
+- the existing `[dbo].[__sql_orm_migrations]` history table.
+
+The command shape should stay script-first, matching `database update`:
+
+```bash
+sql-orm-cli database downgrade --target <MigrationId>
+```
+
+By default the command should print a SQL script. Execution remains opt-in:
+
+```bash
+sql-orm-cli database downgrade --target <MigrationId> --execute \
+  --connection-string "$DATABASE_URL"
+```
+
+The target is the last migration that should remain applied after the downgrade. Rolling back everything should require an explicit sentinel target such as `0`; there should be no implicit "previous migration" default.
+
+The script generation flow should be:
+
+1. Read local migrations in ascending order.
+2. Read applied migrations from `[dbo].[__sql_orm_migrations]` when execution is requested, or generate a script that queries that table when only printing SQL.
+3. Validate that the requested target is explicit and known, unless it is the empty-database sentinel.
+4. Select applied migrations after the target.
+5. Process those migrations in reverse order.
+6. For each migration, verify that the stored checksum matches the checksum of local `up.sql`.
+7. Execute the local `down.sql` inside a transaction.
+8. Delete the migration row from `[dbo].[__sql_orm_migrations]` only after `down.sql` succeeds.
+
+The first implementation should not introduce `migration.rs`. Hand-authored rollback logic belongs in `down.sql` for this phase.
+
+Safety requirements for the implementation phase:
+
+- reject missing target;
+- reject unknown target;
+- reject an applied migration that does not exist locally;
+- reject missing or comment-only `down.sql`;
+- reject checksum mismatch before running rollback SQL;
+- run each migration rollback in its own transaction;
+- fail clearly when rollback cannot be proven reversible from the local artifacts.
+
 ## Recreating the Todo App Migration Flow
 
 ```bash
@@ -136,8 +184,8 @@ The script generates an initial migration from the current example model, a no-o
 
 ## Limits
 
-- `down.sql` is not executed automatically.
-- `database downgrade` does not exist.
+- `down.sql` is not executed automatically yet.
+- `database downgrade` is designed for Etapa 23 but not implemented yet.
 - `migration.rs` is outside the current MVP.
 - Composite foreign-key derivation from public attributes is not part of the current derive surface.
 - Review SQL carefully for computed columns, foreign keys, indexes, and explicit renames.
