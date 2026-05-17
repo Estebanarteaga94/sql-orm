@@ -216,10 +216,24 @@ pub fn build_database_downgrade_script(
         .filter(|migration| target == "0" || migration.id.as_str() > target)
         .rev()
         .map(|migration| {
-            let up_sql = fs::read_to_string(&migration.up_sql_path)
-                .map_err(|_| OrmError::new("failed to read migration up.sql"))?;
-            let down_sql = fs::read_to_string(&migration.down_sql_path)
-                .map_err(|_| OrmError::new("failed to read migration down.sql"))?;
+            let up_sql = fs::read_to_string(&migration.up_sql_path).map_err(|_| {
+                OrmError::new(format!(
+                    "database downgrade migration `{}` is missing local up.sql for checksum validation",
+                    migration.id
+                ))
+            })?;
+            let down_sql = fs::read_to_string(&migration.down_sql_path).map_err(|_| {
+                OrmError::new(format!(
+                    "database downgrade migration `{}` is missing local down.sql",
+                    migration.id
+                ))
+            })?;
+            if is_unresolved_down_sql_template(&down_sql) {
+                return Err(OrmError::new(format!(
+                    "database downgrade migration `{}` has no reversible payload in down.sql; edit down.sql with executable rollback SQL",
+                    migration.id
+                )));
+            }
             let down_statements = split_sql_statements(&down_sql);
             if down_statements.is_empty() {
                 return Err(OrmError::new(format!(
@@ -376,6 +390,33 @@ fn checksum_hex(bytes: &[u8]) -> String {
 
 fn escape_sql_literal(sql: &str) -> String {
     sql.replace('\'', "''")
+}
+
+fn is_unresolved_down_sql_template(sql: &str) -> bool {
+    let mut saw_executable_statement = false;
+    let mut saw_unresolved_marker = false;
+
+    for line in sql.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+
+        if trimmed.starts_with("--") {
+            let lower = trimmed.to_ascii_lowercase();
+            if lower.contains("manual rollback sql")
+                || lower.contains("does not execute down.sql automatically")
+                || lower.contains("no reversible schema changes detected")
+            {
+                saw_unresolved_marker = true;
+            }
+            continue;
+        }
+
+        saw_executable_statement = true;
+    }
+
+    saw_unresolved_marker && !saw_executable_statement
 }
 
 fn split_sql_statements(sql: &str) -> Vec<String> {
@@ -735,6 +776,73 @@ mod tests {
             error
                 .to_string()
                 .contains("migration `200_create_orders` has no executable down.sql statements")
+        );
+    }
+
+    #[test]
+    fn database_downgrade_reports_missing_artifacts_and_unresolved_templates() {
+        let root = temp_project_root();
+        write_local_migration(
+            &root,
+            "100_create_customers",
+            "CREATE TABLE [sales].[customers] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[customers];",
+        );
+        write_local_migration(
+            &root,
+            "200_create_orders",
+            "CREATE TABLE [sales].[orders] ([id] bigint NOT NULL);",
+            "DROP TABLE [sales].[orders];",
+        );
+        fs::remove_file(root.join("migrations/200_create_orders/down.sql")).unwrap();
+
+        let error = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "100_create_customers",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("migration `200_create_orders` is missing local down.sql")
+        );
+
+        fs::write(
+            root.join("migrations/200_create_orders/down.sql"),
+            "-- Migration: 200_create_orders\n-- Manual rollback SQL for this editable migration.\n-- The current MVP does not execute down.sql automatically.\n",
+        )
+        .unwrap();
+
+        let error = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "100_create_customers",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("migration `200_create_orders` has no reversible payload in down.sql")
+        );
+
+        fs::remove_file(root.join("migrations/200_create_orders/up.sql")).unwrap();
+        fs::write(
+            root.join("migrations/200_create_orders/down.sql"),
+            "DROP TABLE [sales].[orders];",
+        )
+        .unwrap();
+
+        let error = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "100_create_customers",
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("migration `200_create_orders` is missing local up.sql")
         );
     }
 

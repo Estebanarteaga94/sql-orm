@@ -183,6 +183,7 @@ Safety requirements:
 - reject unknown target;
 - reject an applied migration that does not exist locally;
 - reject missing or comment-only `down.sql`;
+- reject unresolved scaffold/template `down.sql` that still contains only manual rollback guidance;
 - reject checksum mismatch before running rollback SQL;
 - run each migration rollback in its own transaction;
 - fail clearly when rollback cannot be proven reversible from the local artifacts.
@@ -214,6 +215,7 @@ History and checksum rules:
 - `down.sql` must exist for every migration selected for rollback.
 - `down.sql` must contain at least one executable statement after comments and blank lines are ignored.
 - Template-only or comment-only `down.sql` must be treated as non-reversible.
+- Missing `up.sql` must fail before rollback because the local checksum cannot be compared to migration history.
 - The implementation must not infer reverse SQL from `model_snapshot.json` at downgrade time.
 - The implementation must not read or require `migration.rs`.
 
