@@ -4131,6 +4131,7 @@ mod tests {
                     ColumnValue::new("name", SqlValue::String("ana".to_string())),
                     ColumnValue::new("active", SqlValue::Bool(true)),
                 ],
+                entity: Some(TestEntity::metadata()),
             }
         );
     }
@@ -4244,6 +4245,7 @@ mod tests {
         let insert = super::SqlServerCompiler::compile_insert(&InsertQuery {
             into: TableRef::for_entity::<TenantWriteEntity>(),
             values: insert_values,
+            entity: Some(TenantWriteEntity::metadata()),
         })
         .unwrap();
         let update = super::SqlServerCompiler::compile_update(

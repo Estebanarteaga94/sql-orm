@@ -580,6 +580,7 @@ mod tests {
 
         assert_eq!(insert.into, TableRef::new("sales", "customers"));
         assert_eq!(insert.values.len(), 2);
+        assert_eq!(insert.entity, Some(Customer::metadata()));
         assert_eq!(update.table, TableRef::new("sales", "customers"));
         assert_eq!(update.changes.len(), 1);
         assert!(update.predicate.is_some());

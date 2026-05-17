@@ -1,7 +1,7 @@
 use crate::quoting::{
     quote_column_ref, quote_identifier, quote_table_ref, quote_table_reference, quote_table_source,
 };
-use sql_orm_core::{ColumnValue, OrmError, SqlValue};
+use sql_orm_core::{ColumnMetadata, ColumnValue, EntityMetadata, OrmError, SqlValue};
 use sql_orm_query::{
     AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
     BinaryOp, CompiledQuery, CountQuery, DeleteQuery, ExistsQuery, Expr, InsertQuery, Join,
@@ -79,6 +79,7 @@ impl crate::SqlServerCompiler {
                 "SQL Server insert compilation requires at least one value",
             ));
         }
+        validate_insert_query(query)?;
 
         let mut parameters = ParameterBuilder::default();
         let (columns, values) = compile_column_values(&query.values, &mut parameters)?;
@@ -224,6 +225,73 @@ impl crate::SqlServerCompiler {
 
         Ok(parameters.finish(sql))
     }
+}
+
+fn validate_insert_query(query: &InsertQuery) -> Result<(), OrmError> {
+    let Some(metadata) = query.entity else {
+        return Err(OrmError::new(
+            "SQL Server insert compilation requires entity metadata",
+        ));
+    };
+
+    if metadata.schema != query.into.schema || metadata.table != query.into.table {
+        return Err(OrmError::new(format!(
+            "SQL Server insert target [{}].[{}] does not match entity metadata [{}].[{}]",
+            query.into.schema, query.into.table, metadata.schema, metadata.table
+        )));
+    }
+
+    let mut seen_columns = BTreeSet::new();
+    for value in &query.values {
+        if !seen_columns.insert(value.column_name) {
+            return Err(OrmError::new(format!(
+                "SQL Server insert column `{}` is duplicated",
+                value.column_name
+            )));
+        }
+
+        let column = metadata.column(value.column_name).ok_or_else(|| {
+            OrmError::new(format!(
+                "SQL Server insert column `{}` is not defined on entity `{}`",
+                value.column_name, metadata.rust_name
+            ))
+        })?;
+        validate_insert_column(metadata, column)?;
+    }
+
+    Ok(())
+}
+
+fn validate_insert_column(
+    metadata: &EntityMetadata,
+    column: &ColumnMetadata,
+) -> Result<(), OrmError> {
+    if column.rowversion {
+        return Err(OrmError::new(format!(
+            "SQL Server insert column `{}` on entity `{}` is rowversion and cannot be inserted",
+            column.column_name, metadata.rust_name
+        )));
+    }
+    if column.is_computed() {
+        return Err(OrmError::new(format!(
+            "SQL Server insert column `{}` on entity `{}` is computed and cannot be inserted",
+            column.column_name, metadata.rust_name
+        )));
+    }
+    if column.primary_key && column.identity.is_some() {
+        return Err(OrmError::new(format!(
+            "SQL Server insert column `{}` on entity `{}` is an identity primary key and cannot be inserted",
+            column.column_name, metadata.rust_name
+        )));
+    }
+    if !column.insertable {
+        return Err(OrmError::new(format!(
+            "SQL Server insert column `{}` on entity `{}` is not insertable",
+            column.column_name, metadata.rust_name
+        )));
+    }
+
+    Ok(())
 }
 
 fn validate_aggregate_query(query: &AggregateQuery) -> Result<(), OrmError> {
@@ -775,7 +843,7 @@ mod tests {
     #[allow(dead_code)]
     struct Order;
 
-    static CUSTOMER_COLUMNS: [ColumnMetadata; 4] = [
+    static CUSTOMER_COLUMNS: [ColumnMetadata; 7] = [
         ColumnMetadata {
             rust_field: "id",
             column_name: "id",
@@ -841,6 +909,57 @@ mod tests {
             insertable: true,
             updatable: true,
             max_length: None,
+            precision: None,
+            scale: None,
+        },
+        ColumnMetadata {
+            rust_field: "version",
+            column_name: "version",
+            renamed_from: None,
+            sql_type: SqlServerType::RowVersion,
+            nullable: false,
+            primary_key: false,
+            identity: None,
+            default_sql: None,
+            computed_sql: None,
+            rowversion: true,
+            insertable: false,
+            updatable: false,
+            max_length: None,
+            precision: None,
+            scale: None,
+        },
+        ColumnMetadata {
+            rust_field: "email_domain",
+            column_name: "email_domain",
+            renamed_from: None,
+            sql_type: SqlServerType::NVarChar,
+            nullable: false,
+            primary_key: false,
+            identity: None,
+            default_sql: None,
+            computed_sql: Some("RIGHT([email], CHARINDEX('@', REVERSE([email])) - 1)"),
+            rowversion: false,
+            insertable: false,
+            updatable: false,
+            max_length: Some(160),
+            precision: None,
+            scale: None,
+        },
+        ColumnMetadata {
+            rust_field: "created_by_runtime",
+            column_name: "created_by_runtime",
+            renamed_from: None,
+            sql_type: SqlServerType::NVarChar,
+            nullable: false,
+            primary_key: false,
+            identity: None,
+            default_sql: None,
+            computed_sql: None,
+            rowversion: false,
+            insertable: false,
+            updatable: false,
+            max_length: Some(120),
             precision: None,
             scale: None,
         },
@@ -1185,6 +1304,101 @@ mod tests {
                 SqlValue::String("ana@example.com".to_string()),
                 SqlValue::Bool(true),
             ]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_insert_columns_against_entity_metadata() {
+        let missing_metadata_error = SqlServerCompiler::compile_insert(&InsertQuery {
+            into: TableRef::for_entity::<Customer>(),
+            values: vec![ColumnValue::new(
+                "email",
+                SqlValue::String("ana@example.com".to_string()),
+            )],
+            entity: None,
+        })
+        .unwrap_err();
+        assert_eq!(
+            missing_metadata_error.message(),
+            "SQL Server insert compilation requires entity metadata"
+        );
+
+        let unknown_column_error = SqlServerCompiler::compile_insert(&InsertQuery {
+            into: TableRef::for_entity::<Customer>(),
+            values: vec![ColumnValue::new(
+                "not_a_column",
+                SqlValue::String("value".to_string()),
+            )],
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            unknown_column_error.message(),
+            "SQL Server insert column `not_a_column` is not defined on entity `Customer`"
+        );
+
+        let duplicate_column_error = SqlServerCompiler::compile_insert(&InsertQuery {
+            into: TableRef::for_entity::<Customer>(),
+            values: vec![
+                ColumnValue::new("email", SqlValue::String("first@example.com".to_string())),
+                ColumnValue::new("email", SqlValue::String("second@example.com".to_string())),
+            ],
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            duplicate_column_error.message(),
+            "SQL Server insert column `email` is duplicated"
+        );
+
+        let identity_pk_error = SqlServerCompiler::compile_insert(&InsertQuery {
+            into: TableRef::for_entity::<Customer>(),
+            values: vec![ColumnValue::new("id", SqlValue::I64(7))],
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            identity_pk_error.message(),
+            "SQL Server insert column `id` on entity `Customer` is an identity primary key and cannot be inserted"
+        );
+
+        let non_insertable_error = SqlServerCompiler::compile_insert(&InsertQuery {
+            into: TableRef::for_entity::<Customer>(),
+            values: vec![ColumnValue::new(
+                "created_by_runtime",
+                SqlValue::String("system".to_string()),
+            )],
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            non_insertable_error.message(),
+            "SQL Server insert column `created_by_runtime` on entity `Customer` is not insertable"
+        );
+
+        let rowversion_error = SqlServerCompiler::compile_insert(&InsertQuery {
+            into: TableRef::for_entity::<Customer>(),
+            values: vec![ColumnValue::new("version", SqlValue::Bytes(vec![1, 2, 3]))],
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            rowversion_error.message(),
+            "SQL Server insert column `version` on entity `Customer` is rowversion and cannot be inserted"
+        );
+
+        let computed_error = SqlServerCompiler::compile_insert(&InsertQuery {
+            into: TableRef::for_entity::<Customer>(),
+            values: vec![ColumnValue::new(
+                "email_domain",
+                SqlValue::String("example.com".to_string()),
+            )],
+            entity: Some(Customer::metadata()),
+        })
+        .unwrap_err();
+        assert_eq!(
+            computed_error.message(),
+            "SQL Server insert column `email_domain` on entity `Customer` is computed and cannot be inserted"
         );
     }
 

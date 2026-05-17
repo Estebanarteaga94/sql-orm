@@ -1,10 +1,11 @@
 use crate::expr::TableRef;
-use sql_orm_core::{ColumnValue, Entity, Insertable};
+use sql_orm_core::{ColumnValue, Entity, EntityMetadata, Insertable};
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct InsertQuery {
     pub into: TableRef,
     pub values: Vec<ColumnValue>,
+    pub entity: Option<&'static EntityMetadata>,
 }
 
 impl InsertQuery {
@@ -12,6 +13,7 @@ impl InsertQuery {
         Self {
             into: TableRef::for_entity::<E>(),
             values: insertable.values(),
+            entity: Some(E::metadata()),
         }
     }
 }
