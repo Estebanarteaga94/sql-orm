@@ -93,6 +93,41 @@ enum SharedConnectionKind {
     Pool,
 }
 
+#[cfg(feature = "pool-bb8")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PooledTransactionCleanupPhase {
+    BeginError,
+    AfterCommitAttempt,
+    AfterRollbackAttempt,
+}
+
+#[cfg(feature = "pool-bb8")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PooledTransactionCleanupPlan {
+    restore_retry: bool,
+    exit_transaction_scope: bool,
+    clear_pinned_connection: bool,
+}
+
+#[cfg(feature = "pool-bb8")]
+impl PooledTransactionCleanupPlan {
+    fn for_phase(phase: PooledTransactionCleanupPhase) -> Self {
+        match phase {
+            PooledTransactionCleanupPhase::BeginError => Self {
+                restore_retry: false,
+                exit_transaction_scope: false,
+                clear_pinned_connection: true,
+            },
+            PooledTransactionCleanupPhase::AfterCommitAttempt
+            | PooledTransactionCleanupPhase::AfterRollbackAttempt => Self {
+                restore_retry: true,
+                exit_transaction_scope: true,
+                clear_pinned_connection: true,
+            },
+        }
+    }
+}
+
 pub enum SharedConnectionGuard<'a> {
     /// Guard for a direct connection held through an async mutex.
     Direct(tokio::sync::MutexGuard<'a, MssqlConnection<TokioConnectionStream>>),
@@ -390,7 +425,11 @@ impl SharedConnection {
         .await;
 
         if let Err(error) = begin_result {
-            self.clear_pinned_pool_connection().await;
+            self.cleanup_pinned_pool_transaction(
+                PooledTransactionCleanupPlan::for_phase(PooledTransactionCleanupPhase::BeginError),
+                None,
+            )
+            .await?;
             return Err(error);
         }
 
@@ -405,9 +444,13 @@ impl SharedConnection {
                     connection.commit_transaction().await
                 }
                 .await;
-                self.restore_pinned_pool_retry(retry_options).await?;
-                self.exit_transaction_scope();
-                self.clear_pinned_pool_connection().await;
+                self.cleanup_pinned_pool_transaction(
+                    PooledTransactionCleanupPlan::for_phase(
+                        PooledTransactionCleanupPhase::AfterCommitAttempt,
+                    ),
+                    Some(retry_options),
+                )
+                .await?;
                 commit_result?;
                 Ok(value)
             }
@@ -417,9 +460,13 @@ impl SharedConnection {
                     connection.rollback_transaction().await
                 }
                 .await;
-                self.restore_pinned_pool_retry(retry_options).await?;
-                self.exit_transaction_scope();
-                self.clear_pinned_pool_connection().await;
+                self.cleanup_pinned_pool_transaction(
+                    PooledTransactionCleanupPlan::for_phase(
+                        PooledTransactionCleanupPhase::AfterRollbackAttempt,
+                    ),
+                    Some(retry_options),
+                )
+                .await?;
                 rollback_result?;
                 Err(error)
             }
@@ -497,6 +544,34 @@ impl SharedConnection {
 
         connection.replace_retry_options(retry_options);
         Ok(())
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    async fn cleanup_pinned_pool_transaction(
+        &self,
+        plan: PooledTransactionCleanupPlan,
+        retry_options: Option<MssqlRetryOptions>,
+    ) -> Result<(), OrmError> {
+        let restore_result = if plan.restore_retry {
+            match retry_options {
+                Some(retry_options) => self.restore_pinned_pool_retry(retry_options).await,
+                None => Err(OrmError::new(
+                    "missing retry options for pooled transaction cleanup",
+                )),
+            }
+        } else {
+            Ok(())
+        };
+
+        if plan.exit_transaction_scope {
+            self.exit_transaction_scope();
+        }
+
+        if plan.clear_pinned_connection {
+            self.clear_pinned_pool_connection().await;
+        }
+
+        restore_result
     }
 
     #[allow(dead_code)]
@@ -1840,11 +1915,13 @@ pub fn connect_shared_from_pool(pool: MssqlPool) -> SharedConnection {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(feature = "pool-bb8")]
-    use super::ensure_transactions_supported;
     use super::{
         ActiveTenant, DbContext, DbContextEntitySet, DbSet, SharedConnectionKind,
         SharedConnectionRuntime,
+    };
+    #[cfg(feature = "pool-bb8")]
+    use super::{
+        PooledTransactionCleanupPhase, PooledTransactionCleanupPlan, ensure_transactions_supported,
     };
     use crate::{
         AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, EntityPersist,
@@ -3103,6 +3180,56 @@ mod tests {
         assert_eq!(
             ensure_transactions_supported(SharedConnectionKind::Pool),
             Ok(())
+        );
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    #[test]
+    fn pooled_begin_error_cleanup_plan_clears_pinned_slot_without_transaction_state() {
+        let plan =
+            PooledTransactionCleanupPlan::for_phase(PooledTransactionCleanupPhase::BeginError);
+
+        assert_eq!(
+            plan,
+            PooledTransactionCleanupPlan {
+                restore_retry: false,
+                exit_transaction_scope: false,
+                clear_pinned_connection: true,
+            }
+        );
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    #[test]
+    fn pooled_commit_error_cleanup_plan_restores_runtime_and_clears_pinned_slot() {
+        let plan = PooledTransactionCleanupPlan::for_phase(
+            PooledTransactionCleanupPhase::AfterCommitAttempt,
+        );
+
+        assert_eq!(
+            plan,
+            PooledTransactionCleanupPlan {
+                restore_retry: true,
+                exit_transaction_scope: true,
+                clear_pinned_connection: true,
+            }
+        );
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    #[test]
+    fn pooled_rollback_error_cleanup_plan_restores_runtime_and_clears_pinned_slot() {
+        let plan = PooledTransactionCleanupPlan::for_phase(
+            PooledTransactionCleanupPhase::AfterRollbackAttempt,
+        );
+
+        assert_eq!(
+            plan,
+            PooledTransactionCleanupPlan {
+                restore_retry: true,
+                exit_transaction_scope: true,
+                clear_pinned_connection: true,
+            }
         );
     }
 
