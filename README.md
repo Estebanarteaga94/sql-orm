@@ -605,10 +605,10 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | Area | Current status |
 |---|---|
 | Backend support | SQL Server only |
-| `Tracked<T>` | Experimental |
-| `save_changes()` | Experimental |
+| `Tracked<T>` | Stable for explicit single-primary-key tracking |
+| `save_changes()` | Stable for explicit single-primary-key tracking |
 | Composite primary keys | Metadata exists, public persistence support is limited |
-| Tracking ownership | Pending `Added`, `Modified`, and `Deleted` work is registry-owned after wrapper drop/consume; detached loaded identities can reattach to registry snapshots; wrapper lifetime is no longer required for pending work, but the public API label remains experimental until final Stage 21 release validation and runtime coverage are complete |
+| Tracking ownership | Pending `Added`, `Modified`, and `Deleted` work is registry-owned after wrapper drop/consume; detached loaded identities can reattach to registry snapshots; one live tracked handle per persisted identity is allowed per context |
 | Relationship graph persistence | Not implemented; persist dependents or explicit join entities directly |
 | Many-to-many navigation | Use an explicit join entity |
 | Lazy loading | No automatic I/O from field access |

@@ -1,19 +1,15 @@
-//! Experimental change tracking surface.
+//! Stable explicit change tracking surface.
 //!
-//! Stability audit status, 2026-04-30: this is the only root-crate public
-//! surface still explicitly marked experimental. It remains implemented but
-//! not stable until the remaining identity-map, runtime and documentation
-//! hardening work is complete. The current slice has validated identity
-//! registration, registry-owned pending snapshots after wrapper drop, explicit
-//! state APIs, no-op change detection, operation ordering, transaction
-//! behavior for direct connections, policy integration and public compile-time
-//! coverage.
+//! Stage 21 promoted `Tracked<T>` and `save_changes()` to stable for explicit
+//! tracking of entities with simple primary keys. The stabilized contract has
+//! validated identity registration, registry-owned pending snapshots after
+//! wrapper drop, explicit state APIs, no-op change detection, operation
+//! ordering, transaction behavior for direct connections, policy integration,
+//! runtime SQL Server coverage and public compile-time coverage.
 //!
-//! As of the final Stage 21 documentation pass, wrapper lifetime is no longer
-//! the blocker for pending `Added`, `Modified` and `Deleted` entries:
-//! registry-owned snapshots keep that work available after wrapper drop or
-//! consume. The public label still remains experimental until final release
-//! validation, runtime coverage and the compatibility decision are complete.
+//! Wrapper lifetime is not required for pending `Added`, `Modified` and
+//! `Deleted` entries: registry-owned snapshots keep that work available after
+//! wrapper drop or consume.
 //!
 //! This module intentionally defines only the minimal public contracts for the
 //! future tracking pipeline. In this stage it does not:
@@ -23,7 +19,7 @@
 //! - support composite primary keys through `save_changes()`; that limit is
 //!   now an explicit first-stable-cut scope rather than an implicit behavior
 //!
-//! Current experimental entry points:
+//! Stable entry points:
 //! - `DbSet::find_tracked(id)` for existing entities with single-column PK
 //! - `DbSet::add_tracked(entity)` for new entities pending insertion
 //! - `DbSet::remove_tracked(&mut tracked)` for explicit tracked deletion
@@ -49,7 +45,7 @@
 //!   database
 //! - clearing the tracker removes every current registry entry
 //! - dropping an unchanged wrapper is still equivalent to detach in this
-//!   experimental slice
+//!   stable explicit-tracking cut
 //! - removing a tracked `Added` entity cancels the pending insert locally
 //! - successful tracked deletes unregister the wrapper from the internal registry
 //! - rowversion conflicts are still surfaced as `OrmError::ConcurrencyConflict`
@@ -62,7 +58,7 @@
 //!   stale tracker state behind
 //! - navigation includes and explicit navigation loads attach values to the
 //!   root entity only; related entities are not automatically registered in the
-//!   experimental tracker and relationship changes are not persisted as graph
+//!   tracker and relationship changes are not persisted as graph
 //!   updates
 //! - future relationship persistence is intentionally deferred until graph
 //!   update semantics can define dependent insert/delete behavior, foreign-key
@@ -77,7 +73,7 @@ use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
-/// Lifecycle state for an experimentally tracked entity.
+/// Lifecycle state for a tracked entity.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum EntityState {
     /// Entity was loaded and has not requested mutable access.
@@ -90,7 +86,7 @@ pub enum EntityState {
     Deleted,
 }
 
-/// Snapshot-based wrapper for entities tracked experimentally.
+/// Snapshot-based wrapper for explicitly tracked entities.
 ///
 /// `Tracked<T>` keeps the original snapshot together with the current value so
 /// later stages can compare and persist changes without relying on runtime

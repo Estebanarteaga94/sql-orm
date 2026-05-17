@@ -109,7 +109,7 @@ struct AppDb {
 
 The derived context provides connection helpers such as `connect(...)`, `connect_with_config(...)`, `from_connection(...)`, `from_shared_connection(...)`, `health_check()`, `transaction(...)` and `save_changes()`.
 
-`DbSet<T>` is the typed boundary for an entity. It exposes CRUD, query building and experimental tracking:
+`DbSet<T>` is the typed boundary for an entity. It exposes CRUD, query building and explicit tracking:
 
 - `find(key)`
 - `insert(model)`
@@ -123,18 +123,14 @@ The derived context provides connection helpers such as `connect(...)`, `connect
 
 The public CRUD and tracking routes are currently centered on simple primary keys. Composite primary key metadata exists, but complete public persistence workflows for composite keys are not implemented.
 
-The tracking unit of work now stores pending `Added`, `Modified` and `Deleted`
+The tracking unit of work stores pending `Added`, `Modified` and `Deleted`
 work in the context registry after a `Tracked<T>` wrapper is dropped or
 consumed. `save_changes()` reads registry-owned snapshots, and the internal
 helpers that accept unchanged values or synchronize persisted rows update those
-snapshots even when the original wrapper is gone. The API is still labelled
-experimental until the final Stage 21 validation and documentation pass is
-completed, but wrapper lifetime is no longer required for pending `Added`,
-`Modified` or `Deleted` work to be persisted. The remaining stability gate is
-release-level validation, including runtime coverage and the explicit
-compatibility decision to remove the label.
+snapshots even when the original wrapper is gone. Stage 21 promoted this
+surface to stable for explicit tracking of entities with simple primary keys.
 
-Navigation loading does not turn the experimental tracker into a graph tracker.
+Navigation loading does not turn the tracker into a graph tracker.
 Includes materialize ordinary entity values, and explicit tracked collection
 loading attaches related values to the tracked root without registering those
 related entities. Mutating a navigation wrapper can still mark the root wrapper
@@ -395,15 +391,15 @@ Important limits:
 
 These are intentional limits of the current implementation:
 
-For the current audited inventory of experimental, pending verification,
-deferred, and blocked public surfaces, see
+For the current audited inventory of pending verification, deferred, and
+blocked public surfaces, see
 [Stability audit](stability-audit.md).
-For the acceptance criteria required before `Tracked<T>` and `save_changes()`
-can become stable, see [Tracking stability criteria](tracking-stability.md).
+For the criteria used to stabilize `Tracked<T>` and `save_changes()`, see
+[Tracking stability criteria](tracking-stability.md).
 
 - SQL Server is the only supported database target.
 - Public persistence workflows are centered on simple primary keys.
-- `Tracked<T>` and `save_changes()` are experimental.
+- `Tracked<T>` and `save_changes()` are stable for explicit tracking with simple primary keys.
 - `db.transaction(...)` is not supported on contexts created from a pool until a physical connection can be pinned for the whole closure.
 - Navigation properties are implemented for metadata, inferred explicit joins,
   single-navigation includes, join-based `has_many` includes, and explicit

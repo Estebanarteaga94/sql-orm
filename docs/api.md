@@ -167,16 +167,13 @@ The main data-access API is:
 Relevant limits:
 
 - `find`, `update`, `delete`, Active Record, and public tracking remain oriented around simple primary keys.
-- `save_changes()` and `Tracked<T>` are still documented as experimental until
-  the final Stage 21 validation and release documentation pass is complete.
+- `save_changes()` and `Tracked<T>` are stable for explicit tracking with
+  simple primary keys.
 - Pending `Added`, `Modified` and `Deleted` tracking work is held by the
   context registry after the wrapper is dropped or consumed. Explicit
   `detach_tracked(...)`, `Tracked::detach()` and `clear_tracker()` still remove
   work from the current unit of work.
-- Wrapper lifetime is no longer the blocker for those pending operations; the
-  remaining blocker for removing the experimental label is final Stage 21
-  validation, including runtime coverage and the explicit compatibility
-  decision recorded in the release documentation.
+- Wrapper lifetime is no longer required for those pending operations.
 - A detached loaded identity can reattach to registry-owned original/current
   snapshots. A second live `Tracked<T>` handle for the same persisted identity
   in one context is rejected with `OrmError`.
@@ -188,10 +185,10 @@ Relevant limits:
   or explicit join entity directly.
 - `db.transaction(...)` is blocked for contexts created from pools until one physical connection can be pinned for the full closure.
 
-The current inventory of experimental, pending verification, deferred, and
-blocked public surfaces is tracked in [Stability audit](stability-audit.md).
-The acceptance criteria for removing the experimental label from tracking are
-tracked in [Tracking stability criteria](tracking-stability.md).
+The current inventory of pending verification, deferred, and blocked public
+surfaces is tracked in [Stability audit](stability-audit.md). The criteria used
+to stabilize tracking are tracked in
+[Tracking stability criteria](tracking-stability.md).
 
 ## Query Builder
 
@@ -261,7 +258,7 @@ Navigation graph tracking remains intentionally narrow. Includes return
 ordinary entity values and do not register included graphs automatically.
 `load_collection_tracked(...)` mutates only the tracked root wrapper without
 tracking related entities. Relationship changes inside navigation wrappers are
-not persisted by `save_changes()` in this experimental cut.
+not persisted by `save_changes()` in the stable explicit-tracking cut.
 
 Many-to-many link changes follow the same rule: insert, update or delete the
 explicit join entity rows directly. There is no direct collection navigation

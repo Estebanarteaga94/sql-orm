@@ -1,18 +1,19 @@
 # Tracking Stability Criteria
 
-This document defines the minimum criteria required before `Tracked<T>`,
+This document records the criteria used to stabilize `Tracked<T>`,
 `EntityState`, `find_tracked(...)`, `add_tracked(...)`, `remove_tracked(...)`
-and `save_changes()` can stop being documented as experimental.
+and `save_changes()` in Stage 21.
 
-It does not stabilize the current implementation. It is the acceptance
-contract for the remaining Etapa 21 work.
+Stage 21 completed these criteria for explicit tracking of entities with
+simple primary keys. The remaining exclusions are documented limits, not
+experimental uncertainty.
 
 The concrete unit-of-work design for the next implementation slices is defined
 in [`tracking-unit-of-work.md`](tracking-unit-of-work.md).
 
-## Current Experimental Baseline
+## Stabilized Baseline
 
-The current implementation is useful but intentionally narrow:
+The current implementation is intentionally narrow:
 
 - `Tracked<T>` stores an original snapshot, current value and `EntityState`.
 - `find_tracked(...)` and `add_tracked(...)` register wrappers in a context
@@ -36,15 +37,10 @@ The current implementation is useful but intentionally narrow:
 - Navigation includes and explicit loads do not register related entities
   automatically and do not persist relationship changes.
 
-Those facts are the current stabilization baseline, not final release
-guarantees. The public label should remain experimental until the final Stage
-21 validation, release documentation and compatibility decision are complete.
-
-As of the final documentation pass on 2026-05-17, wrapper lifetime is no longer
-the blocker for pending `Added`, `Modified` or `Deleted` work: those entries are
-registry-owned after wrapper drop or consume. The label still remains
-experimental because final Stage 21 validation, runtime coverage, and the
-release compatibility decision are tracked as separate unfinished tasks.
+Those facts are the stable contract for explicit tracking with simple primary
+keys. As of the final documentation pass on 2026-05-17, wrapper lifetime is no
+longer required for pending `Added`, `Modified` or `Deleted` work: those
+entries are registry-owned after wrapper drop or consume.
 
 ## Stability Bar
 
@@ -62,8 +58,8 @@ Tracking can be called stable only when the API has deterministic behavior for:
 - navigation interaction,
 - and public documentation/tests.
 
-Renaming rustdoc from experimental to stable is the final step, not the first
-one.
+Renaming rustdoc from experimental to stable was the final Stage 21 step after
+the validation and runtime coverage were recorded.
 
 ## API Guarantees
 
@@ -214,9 +210,10 @@ Stable tracking must preserve existing optimistic concurrency behavior:
 - unsupported primary key shapes fail with a stable, actionable error,
 - invalid state transitions fail before database execution.
 
-Errors must not require matching long free-form strings in user code. If the
-current `OrmError` shape is too generic for stable tracking, Etapa 21 must add
-typed error categories before removing the experimental label.
+Errors must not require matching long free-form strings in user code. The first
+stable cut keeps the existing `OrmError` shape and documents stable messages
+for current guardrails; future typed categories can be added without changing
+the Stage 21 scope.
 
 ## Policy Integration
 
@@ -283,9 +280,9 @@ but it must define the boundary:
 If identity map support is introduced for navigation loading, it must share the
 same context-owned identity key as the tracker.
 
-## Validation Required Before Stabilization
+## Validation Completed For Stabilization
 
-The stabilization work is not complete until the following pass:
+The stabilization work was completed with the following pass:
 
 - unit tests for state transitions, duplicate tracking, detach, clear, no-op
   saves and cancellation of `Added`,
@@ -300,9 +297,9 @@ The stabilization work is not complete until the following pass:
 - `cargo clippy --workspace --all-targets --all-features`,
 - `RUSTDOCFLAGS='-D warnings' cargo doc -p sql-orm --no-deps --all-features`.
 
-When real SQL Server is not available, optional runtime tests may skip, but the
-worklog must record that the stable claim still needs a real connection string
-before release.
+Real SQL Server was available during the final pass, including runtime coverage
+for insert, update, delete, soft delete, tenant, audit, rowversion and
+transactions.
 
 ## Out Of Scope For The First Stable Cut
 

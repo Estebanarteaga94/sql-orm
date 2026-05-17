@@ -417,7 +417,7 @@ impl core::ops::DerefMut for SharedConnectionGuard<'_> {
 ///
 /// `#[derive(DbContext)]` implements this trait for structs whose fields are
 /// `DbSet<T>`. The trait centralizes connection access, health checks, raw SQL,
-/// transactions, and experimental `save_changes()` support while keeping SQL
+/// transactions, and `save_changes()` support while keeping SQL
 /// generation in `sql-orm-sqlserver` and execution in `sql-orm-tiberius`.
 pub trait DbContext: Sized {
     /// Builds a context from an existing shared connection handle.
@@ -427,7 +427,7 @@ pub trait DbContext: Sized {
     #[doc(hidden)]
     fn tracking_registry(&self) -> TrackingRegistryHandle;
 
-    /// Clears every experimental tracking entry currently registered on this
+    /// Clears every tracking entry currently registered on this
     /// context.
     ///
     /// This does not execute SQL. Pending inserts, updates and deletes are
@@ -607,7 +607,7 @@ impl<E: Entity> DbSet<E> {
     }
 
     /// Loads an entity by its single-column primary key and wraps it in the
-    /// experimental snapshot-based tracking container.
+    /// snapshot-based tracking container.
     ///
     /// The loaded row is registered in this context's tracker using entity
     /// type, schema, table and primary key value. If that identity already has
@@ -641,7 +641,7 @@ impl<E: Entity> DbSet<E> {
         Ok(tracked)
     }
 
-    /// Registers a new in-memory entity as experimentally tracked in `Added`
+    /// Registers a new in-memory entity as tracked in `Added`
     /// state so a later `save_changes()` can persist it via `insert`.
     ///
     /// `Added` entries use a temporary identity until persistence. Entities
@@ -679,7 +679,7 @@ impl<E: Entity> DbSet<E> {
         }
     }
 
-    /// Detaches a tracked wrapper from this context's experimental tracker.
+    /// Detaches a tracked wrapper from this context's tracker.
     ///
     /// Detach does not execute SQL and does not reset the wrapper state. It
     /// only removes the entry from the context unit of work so later

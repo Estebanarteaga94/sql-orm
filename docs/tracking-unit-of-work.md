@@ -125,12 +125,11 @@ snapshot. That pointer is cleared on wrapper drop for pending states; the unit
 of work no longer requires the wrapper to stay alive for `Added`, `Modified`
 or `Deleted` persistence.
 
-The public tracking surface still remains labelled experimental until the
-release-level Stage 21 validation and documentation pass decides which
-guarantees are promoted. The current implementation has removed wrapper
-lifetime as a persistence requirement for pending work, but it still has
-documented limits around simple primary keys, relationship graph persistence
-and transactions from pooled contexts.
+The public tracking surface is stable for explicit tracking with simple
+primary keys after the release-level Stage 21 validation and documentation
+pass. The current implementation has removed wrapper lifetime as a persistence
+requirement for pending work, while retaining documented limits around
+relationship graph persistence and transactions from pooled contexts.
 
 As of 2026-05-16, registry diagnostics expose a stable `entry_id` through
 `TrackedEntityRegistration`. This is the first observable step toward owned
@@ -160,7 +159,7 @@ writing through a dead wrapper pointer.
 
 ## Current Detach And State Policy
 
-The current experimental policy is explicit:
+The current stable explicit-tracking policy is:
 
 - `Unchanged`: `save_changes()` ignores the entry. `detach_tracked(...)`,
   `Tracked::detach()`, `clear_tracker()` or dropping the wrapper removes it
@@ -304,8 +303,9 @@ That has two important limits:
 - unchanged dropped wrappers are still removed because they carry no pending
   work.
 
-This is acceptable only while tracking is experimental. Stable tracking must
-move ownership to the context registry.
+Stage 21 completed the stable cut by moving pending work ownership to the
+context registry while keeping a live pointer only for synchronizing attached
+wrappers.
 
 ## Ownership Model
 
@@ -450,9 +450,9 @@ pub trait TrackedEntitySnapshot: Entity + Clone + Send + 'static {
 ```
 
 The first runtime slice may conservatively keep mutable access as `Modified`.
-Before removing the experimental label, `has_persisted_changes(...)` must skip
-updates when persisted columns did not change, ignoring navigation wrappers,
-identity, computed, rowversion and non-updatable columns.
+`has_persisted_changes(...)` skips updates when persisted columns did not
+change, ignoring navigation wrappers, identity, computed, rowversion and
+non-updatable columns.
 
 Generated comparison belongs in `sql-orm-macros` and public traits in
 `sql-orm`. It must not be placed in `sql-orm-query`,
@@ -517,7 +517,7 @@ transaction closure.
 
 ## Public API Surface
 
-The implementation tasks following this design should add explicit APIs before
+The implementation following this design exposed the explicit APIs required for
 stabilization:
 
 - `Tracked<T>::state()`,
@@ -528,8 +528,8 @@ stabilization:
 - `DbContext::clear_tracker()`,
 - `DbContext::tracked_entries()` or a read-only equivalent for diagnostics.
 
-These APIs must be exposed from `sql_orm::prelude` only after they have tests
-and rustdoc. Until then, tracking remains experimental.
+These APIs are exposed from `sql_orm::prelude` after Stage 21 tests and
+rustdoc validation.
 
 ## Migration Steps
 
