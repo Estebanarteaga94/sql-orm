@@ -699,6 +699,12 @@ impl TrackingRegistry {
             TrackedIdentity::for_entity::<E>(TrackedPrimaryKeyIdentity::Simple(key.clone()));
         let mut state = self.state.lock().expect("tracking registry mutex poisoned");
 
+        let target_index = state
+            .entries
+            .iter()
+            .position(|entry| entry.registration_id == registration_id)
+            .ok_or_else(|| OrmError::new("tracked entity registration was not found"))?;
+
         if state
             .entries
             .iter()
@@ -711,12 +717,7 @@ impl TrackingRegistry {
             )));
         }
 
-        let entry = state
-            .entries
-            .iter_mut()
-            .find(|entry| entry.registration_id == registration_id)
-            .ok_or_else(|| OrmError::new("tracked entity registration was not found"))?;
-        entry.identity = identity;
+        state.entries[target_index].identity = identity;
         Ok(())
     }
 
@@ -2191,6 +2192,23 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.message(), "tracked entity registration was not found");
+    }
+
+    #[test]
+    fn tracking_registry_missing_registration_error_precedes_identity_collision() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut existing = Tracked::from_loaded(DummyEntity);
+        existing
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(11))
+            .unwrap();
+
+        let error = registry
+            .update_persisted_identity::<DummyEntity>(99, SqlValue::I64(11))
+            .unwrap_err();
+
+        assert_eq!(error.message(), "tracked entity registration was not found");
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(registry.registrations()[0].entry_id, 0);
     }
 
     #[test]
