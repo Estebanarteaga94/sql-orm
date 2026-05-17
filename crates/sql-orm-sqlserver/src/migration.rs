@@ -1,5 +1,5 @@
 use crate::quoting::{quote_identifier, quote_qualified_identifier};
-use sql_orm_core::{OrmError, ReferentialAction, SqlServerType};
+use sql_orm_core::{OrmError, ReferentialAction, SqlServerType, quote_sql_string_literal};
 use sql_orm_migrate::{
     AddColumn, AddForeignKey, AlterColumn, ColumnSnapshot, CreateIndex, CreateSchema, CreateTable,
     DropColumn, DropForeignKey, DropIndex, DropSchema, DropTable, IndexColumnSnapshot,
@@ -20,10 +20,11 @@ impl crate::SqlServerCompiler {
         let table =
             quote_qualified_identifier(MIGRATIONS_HISTORY_SCHEMA, MIGRATIONS_HISTORY_TABLE)?;
 
+        let object_name = quote_sql_string_literal(&format!(
+            "{MIGRATIONS_HISTORY_SCHEMA}.{MIGRATIONS_HISTORY_TABLE}"
+        ));
         Ok(format!(
-            "IF OBJECT_ID(N'{schema}.{table_name}', N'U') IS NULL\nBEGIN\n    CREATE TABLE {table} (\n        [id] nvarchar(150) NOT NULL PRIMARY KEY,\n        [name] nvarchar(255) NOT NULL,\n        [applied_at] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),\n        [checksum] nvarchar(128) NOT NULL,\n        [orm_version] nvarchar(50) NOT NULL\n    );\nEND",
-            schema = MIGRATIONS_HISTORY_SCHEMA,
-            table_name = MIGRATIONS_HISTORY_TABLE,
+            "IF OBJECT_ID({object_name}, N'U') IS NULL\nBEGIN\n    CREATE TABLE {table} (\n        [id] nvarchar(150) NOT NULL PRIMARY KEY,\n        [name] nvarchar(255) NOT NULL,\n        [applied_at] datetime2 NOT NULL DEFAULT SYSUTCDATETIME(),\n        [checksum] nvarchar(128) NOT NULL,\n        [orm_version] nvarchar(50) NOT NULL\n    );\nEND",
         ))
     }
 }
@@ -48,9 +49,10 @@ fn compile_operation(operation: &MigrationOperation) -> Result<String, OrmError>
 
 fn compile_create_schema(operation: &CreateSchema) -> Result<String, OrmError> {
     let schema = crate::quote_identifier(&operation.schema_name)?;
+    let schema_name = quote_sql_string_literal(&operation.schema_name);
+    let create_schema = quote_sql_string_literal(&format!("CREATE SCHEMA {schema}"));
     Ok(format!(
-        "IF SCHEMA_ID(N'{name}') IS NULL EXEC(N'CREATE SCHEMA {schema}')",
-        name = operation.schema_name,
+        "IF SCHEMA_ID({schema_name}) IS NULL EXEC({create_schema})",
     ))
 }
 
@@ -112,10 +114,11 @@ fn compile_add_column(operation: &AddColumn) -> Result<String, OrmError> {
 fn compile_rename_table(operation: &RenameTable) -> Result<String, OrmError> {
     let qualified_table =
         quote_qualified_identifier(&operation.schema_name, &operation.previous_table_name)?;
+    let qualified_table = quote_sql_string_literal(&qualified_table);
+    let next_name = quote_sql_string_literal(&operation.next_table_name);
 
     Ok(format!(
-        "EXEC sp_rename N'{qualified_table}', N'{next_name}', N'OBJECT'",
-        next_name = operation.next_table_name,
+        "EXEC sp_rename {qualified_table}, {next_name}, N'OBJECT'",
     ))
 }
 
@@ -125,10 +128,11 @@ fn compile_rename_column(operation: &RenameColumn) -> Result<String, OrmError> {
         quote_qualified_identifier(&operation.schema_name, &operation.table_name)?,
         quote_identifier(&operation.previous_column_name)?,
     );
+    let qualified_column = quote_sql_string_literal(&qualified_column);
+    let next_name = quote_sql_string_literal(&operation.next_column_name);
 
     Ok(format!(
-        "EXEC sp_rename N'{qualified_column}', N'{next_name}', N'COLUMN'",
-        next_name = operation.next_column_name,
+        "EXEC sp_rename {qualified_column}, {next_name}, N'COLUMN'",
     ))
 }
 
@@ -608,6 +612,25 @@ mod tests {
         assert_eq!(
             sql[0],
             "EXEC sp_rename N'[sales].[customers]', N'clients', N'OBJECT'"
+        );
+    }
+
+    #[test]
+    fn migration_literals_escape_single_quotes() {
+        let operations = vec![
+            MigrationOperation::CreateSchema(CreateSchema::new("sales'ops")),
+            MigrationOperation::RenameTable(RenameTable::new("sales", "customers", "client's")),
+        ];
+
+        let sql = SqlServerCompiler::compile_migration_operations(&operations).unwrap();
+
+        assert_eq!(
+            sql[0],
+            "IF SCHEMA_ID(N'sales''ops') IS NULL EXEC(N'CREATE SCHEMA [sales''ops]')"
+        );
+        assert_eq!(
+            sql[1],
+            "EXEC sp_rename N'[sales].[customers]', N'client''s', N'OBJECT'"
         );
     }
 

@@ -38,6 +38,15 @@ impl fmt::Display for OrmError {
 
 impl std::error::Error for OrmError {}
 
+/// Quotes a SQL Server Unicode string literal as `N'...'`.
+///
+/// This helper is for trusted SQL generation paths that must interpolate text
+/// into metadata or migration scripts. User values in queries should continue
+/// to use parameters instead of string interpolation.
+pub fn quote_sql_string_literal(value: &str) -> String {
+    format!("N'{}'", value.replace('\'', "''"))
+}
+
 /// Minimal crate identity metadata used while the rest of the model is defined.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CrateIdentity {
@@ -718,7 +727,7 @@ mod tests {
         EntityMetadata, EntityPolicy, EntityPolicyMetadata, ForeignKeyMetadata, FromRow,
         IdentityMetadata, IndexColumnMetadata, IndexMetadata, Insertable, NavigationKind,
         NavigationMetadata, OrmError, PrimaryKeyMetadata, ReferentialAction, Row, SqlServerType,
-        SqlTypeMapping, SqlValue, column_name_exists,
+        SqlTypeMapping, SqlValue, column_name_exists, quote_sql_string_literal,
     };
     use chrono::{NaiveDate, NaiveDateTime};
     use rust_decimal::Decimal;
@@ -1258,6 +1267,16 @@ mod tests {
         assert_eq!(
             Option::<String>::from_sql_value(SqlValue::String("ana".to_string())),
             Ok(Some("ana".to_string()))
+        );
+    }
+
+    #[test]
+    fn quotes_sql_server_unicode_string_literals() {
+        assert_eq!(quote_sql_string_literal("sales"), "N'sales'");
+        assert_eq!(quote_sql_string_literal("O'Brien"), "N'O''Brien'");
+        assert_eq!(
+            quote_sql_string_literal("line 1\nline '2'"),
+            "N'line 1\nline ''2'''"
         );
     }
 }

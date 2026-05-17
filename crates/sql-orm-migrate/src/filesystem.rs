@@ -1,5 +1,5 @@
 use crate::ModelSnapshot;
-use sql_orm_core::OrmError;
+use sql_orm_core::{OrmError, quote_sql_string_literal};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -176,7 +176,7 @@ pub fn build_database_update_script(
         } else {
             statements
                 .iter()
-                .map(|statement| format!("    EXEC(N'{}');", escape_sql_literal(statement)))
+                .map(|statement| format!("    EXEC({});", quote_sql_string_literal(statement)))
                 .collect::<Vec<_>>()
                 .join("\n")
                 + "\n"
@@ -271,12 +271,15 @@ pub fn build_database_downgrade_script(
 }
 
 fn render_idempotent_migration_block(id: &str, name: &str, checksum: &str, body: &str) -> String {
+    let id_literal = quote_sql_string_literal(id);
+    let name_literal = quote_sql_string_literal(name);
+    let checksum_literal = quote_sql_string_literal(checksum);
+    let version_literal = quote_sql_string_literal(ORM_VERSION);
+    let checksum_mismatch_message =
+        quote_sql_string_literal(&format!("sql-orm migration checksum mismatch for {id}"));
+
     format!(
-        "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}' AND [checksum] <> N'{checksum}')\nBEGIN\n    THROW 50001, N'sql-orm migration checksum mismatch for {id}', 1;\nEND\n\nIF NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}')\nBEGIN\n    BEGIN TRY\n        BEGIN TRANSACTION;\n{body}        INSERT INTO [dbo].[__sql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES (N'{id}', N'{name}', N'{checksum}', N'{version}');\n        COMMIT TRANSACTION;\n    END TRY\n    BEGIN CATCH\n        IF XACT_STATE() <> 0\n            ROLLBACK TRANSACTION;\n        THROW;\n    END CATCH\nEND",
-        id = id,
-        name = name,
-        checksum = checksum,
-        version = ORM_VERSION,
+        "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = {id_literal} AND [checksum] <> {checksum_literal})\nBEGIN\n    THROW 50001, {checksum_mismatch_message}, 1;\nEND\n\nIF NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = {id_literal})\nBEGIN\n    BEGIN TRY\n        BEGIN TRANSACTION;\n{body}        INSERT INTO [dbo].[__sql_orm_migrations] ([id], [name], [checksum], [orm_version]) VALUES ({id_literal}, {name_literal}, {checksum_literal}, {version_literal});\n        COMMIT TRANSACTION;\n    END TRY\n    BEGIN CATCH\n        IF XACT_STATE() <> 0\n            ROLLBACK TRANSACTION;\n        THROW;\n    END CATCH\nEND",
         body = body,
     )
 }
@@ -294,7 +297,7 @@ fn render_downgrade_history_guard(migrations: &[MigrationEntry], target: &str) -
     } else {
         let known_ids = migrations
             .iter()
-            .map(|migration| format!("N'{}'", escape_sql_literal(&migration.id)))
+            .map(|migration| quote_sql_string_literal(&migration.id))
             .collect::<Vec<_>>()
             .join(", ");
         format!(
@@ -302,12 +305,15 @@ fn render_downgrade_history_guard(migrations: &[MigrationEntry], target: &str) -
             known_ids = known_ids,
         )
     };
-    let target_literal = escape_sql_literal(target);
+    let target_literal = quote_sql_string_literal(target);
     let target_guard = if target == "0" {
         String::new()
     } else {
+        let target_error = quote_sql_string_literal(&format!(
+            "sql-orm downgrade target {target} is not applied in migration history"
+        ));
         format!(
-            "\n\nIF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] > N'{target}')\n   AND NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{target}')\nBEGIN\n    THROW 50003, N'sql-orm downgrade target {target} is not applied in migration history', 1;\nEND",
+            "\n\nIF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] > {target})\n   AND NOT EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = {target})\nBEGIN\n    THROW 50003, {target_error}, 1;\nEND",
             target = target_literal,
         )
     };
@@ -320,19 +326,24 @@ fn render_downgrade_history_guard(migrations: &[MigrationEntry], target: &str) -
 }
 
 fn render_idempotent_downgrade_block(migration: &DowngradeMigrationBlock) -> String {
-    let id = escape_sql_literal(&migration.id);
-    let checksum = escape_sql_literal(&migration.checksum);
+    let id = quote_sql_string_literal(&migration.id);
+    let checksum = quote_sql_string_literal(&migration.checksum);
+    let checksum_mismatch_message = quote_sql_string_literal(&format!(
+        "sql-orm migration checksum mismatch for {}",
+        migration.id
+    ));
     let body = migration
         .down_statements
         .iter()
-        .map(|statement| format!("        EXEC(N'{}');", escape_sql_literal(statement)))
+        .map(|statement| format!("        EXEC({});", quote_sql_string_literal(statement)))
         .collect::<Vec<_>>()
         .join("\n");
 
     format!(
-        "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}' AND [checksum] <> N'{checksum}')\nBEGIN\n    THROW 50001, N'sql-orm migration checksum mismatch for {id}', 1;\nEND\n\nIF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}')\nBEGIN\n    BEGIN TRY\n        BEGIN TRANSACTION;\n{body}\n        DELETE FROM [dbo].[__sql_orm_migrations] WHERE [id] = N'{id}';\n        COMMIT TRANSACTION;\n    END TRY\n    BEGIN CATCH\n        IF XACT_STATE() <> 0\n            ROLLBACK TRANSACTION;\n        THROW;\n    END CATCH\nEND",
+        "IF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = {id} AND [checksum] <> {checksum})\nBEGIN\n    THROW 50001, {checksum_mismatch_message}, 1;\nEND\n\nIF EXISTS (SELECT 1 FROM [dbo].[__sql_orm_migrations] WHERE [id] = {id})\nBEGIN\n    BEGIN TRY\n        BEGIN TRANSACTION;\n{body}\n        DELETE FROM [dbo].[__sql_orm_migrations] WHERE [id] = {id};\n        COMMIT TRANSACTION;\n    END TRY\n    BEGIN CATCH\n        IF XACT_STATE() <> 0\n            ROLLBACK TRANSACTION;\n        THROW;\n    END CATCH\nEND",
         id = id,
         checksum = checksum,
+        checksum_mismatch_message = checksum_mismatch_message,
         body = body,
     )
 }
@@ -386,10 +397,6 @@ fn checksum_hex(bytes: &[u8]) -> String {
     }
 
     format!("{hash:016x}")
-}
-
-fn escape_sql_literal(sql: &str) -> String {
-    sql.replace('\'', "''")
 }
 
 fn is_unresolved_down_sql_template(sql: &str) -> bool {
@@ -646,6 +653,27 @@ mod tests {
 
         assert!(!script.contains("EXEC(N'');"));
         assert!(script.contains("INSERT INTO [dbo].[__sql_orm_migrations]"));
+    }
+
+    #[test]
+    fn database_update_script_escapes_single_quotes_inside_exec_blocks() {
+        let root = temp_project_root();
+        let scaffold = create_migration_scaffold(&root, "Quoted Literal").unwrap();
+        fs::write(
+            scaffold.directory.join("up.sql"),
+            "INSERT INTO [dbo].[messages] ([body]) VALUES (N'O''Brien');",
+        )
+        .unwrap();
+
+        let script =
+            build_database_update_script(&root, "CREATE TABLE [dbo].[__sql_orm_migrations] (...);")
+                .unwrap();
+
+        assert!(
+            script.contains(
+                "EXEC(N'INSERT INTO [dbo].[messages] ([body]) VALUES (N''O''''Brien'');');"
+            )
+        );
     }
 
     #[test]

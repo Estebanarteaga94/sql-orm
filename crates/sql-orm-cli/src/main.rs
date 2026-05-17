@@ -724,7 +724,7 @@ mod tests {
         CliCommand, DatabaseDowngradeOptions, DatabaseUpdateOptions, MigrationAddOptions,
         build_migration_plan, first_destructive_migration_operation, parse_command, run,
     };
-    use sql_orm_core::{FromRow, OrmError, Row, SqlServerType};
+    use sql_orm_core::{FromRow, OrmError, Row, SqlServerType, quote_sql_string_literal};
     use sql_orm_migrate::{
         AlterColumn, ColumnSnapshot, DropColumn, DropTable, MigrationOperation, ModelSnapshot,
         SchemaSnapshot, TableSnapshot, read_model_snapshot,
@@ -1854,18 +1854,21 @@ mod tests {
             .map_err(|error| OrmError::new(format!("failed to create async runtime: {error}")))?;
         runtime.block_on(async {
             let mut connection = MssqlConnection::connect(connection_string).await?;
+            let table_object = quote_sql_string_literal(&format!("[{schema}].[{table}]"));
             connection
                 .execute(CompiledQuery::new(
                     format!(
-                        "IF OBJECT_ID(N'[{schema}].[{table}]', N'U') IS NOT NULL DROP TABLE [{schema}].[{table}];"
+                        "IF OBJECT_ID({table_object}, N'U') IS NOT NULL DROP TABLE [{schema}].[{table}];"
                     ),
                     vec![],
                 ))
                 .await?;
+            let schema_name = quote_sql_string_literal(schema);
+            let drop_schema = quote_sql_string_literal(&format!("DROP SCHEMA [{schema}]"));
             connection
                 .execute(CompiledQuery::new(
                     format!(
-                        "IF SCHEMA_ID(N'{schema}') IS NOT NULL EXEC(N'DROP SCHEMA [{schema}]');"
+                        "IF SCHEMA_ID({schema_name}) IS NOT NULL EXEC({drop_schema});"
                     ),
                     vec![],
                 ))
@@ -1874,7 +1877,7 @@ mod tests {
             if !migration_ids.is_empty() {
                 let ids = migration_ids
                     .iter()
-                    .map(|id| format!("N'{}'", id.replace('\'', "''")))
+                    .map(|id| quote_sql_string_literal(id))
                     .collect::<Vec<_>>()
                     .join(", ");
                 connection
@@ -1899,7 +1902,9 @@ mod tests {
         fetch_count(
             connection_string,
             format!(
-                "SELECT CAST(COUNT(*) AS int) AS [count] FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = N'{schema}' AND TABLE_NAME = N'{table}'"
+                "SELECT CAST(COUNT(*) AS int) AS [count] FROM INFORMATION_SCHEMA.TABLES WHERE TABLE_SCHEMA = {} AND TABLE_NAME = {}",
+                quote_sql_string_literal(schema),
+                quote_sql_string_literal(table),
             ),
         )
         .await
@@ -1914,7 +1919,10 @@ mod tests {
         fetch_count(
             connection_string,
             format!(
-                "SELECT CAST(COUNT(*) AS int) AS [count] FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = N'{schema}' AND TABLE_NAME = N'{table}' AND COLUMN_NAME = N'{column}'"
+                "SELECT CAST(COUNT(*) AS int) AS [count] FROM INFORMATION_SCHEMA.COLUMNS WHERE TABLE_SCHEMA = {} AND TABLE_NAME = {} AND COLUMN_NAME = {}",
+                quote_sql_string_literal(schema),
+                quote_sql_string_literal(table),
+                quote_sql_string_literal(column),
             ),
         )
         .await
@@ -1930,7 +1938,7 @@ mod tests {
 
         let ids = migration_ids
             .iter()
-            .map(|id| format!("N'{}'", id.replace('\'', "''")))
+            .map(|id| quote_sql_string_literal(id))
             .collect::<Vec<_>>()
             .join(", ");
         fetch_count(
