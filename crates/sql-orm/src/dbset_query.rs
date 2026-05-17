@@ -1541,8 +1541,8 @@ fn include_prefix(alias: &'static str) -> String {
     format!("{alias}__")
 }
 
-fn include_column_alias(alias: &'static str, column_name: &'static str) -> &'static str {
-    Box::leak(format!("{alias}__{column_name}").into_boxed_str())
+fn include_column_alias(alias: &'static str, column_name: &'static str) -> String {
+    format!("{alias}__{column_name}")
 }
 
 fn prefixed_column_name(prefix: &str, column_name: &str) -> String {
@@ -1683,6 +1683,7 @@ mod tests {
         SelectQuery, SortDirection, TableRef,
     };
     use sql_orm_sqlserver::SqlServerCompiler;
+    use std::borrow::Cow;
 
     struct TestEntity;
     struct JoinedEntity;
@@ -2774,9 +2775,13 @@ mod tests {
             TableRef::with_alias("dbo", "navigation_roots", "owner")
         );
         assert_eq!(select.projection.len(), 3);
-        assert_eq!(select.projection[0].alias, Some("id"));
-        assert_eq!(select.projection[1].alias, Some("owner_id"));
-        assert_eq!(select.projection[2].alias, Some("owner__id"));
+        assert_eq!(select.projection[0].alias.as_deref(), Some("id"));
+        assert_eq!(select.projection[1].alias.as_deref(), Some("owner_id"));
+        assert_eq!(select.projection[2].alias.as_deref(), Some("owner__id"));
+        assert!(matches!(
+            select.projection[2].alias,
+            Some(Cow::Owned(ref alias)) if alias == "owner__id"
+        ));
     }
 
     #[test]
@@ -2999,9 +3004,16 @@ mod tests {
             TableRef::with_alias("sales", "navigation_targets", "orders")
         );
         assert_eq!(select.projection.len(), 3);
-        assert_eq!(select.projection[0].alias, Some("id"));
-        assert_eq!(select.projection[1].alias, Some("orders__id"));
-        assert_eq!(select.projection[2].alias, Some("orders__owner_id"));
+        assert_eq!(select.projection[0].alias.as_deref(), Some("id"));
+        assert_eq!(select.projection[1].alias.as_deref(), Some("orders__id"));
+        assert_eq!(
+            select.projection[2].alias.as_deref(),
+            Some("orders__owner_id")
+        );
+        assert!(matches!(
+            select.projection[2].alias,
+            Some(Cow::Owned(ref alias)) if alias == "orders__owner_id"
+        ));
     }
 
     #[test]

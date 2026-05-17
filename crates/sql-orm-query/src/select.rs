@@ -4,11 +4,12 @@ use crate::order::OrderBy;
 use crate::pagination::Pagination;
 use crate::predicate::Predicate;
 use sql_orm_core::{Entity, EntityColumn};
+use std::borrow::Cow;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct SelectProjection {
     pub expr: Expr,
-    pub alias: Option<&'static str>,
+    pub alias: Option<Cow<'static, str>>,
 }
 
 impl SelectProjection {
@@ -16,23 +17,23 @@ impl SelectProjection {
         let alias = column.column_name();
         Self {
             expr: Expr::from(column),
-            alias: Some(alias),
+            alias: Some(Cow::Borrowed(alias)),
         }
     }
 
     pub fn expr(expr: Expr) -> Self {
         let alias = match &expr {
-            Expr::Column(column) => Some(column.column_name),
+            Expr::Column(column) => Some(Cow::Borrowed(column.column_name)),
             _ => None,
         };
 
         Self { expr, alias }
     }
 
-    pub fn expr_as(expr: Expr, alias: &'static str) -> Self {
+    pub fn expr_as(expr: Expr, alias: impl Into<Cow<'static, str>>) -> Self {
         Self {
             expr,
-            alias: Some(alias),
+            alias: Some(alias.into()),
         }
     }
 }

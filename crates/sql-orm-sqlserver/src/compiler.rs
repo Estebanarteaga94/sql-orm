@@ -423,7 +423,7 @@ fn compile_projection(
     let parts = projection
         .iter()
         .map(|projection| {
-            let alias = projection.alias.ok_or_else(|| {
+            let alias = projection.alias.as_deref().ok_or_else(|| {
                 OrmError::new("SQL Server projection expressions require an explicit alias")
             })?;
             if alias.trim().is_empty() {

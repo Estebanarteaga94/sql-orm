@@ -457,20 +457,24 @@ mod tests {
     #[test]
     fn select_projection_captures_default_and_explicit_aliases() {
         let column_projection = SelectProjection::column(Customer::email);
-        assert_eq!(column_projection.alias, Some("email"));
+        assert_eq!(column_projection.alias.as_deref(), Some("email"));
         assert_eq!(column_projection.expr, Expr::from(Customer::email));
 
         let expression_projection = SelectProjection::expr_as(
             Expr::function(SqlFunction::Lower, vec![Expr::from(Customer::email)]),
             "email_lower",
         );
-        assert_eq!(expression_projection.alias, Some("email_lower"));
+        assert_eq!(expression_projection.alias.as_deref(), Some("email_lower"));
+
+        let owned_alias_projection =
+            SelectProjection::expr_as(Expr::from(Customer::email), "owned_email".to_string());
+        assert_eq!(owned_alias_projection.alias.as_deref(), Some("owned_email"));
 
         let unaliased_expression = SelectProjection::expr(Expr::function(
             SqlFunction::Lower,
             vec![Expr::from(Customer::email)],
         ));
-        assert_eq!(unaliased_expression.alias, None);
+        assert_eq!(unaliased_expression.alias.as_deref(), None);
     }
 
     #[test]
@@ -497,7 +501,7 @@ mod tests {
             SqlFunction::Lower,
             vec![Expr::from(Customer::email)],
         ));
-        assert_eq!(ordinary_projection.alias, None);
+        assert_eq!(ordinary_projection.alias.as_deref(), None);
     }
 
     #[test]
