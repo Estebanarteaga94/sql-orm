@@ -40,29 +40,28 @@ Do not keep using the outer context for work that must be part of the transactio
 
 The transaction context inherits the same shared connection runtime state as the parent context, including tenant and soft-delete runtime configuration.
 
-## Pool Limit
+## Pool Support
 
-With `pool-bb8`, `db.transaction(...)` is explicitly blocked when the context was created from `from_pool(...)` or `connect_shared_from_pool(...)`. The API returns `OrmError` before issuing `BEGIN TRANSACTION`.
+With `pool-bb8`, `db.transaction(...)` is supported for contexts created from `from_pool(...)` or `connect_shared_from_pool(...)`.
 
-This remains blocked until pooled transactions can pin one physical SQL Server connection for the full closure.
+The ORM acquires one physical pooled SQL Server connection, pins it for the full closure, and issues `BEGIN TRANSACTION`, `COMMIT`, and `ROLLBACK` on that same checked-out connection before returning it to the pool.
 
-## Stage 22 Pool Design
+## Pool Implementation
 
-The stable implementation for pool-backed transactions must keep the public
+The stable implementation for pool-backed transactions keeps the public
 `db.transaction(|tx| async move { ... })` API unchanged. The difference is
 internal: when the parent context is backed by `SharedConnection::Pool`, the
-transaction must acquire one `MssqlPooledConnection` before `BEGIN
+transaction acquires one `MssqlPooledConnection` before `BEGIN
 TRANSACTION`, keep that exact connection checked out for the entire closure,
 and issue `COMMIT` or `ROLLBACK` on the same checked-out connection before
 returning it to the pool.
 
-The required internal shape is:
+The internal shape is:
 
 - `SharedConnectionRuntime` keeps the existing tenant, audit, soft-delete and
   transaction-depth state shared by derived handles.
-- Add a transaction-local pinned connection slot to runtime state. It must be
-  visible only while `db.transaction(...)` is executing and only to connection
-  acquisition from the transaction context.
+- A transaction-local pinned connection slot lives in runtime state and is
+  visible while `db.transaction(...)` is executing.
 - `SharedConnection::lock()` keeps its current behavior outside transactions:
   direct connections lock the direct mutex, and pool-backed contexts acquire one
   pooled connection per operation.
@@ -98,11 +97,7 @@ while `is_transaction_active()` is already true, it must return an explicit
 `OrmError` instead of issuing nested `BEGIN TRANSACTION` or pretending to
 create a savepoint.
 
-Retries remain disabled for queries executed through a transaction context. The
-existing Tiberius transaction helpers already use `MssqlRetryOptions::disabled`
-for fetches through `MssqlTransaction`; the pool-pinned path must preserve the
-same rule for all transaction-scoped reads and writes by routing through the
-same transaction execution helpers or equivalent disabled-retry calls.
+Retries remain disabled for queries executed through a transaction context.
 
 Timeouts, tracing and slow-query instrumentation must come from the pinned
 connection's `MssqlConnectionConfig`, exactly as direct transactions do today.
@@ -112,16 +107,15 @@ connection. Tracking must continue to use the context's shared
 `TrackingRegistryHandle`, so `save_changes()` inside a pool-backed transaction
 sees the same unit of work as the parent context.
 
-Validation for this design should be added in the implementation task:
+Validation currently covers:
 
-- unit coverage proving `lock()` reuses a pinned connection while transaction
-  depth is active and reacquires normally after the transaction ends;
-- tests proving nested transaction calls fail clearly;
-- SQL Server integration coverage for commit, rollback and closure error paths
-  from a pool-backed context;
-- coverage that `save_changes()` inside a pool-backed transaction uses the
-  pinned connection and does not open a second transaction or acquire another
-  pooled connection.
+- direct connection commit and rollback against SQL Server real;
+- pool-backed commit and rollback/closure-error paths against SQL Server real
+  using a pool with `max_size(1)`, which verifies that operations inside the
+  closure reuse the pinned connection rather than acquiring a second pooled
+  connection;
+- explicit nested transaction rejection from inside a pool-backed transaction
+  closure.
 
 ## No Savepoints
 

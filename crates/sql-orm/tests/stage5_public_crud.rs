@@ -1,7 +1,11 @@
+#[cfg(feature = "pool-bb8")]
+use sql_orm::MssqlPool;
 use sql_orm::prelude::*;
 use sql_orm::query::{CompiledQuery, Expr, Predicate, SelectQuery};
 use sql_orm::tiberius::MssqlConnection;
 use std::sync::OnceLock;
+#[cfg(feature = "pool-bb8")]
+use std::time::Duration;
 use tokio::sync::{Mutex, MutexGuard};
 
 const TEST_CONNECTION_ENV: &str = "SQL_ORM_TEST_CONNECTION_STRING";
@@ -292,6 +296,94 @@ async fn public_dbcontext_transaction_rolls_back_on_err() -> Result<(), OrmError
 
         let all = db.users.query().all().await?;
         assert!(all.is_empty());
+
+        Ok(())
+    }
+    .await;
+
+    cleanup_test_table(&connection_string, keep_tables).await?;
+
+    result
+}
+
+#[cfg(feature = "pool-bb8")]
+#[tokio::test]
+async fn public_dbcontext_pool_transaction_commits_and_rolls_back() -> Result<(), OrmError> {
+    let Some(connection_string) = test_connection_string() else {
+        eprintln!(
+            "skipping public pooled transaction test because {TEST_CONNECTION_ENV} is not set"
+        );
+        return Ok(());
+    };
+
+    let keep_tables = keep_test_tables();
+    let _fixture_guard = public_crud_fixture_lock().await;
+    reset_test_table(&connection_string).await?;
+    announce_test_table(keep_tables, false);
+
+    let result = async {
+        let pool = MssqlPool::builder()
+            .max_size(1)
+            .acquire_timeout(Duration::from_secs(2))
+            .connect(&connection_string)
+            .await?;
+        let db = PublicCrudDb::from_pool(pool);
+
+        let inserted = db
+            .transaction(|tx| async move {
+                tx.users
+                    .insert(NewPublicCrudUser {
+                        name: "Pooled Commit".to_string(),
+                        active: true,
+                    })
+                    .await
+            })
+            .await?;
+
+        assert!(inserted.id > 0);
+        assert_eq!(db.users.query().count().await?, 1);
+
+        let rollback_error = db
+            .transaction(|tx| async move {
+                tx.users
+                    .insert(NewPublicCrudUser {
+                        name: "Pooled Rollback".to_string(),
+                        active: false,
+                    })
+                    .await?;
+
+                Err::<(), OrmError>(OrmError::new(
+                    "forcing pooled transaction rollback for integration test",
+                ))
+            })
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            rollback_error.message(),
+            "forcing pooled transaction rollback for integration test"
+        );
+        assert_eq!(db.users.query().count().await?, 1);
+
+        db.transaction(|tx| async move {
+            let nested_error = tx
+                .transaction(|_| async { Ok::<(), OrmError>(()) })
+                .await
+                .unwrap_err();
+            assert!(nested_error.message().contains("nested db.transaction"));
+            Ok(())
+        })
+        .await?;
+
+        let persisted = db.users.find(inserted.id).await?;
+        assert_eq!(
+            persisted,
+            Some(PublicCrudUser {
+                id: inserted.id,
+                name: "Pooled Commit".to_string(),
+                active: true,
+            })
+        );
 
         Ok(())
     }

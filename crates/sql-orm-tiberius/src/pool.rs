@@ -27,6 +27,16 @@ impl MssqlPool {
         Ok(MssqlPooledConnection { inner: connection })
     }
 
+    pub async fn acquire_owned(&self) -> Result<MssqlPooledConnection<'static>, OrmError> {
+        let connection = self
+            .inner
+            .get_owned()
+            .await
+            .map_err(|_| OrmError::new("failed to acquire SQL Server pooled connection"))?;
+
+        Ok(MssqlPooledConnection { inner: connection })
+    }
+
     pub fn max_size(&self) -> u32 {
         self.options.max_size
     }

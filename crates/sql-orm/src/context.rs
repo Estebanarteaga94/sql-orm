@@ -81,6 +81,8 @@ struct SharedConnectionRuntime {
     soft_delete_request_values: Option<Arc<SoftDeleteRequestValues>>,
     active_tenant: Option<ActiveTenant>,
     transaction_depth: Arc<AtomicUsize>,
+    #[cfg(feature = "pool-bb8")]
+    pinned_pool_connection: Arc<tokio::sync::Mutex<Option<MssqlPooledConnection<'static>>>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -96,6 +98,9 @@ pub enum SharedConnectionGuard<'a> {
     #[cfg(feature = "pool-bb8")]
     /// Guard for one connection acquired from a pool.
     Pool(Box<MssqlPooledConnection<'a>>),
+    #[cfg(feature = "pool-bb8")]
+    /// Guard for the connection pinned to the active pooled transaction.
+    PinnedPool(tokio::sync::MutexGuard<'a, Option<MssqlPooledConnection<'static>>>),
 }
 
 impl SharedConnection {
@@ -137,6 +142,8 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -155,6 +162,8 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -179,6 +188,8 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -197,6 +208,8 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -216,6 +229,8 @@ impl SharedConnection {
                 soft_delete_request_values: Some(Arc::new(request_values)),
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -241,6 +256,8 @@ impl SharedConnection {
                 soft_delete_request_values: None,
                 active_tenant: self.runtime.active_tenant.clone(),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -260,6 +277,8 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: Some(ActiveTenant::from_context(&tenant)),
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -275,6 +294,8 @@ impl SharedConnection {
                 soft_delete_request_values: self.runtime.soft_delete_request_values.clone(),
                 active_tenant: None,
                 transaction_depth: Arc::clone(&self.runtime.transaction_depth),
+                #[cfg(feature = "pool-bb8")]
+                pinned_pool_connection: Arc::clone(&self.runtime.pinned_pool_connection),
             }),
         }
     }
@@ -290,6 +311,12 @@ impl SharedConnection {
             }
             #[cfg(feature = "pool-bb8")]
             SharedConnectionInner::Pool(pool) => {
+                let pinned_connection = self.runtime.pinned_pool_connection.lock().await;
+                if pinned_connection.is_some() {
+                    return Ok(SharedConnectionGuard::PinnedPool(pinned_connection));
+                }
+                drop(pinned_connection);
+
                 Ok(SharedConnectionGuard::Pool(Box::new(pool.acquire().await?)))
             }
         }
@@ -301,12 +328,22 @@ impl SharedConnection {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<T, OrmError>>,
     {
+        if self.is_transaction_active() {
+            return Err(OrmError::new(
+                "nested db.transaction calls are not supported; use the transaction context passed to the active transaction",
+            ));
+        }
         ensure_transactions_supported(self.kind())?;
 
-        {
-            let mut connection = self.lock().await?;
-            connection.begin_transaction_scope().await?;
+        #[cfg(feature = "pool-bb8")]
+        if let SharedConnectionInner::Pool(pool) = self.inner.as_ref() {
+            return self.run_pooled_transaction(pool, operation).await;
         }
+
+        let mut connection = self.lock().await?;
+        connection.begin_transaction_scope().await?;
+        drop(connection);
+
         self.enter_transaction_scope();
 
         let result = operation().await;
@@ -323,6 +360,59 @@ impl SharedConnection {
                 let mut connection = self.lock().await?;
                 let rollback_result = connection.rollback_transaction().await;
                 self.exit_transaction_scope();
+                rollback_result?;
+                Err(error)
+            }
+        }
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    async fn run_pooled_transaction<F, Fut, T>(
+        &self,
+        pool: &MssqlPool,
+        operation: F,
+    ) -> Result<T, OrmError>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<T, OrmError>>,
+    {
+        self.install_pinned_pool_connection(pool.acquire_owned().await?)
+            .await?;
+
+        let begin_result = async {
+            let mut connection = self.lock().await?;
+            connection.begin_transaction_scope().await
+        }
+        .await;
+
+        if let Err(error) = begin_result {
+            self.clear_pinned_pool_connection().await;
+            return Err(error);
+        }
+
+        self.enter_transaction_scope();
+        let result = operation().await;
+
+        match result {
+            Ok(value) => {
+                let commit_result = async {
+                    let mut connection = self.lock().await?;
+                    connection.commit_transaction().await
+                }
+                .await;
+                self.exit_transaction_scope();
+                self.clear_pinned_pool_connection().await;
+                commit_result?;
+                Ok(value)
+            }
+            Err(error) => {
+                let rollback_result = async {
+                    let mut connection = self.lock().await?;
+                    connection.rollback_transaction().await
+                }
+                .await;
+                self.exit_transaction_scope();
+                self.clear_pinned_pool_connection().await;
                 rollback_result?;
                 Err(error)
             }
@@ -356,6 +446,28 @@ impl SharedConnection {
         );
     }
 
+    #[cfg(feature = "pool-bb8")]
+    async fn install_pinned_pool_connection(
+        &self,
+        connection: MssqlPooledConnection<'static>,
+    ) -> Result<(), OrmError> {
+        let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
+        if pinned_connection.is_some() {
+            return Err(OrmError::new(
+                "a pooled transaction connection is already pinned",
+            ));
+        }
+
+        *pinned_connection = Some(connection);
+        Ok(())
+    }
+
+    #[cfg(feature = "pool-bb8")]
+    async fn clear_pinned_pool_connection(&self) {
+        let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
+        *pinned_connection = None;
+    }
+
     #[allow(dead_code)]
     pub(crate) fn audit_provider(&self) -> Option<Arc<dyn AuditProvider>> {
         self.runtime.audit_provider.clone()
@@ -385,9 +497,7 @@ fn ensure_transactions_supported(kind: SharedConnectionKind) -> Result<(), OrmEr
     match kind {
         SharedConnectionKind::Direct => Ok(()),
         #[cfg(feature = "pool-bb8")]
-        SharedConnectionKind::Pool => Err(OrmError::new(
-            "db.transaction is not supported for pooled connections yet; create the DbContext from a direct connection until pooled transactions pin one physical SQL Server connection for the entire closure",
-        )),
+        SharedConnectionKind::Pool => Ok(()),
     }
 }
 
@@ -399,6 +509,10 @@ impl core::ops::Deref for SharedConnectionGuard<'_> {
             SharedConnectionGuard::Direct(connection) => connection,
             #[cfg(feature = "pool-bb8")]
             SharedConnectionGuard::Pool(connection) => connection,
+            #[cfg(feature = "pool-bb8")]
+            SharedConnectionGuard::PinnedPool(connection) => connection
+                .as_ref()
+                .expect("pinned pooled transaction connection is missing"),
         }
     }
 }
@@ -409,6 +523,10 @@ impl core::ops::DerefMut for SharedConnectionGuard<'_> {
             SharedConnectionGuard::Direct(connection) => connection,
             #[cfg(feature = "pool-bb8")]
             SharedConnectionGuard::Pool(connection) => connection,
+            #[cfg(feature = "pool-bb8")]
+            SharedConnectionGuard::PinnedPool(connection) => connection
+                .as_mut()
+                .expect("pinned pooled transaction connection is missing"),
         }
     }
 }
@@ -481,33 +599,13 @@ pub trait DbContext: Sized {
     {
         let shared_connection = self.shared_connection();
         async move {
-            ensure_transactions_supported(shared_connection.kind())?;
-
-            {
-                let mut connection = shared_connection.lock().await?;
-                connection.begin_transaction_scope().await?;
-            }
-            shared_connection.enter_transaction_scope();
-
-            let transaction_context = Self::from_shared_connection(shared_connection.clone());
-            let result = operation(transaction_context).await;
-
-            match result {
-                Ok(value) => {
-                    let mut connection = shared_connection.lock().await?;
-                    let commit_result = connection.commit_transaction().await;
-                    shared_connection.exit_transaction_scope();
-                    commit_result?;
-                    Ok(value)
-                }
-                Err(error) => {
-                    let mut connection = shared_connection.lock().await?;
-                    let rollback_result = connection.rollback_transaction().await;
-                    shared_connection.exit_transaction_scope();
-                    rollback_result?;
-                    Err(error)
-                }
-            }
+            let transaction_connection = shared_connection.clone();
+            shared_connection
+                .run_transaction(|| async move {
+                    let transaction_context = Self::from_shared_connection(transaction_connection);
+                    operation(transaction_context).await
+                })
+                .await
         }
     }
 }
@@ -2970,14 +3068,31 @@ mod tests {
 
     #[cfg(feature = "pool-bb8")]
     #[test]
-    fn pooled_shared_connections_reject_transactions_until_pinned() {
-        let error = ensure_transactions_supported(SharedConnectionKind::Pool).unwrap_err();
+    fn pooled_shared_connections_support_transaction_boundary() {
+        assert_eq!(
+            ensure_transactions_supported(SharedConnectionKind::Pool),
+            Ok(())
+        );
+    }
 
-        assert!(error.message().contains("pooled connections"));
-        assert!(
-            error
-                .message()
-                .contains("pin one physical SQL Server connection")
+    #[test]
+    fn transaction_depth_detects_active_transaction() {
+        let runtime = SharedConnectionRuntime::default();
+
+        assert_eq!(
+            runtime
+                .transaction_depth
+                .load(std::sync::atomic::Ordering::SeqCst),
+            0
+        );
+        runtime
+            .transaction_depth
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        assert_eq!(
+            runtime
+                .transaction_depth
+                .load(std::sync::atomic::Ordering::SeqCst),
+            1
         );
     }
 
