@@ -3,9 +3,10 @@ use crate::quoting::{
 };
 use sql_orm_core::{ColumnValue, OrmError, SqlValue};
 use sql_orm_query::{
-    BinaryOp, CompiledQuery, CountQuery, DeleteQuery, Expr, InsertQuery, Join, JoinType, OrderBy,
-    Pagination, Predicate, Query, SelectProjection, SelectQuery, SortDirection, TableRef, UnaryOp,
-    UpdateQuery,
+    AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
+    BinaryOp, CompiledQuery, CountQuery, DeleteQuery, ExistsQuery, Expr, InsertQuery, Join,
+    JoinType, OrderBy, Pagination, Predicate, Query, SelectProjection, SelectQuery, SortDirection,
+    TableRef, UnaryOp, UpdateQuery,
 };
 use std::collections::BTreeSet;
 
@@ -29,9 +30,8 @@ impl crate::SqlServerCompiler {
     pub fn compile_query(query: &Query) -> Result<CompiledQuery, OrmError> {
         match query {
             Query::Select(query) => Self::compile_select(query),
-            Query::Aggregate(_) => Err(OrmError::new(
-                "SQL Server aggregate query compilation is not implemented yet",
-            )),
+            Query::Aggregate(query) => Self::compile_aggregate(query),
+            Query::Exists(query) => Self::compile_exists(query),
             Query::Insert(query) => Self::compile_insert(query),
             Query::Update(query) => Self::compile_update(query),
             Query::Delete(query) => Self::compile_delete(query),
@@ -142,6 +142,87 @@ impl crate::SqlServerCompiler {
 
         Ok(parameters.finish(sql))
     }
+
+    pub fn compile_exists(query: &ExistsQuery) -> Result<CompiledQuery, OrmError> {
+        let mut parameters = ParameterBuilder::default();
+        let mut subquery = format!("SELECT 1 FROM {}", quote_table_source(&query.from)?);
+        subquery.push_str(&compile_joins(&query.from, &query.joins, &mut parameters)?);
+
+        if let Some(predicate) = &query.predicate {
+            let predicate = compile_predicate(predicate, &mut parameters)?;
+            subquery.push_str(" WHERE ");
+            subquery.push_str(&predicate);
+        }
+
+        let sql = format!(
+            "SELECT CASE WHEN EXISTS ({subquery}) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS {}",
+            quote_identifier("exists")?
+        );
+
+        Ok(parameters.finish(sql))
+    }
+
+    pub fn compile_aggregate(query: &AggregateQuery) -> Result<CompiledQuery, OrmError> {
+        validate_aggregate_query(query)?;
+
+        let mut parameters = ParameterBuilder::default();
+        let projection =
+            compile_aggregate_projection(&query.projection, &query.group_by, &mut parameters)?;
+        let mut sql = format!(
+            "SELECT {projection} FROM {}",
+            quote_table_source(&query.from)?
+        );
+        sql.push_str(&compile_joins(&query.from, &query.joins, &mut parameters)?);
+
+        if let Some(predicate) = &query.predicate {
+            let predicate = compile_predicate(predicate, &mut parameters)?;
+            sql.push_str(" WHERE ");
+            sql.push_str(&predicate);
+        }
+
+        if !query.group_by.is_empty() {
+            sql.push_str(" GROUP BY ");
+            sql.push_str(&compile_group_by(&query.group_by, &mut parameters)?);
+        }
+
+        if let Some(having) = &query.having {
+            let having = compile_aggregate_predicate(having, &query.group_by, &mut parameters)?;
+            sql.push_str(" HAVING ");
+            sql.push_str(&having);
+        }
+
+        if !query.order_by.is_empty() {
+            sql.push_str(" ORDER BY ");
+            sql.push_str(&compile_aggregate_order_by(
+                &query.order_by,
+                &query.group_by,
+                &mut parameters,
+            )?);
+        }
+
+        if let Some(pagination) = query.pagination {
+            if query.order_by.is_empty() {
+                return Err(OrmError::new(
+                    "SQL Server aggregate pagination requires ORDER BY before OFFSET/FETCH",
+                ));
+            }
+
+            sql.push(' ');
+            sql.push_str(&compile_pagination(pagination, &mut parameters));
+        }
+
+        Ok(parameters.finish(sql))
+    }
+}
+
+fn validate_aggregate_query(query: &AggregateQuery) -> Result<(), OrmError> {
+    if query.projection.is_empty() {
+        return Err(OrmError::new(
+            "SQL Server aggregate query compilation requires at least one projection",
+        ));
+    }
+
+    Ok(())
 }
 
 fn compile_joins(
@@ -207,6 +288,77 @@ fn compile_projection(
     Ok(parts.join(", "))
 }
 
+fn compile_aggregate_projection(
+    projection: &[AggregateProjection],
+    group_by: &[Expr],
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    let mut aliases = BTreeSet::new();
+    let parts = projection
+        .iter()
+        .map(|projection| {
+            if projection.alias.trim().is_empty() {
+                return Err(OrmError::new(
+                    "SQL Server aggregate projection alias cannot be empty",
+                ));
+            }
+            if !aliases.insert(projection.alias) {
+                return Err(OrmError::new(format!(
+                    "SQL Server aggregate projection alias `{}` is duplicated",
+                    projection.alias
+                )));
+            }
+
+            Ok(format!(
+                "{} AS {}",
+                compile_aggregate_expr(&projection.expr, group_by, parameters)?,
+                quote_identifier(projection.alias)?
+            ))
+        })
+        .collect::<Result<Vec<_>, OrmError>>()?;
+    Ok(parts.join(", "))
+}
+
+fn compile_group_by(
+    group_by: &[Expr],
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    let parts = group_by
+        .iter()
+        .map(|expr| compile_expr(expr, parameters))
+        .collect::<Result<Vec<_>, _>>()?;
+    Ok(parts.join(", "))
+}
+
+fn compile_aggregate_expr(
+    expr: &AggregateExpr,
+    group_by: &[Expr],
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    match expr {
+        AggregateExpr::GroupKey(expr) => {
+            validate_group_key(expr, group_by)?;
+            compile_expr(expr, parameters)
+        }
+        AggregateExpr::CountAll => Ok("COUNT(*)".to_string()),
+        AggregateExpr::Count(expr) => Ok(format!("COUNT({})", compile_expr(expr, parameters)?)),
+        AggregateExpr::Sum(expr) => Ok(format!("SUM({})", compile_expr(expr, parameters)?)),
+        AggregateExpr::Avg(expr) => Ok(format!("AVG({})", compile_expr(expr, parameters)?)),
+        AggregateExpr::Min(expr) => Ok(format!("MIN({})", compile_expr(expr, parameters)?)),
+        AggregateExpr::Max(expr) => Ok(format!("MAX({})", compile_expr(expr, parameters)?)),
+    }
+}
+
+fn validate_group_key(expr: &Expr, group_by: &[Expr]) -> Result<(), OrmError> {
+    if group_by.iter().any(|group_key| group_key == expr) {
+        return Ok(());
+    }
+
+    Err(OrmError::new(
+        "SQL Server aggregate group key projection must appear in GROUP BY",
+    ))
+}
+
 fn compile_expr(expr: &Expr, parameters: &mut ParameterBuilder) -> Result<String, OrmError> {
     match expr {
         Expr::Column(column) => quote_column_ref(column),
@@ -262,6 +414,77 @@ fn compile_predicate(
     }
 }
 
+fn compile_aggregate_predicate(
+    predicate: &AggregatePredicate,
+    group_by: &[Expr],
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    match predicate {
+        AggregatePredicate::Eq(left, right) => {
+            compile_aggregate_comparison(left, "=", right, group_by, parameters)
+        }
+        AggregatePredicate::Ne(left, right) => {
+            compile_aggregate_comparison(left, "<>", right, group_by, parameters)
+        }
+        AggregatePredicate::Gt(left, right) => {
+            compile_aggregate_comparison(left, ">", right, group_by, parameters)
+        }
+        AggregatePredicate::Gte(left, right) => {
+            compile_aggregate_comparison(left, ">=", right, group_by, parameters)
+        }
+        AggregatePredicate::Lt(left, right) => {
+            compile_aggregate_comparison(left, "<", right, group_by, parameters)
+        }
+        AggregatePredicate::Lte(left, right) => {
+            compile_aggregate_comparison(left, "<=", right, group_by, parameters)
+        }
+        AggregatePredicate::And(predicates) => {
+            compile_aggregate_logical("AND", predicates, group_by, parameters)
+        }
+        AggregatePredicate::Or(predicates) => {
+            compile_aggregate_logical("OR", predicates, group_by, parameters)
+        }
+        AggregatePredicate::Not(predicate) => Ok(format!(
+            "(NOT {})",
+            compile_aggregate_predicate(predicate, group_by, parameters)?
+        )),
+    }
+}
+
+fn compile_aggregate_comparison(
+    left: &AggregateExpr,
+    operator: &str,
+    right: &Expr,
+    group_by: &[Expr],
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    Ok(format!(
+        "({} {operator} {})",
+        compile_aggregate_expr(left, group_by, parameters)?,
+        compile_expr(right, parameters)?,
+    ))
+}
+
+fn compile_aggregate_logical(
+    operator: &str,
+    predicates: &[AggregatePredicate],
+    group_by: &[Expr],
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    if predicates.is_empty() {
+        return Err(OrmError::new(
+            "aggregate logical predicate compilation requires at least one child predicate",
+        ));
+    }
+
+    let compiled = predicates
+        .iter()
+        .map(|predicate| compile_aggregate_predicate(predicate, group_by, parameters))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    Ok(format!("({})", compiled.join(&format!(" {operator} "))))
+}
+
 fn compile_comparison(
     left: &Expr,
     operator: &str,
@@ -302,6 +525,28 @@ fn compile_order_by(order_by: &[OrderBy]) -> Result<String, OrmError> {
                 "{}.{} {}",
                 quote_table_reference(&order.table)?,
                 quote_identifier(order.column_name)?,
+                match order.direction {
+                    SortDirection::Asc => "ASC",
+                    SortDirection::Desc => "DESC",
+                },
+            ))
+        })
+        .collect::<Result<Vec<_>, OrmError>>()?;
+
+    Ok(parts.join(", "))
+}
+
+fn compile_aggregate_order_by(
+    order_by: &[AggregateOrderBy],
+    group_by: &[Expr],
+    parameters: &mut ParameterBuilder,
+) -> Result<String, OrmError> {
+    let parts = order_by
+        .iter()
+        .map(|order| {
+            Ok(format!(
+                "{} {}",
+                compile_aggregate_expr(&order.expr, group_by, parameters)?,
                 match order.direction {
                     SortDirection::Asc => "ASC",
                     SortDirection::Desc => "DESC",
@@ -376,7 +621,8 @@ mod tests {
         IdentityMetadata, Insertable, PrimaryKeyMetadata, SqlServerType, SqlValue,
     };
     use sql_orm_query::{
-        AggregateQuery, BinaryOp, CountQuery, DeleteQuery, Expr, InsertQuery, OrderBy, Pagination,
+        AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
+        BinaryOp, CountQuery, DeleteQuery, ExistsQuery, Expr, InsertQuery, OrderBy, Pagination,
         Predicate, Query, SelectProjection, SelectQuery, TableRef, UnaryOp, UpdateQuery,
     };
 
@@ -853,6 +1099,34 @@ mod tests {
     }
 
     #[test]
+    fn compiles_exists_query_with_join_and_parameter_order() {
+        let query = ExistsQuery::from_entity::<Customer>()
+            .inner_join::<Order>(Predicate::eq(
+                Expr::from(Customer::id),
+                Expr::from(Order::customer_id),
+            ))
+            .filter(Predicate::eq(
+                Expr::from(Customer::active),
+                Expr::value(SqlValue::Bool(true)),
+            ))
+            .filter(Predicate::gt(
+                Expr::from(Order::total_cents),
+                Expr::value(SqlValue::I64(1000)),
+            ));
+
+        let compiled = SqlServerCompiler::compile_exists(&query).unwrap();
+
+        assert_eq!(
+            compiled.sql,
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM [sales].[customers] INNER JOIN [sales].[orders] ON ([sales].[customers].[id] = [sales].[orders].[customer_id]) WHERE (([sales].[customers].[active] = @P1) AND ([sales].[orders].[total_cents] > @P2))) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS [exists]"
+        );
+        assert_eq!(
+            compiled.params,
+            vec![SqlValue::Bool(true), SqlValue::I64(1000)]
+        );
+    }
+
+    #[test]
     fn compiles_query_enum_through_single_entry_point() {
         let query = Query::Count(CountQuery::from_entity::<Customer>().filter(Predicate::eq(
             Expr::from(Customer::active),
@@ -866,17 +1140,117 @@ mod tests {
             "SELECT COUNT(*) AS [count] FROM [sales].[customers] WHERE ([sales].[customers].[active] = @P1)"
         );
         assert_eq!(compiled.params, vec![SqlValue::Bool(true)]);
+
+        let exists_query = Query::Exists(Box::new(ExistsQuery::from_entity::<Customer>().filter(
+            Predicate::eq(
+                Expr::from(Customer::active),
+                Expr::value(SqlValue::Bool(true)),
+            ),
+        )));
+        let compiled_exists = SqlServerCompiler::compile_query(&exists_query).unwrap();
+        assert_eq!(
+            compiled_exists.sql,
+            "SELECT CASE WHEN EXISTS (SELECT 1 FROM [sales].[customers] WHERE ([sales].[customers].[active] = @P1)) THEN CAST(1 AS bit) ELSE CAST(0 AS bit) END AS [exists]"
+        );
+        assert_eq!(compiled_exists.params, vec![SqlValue::Bool(true)]);
     }
 
     #[test]
-    fn aggregate_query_enum_variant_is_explicitly_not_compiled_yet() {
-        let query = Query::Aggregate(Box::new(AggregateQuery::from_entity::<Customer>()));
+    fn compiles_aggregate_query_through_single_entry_point() {
+        let query = Query::Aggregate(Box::new(
+            AggregateQuery::from_entity::<Order>()
+                .project(vec![AggregateProjection::count_as("order_count")])
+                .filter(Predicate::gt(
+                    Expr::from(Order::total_cents),
+                    Expr::value(SqlValue::I64(1000)),
+                )),
+        ));
 
-        let error = SqlServerCompiler::compile_query(&query).unwrap_err();
+        let compiled = SqlServerCompiler::compile_query(&query).unwrap();
 
         assert_eq!(
-            error.message(),
-            "SQL Server aggregate query compilation is not implemented yet"
+            compiled.sql,
+            "SELECT COUNT(*) AS [order_count] FROM [sales].[orders] WHERE ([sales].[orders].[total_cents] > @P1)"
+        );
+        assert_eq!(compiled.params, vec![SqlValue::I64(1000)]);
+    }
+
+    #[test]
+    fn compiles_grouped_aggregate_query_with_having_and_parameter_order() {
+        let query = AggregateQuery::from_entity::<Order>()
+            .inner_join::<Customer>(Predicate::eq(
+                Expr::from(Order::customer_id),
+                Expr::from(Customer::id),
+            ))
+            .filter(Predicate::eq(
+                Expr::from(Customer::active),
+                Expr::value(SqlValue::Bool(true)),
+            ))
+            .group_by(vec![Expr::from(Order::customer_id)])
+            .project(vec![
+                AggregateProjection::group_key(Order::customer_id),
+                AggregateProjection::count_as("order_count"),
+                AggregateProjection::sum_as(Order::total_cents, "total_cents"),
+                AggregateProjection::avg_as(Order::total_cents, "average_cents"),
+                AggregateProjection::min_as(Order::total_cents, "min_cents"),
+                AggregateProjection::max_as(Order::total_cents, "max_cents"),
+            ])
+            .having(AggregatePredicate::gt(
+                AggregateExpr::count_all(),
+                Expr::value(SqlValue::I64(1)),
+            ))
+            .order_by(AggregateOrderBy::desc(AggregateExpr::sum(Expr::from(
+                Order::total_cents,
+            ))))
+            .paginate(Pagination::page(1, 10));
+
+        let compiled = SqlServerCompiler::compile_aggregate(&query).unwrap();
+
+        assert_eq!(
+            compiled.sql,
+            "SELECT [sales].[orders].[customer_id] AS [customer_id], COUNT(*) AS [order_count], SUM([sales].[orders].[total_cents]) AS [total_cents], AVG([sales].[orders].[total_cents]) AS [average_cents], MIN([sales].[orders].[total_cents]) AS [min_cents], MAX([sales].[orders].[total_cents]) AS [max_cents] FROM [sales].[orders] INNER JOIN [sales].[customers] ON ([sales].[orders].[customer_id] = [sales].[customers].[id]) WHERE ([sales].[customers].[active] = @P1) GROUP BY [sales].[orders].[customer_id] HAVING (COUNT(*) > @P2) ORDER BY SUM([sales].[orders].[total_cents]) DESC OFFSET @P3 ROWS FETCH NEXT @P4 ROWS ONLY"
+        );
+        assert_eq!(
+            compiled.params,
+            vec![
+                SqlValue::Bool(true),
+                SqlValue::I64(1),
+                SqlValue::I64(0),
+                SqlValue::I64(10),
+            ]
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_aggregate_queries() {
+        let empty_projection_error =
+            SqlServerCompiler::compile_aggregate(&AggregateQuery::from_entity::<Order>())
+                .unwrap_err();
+        assert_eq!(
+            empty_projection_error.message(),
+            "SQL Server aggregate query compilation requires at least one projection"
+        );
+
+        let duplicate_alias_error = SqlServerCompiler::compile_aggregate(
+            &AggregateQuery::from_entity::<Order>().project(vec![
+                AggregateProjection::count_as("value"),
+                AggregateProjection::sum_as(Order::total_cents, "value"),
+            ]),
+        )
+        .unwrap_err();
+        assert_eq!(
+            duplicate_alias_error.message(),
+            "SQL Server aggregate projection alias `value` is duplicated"
+        );
+
+        let missing_group_key_error = SqlServerCompiler::compile_aggregate(
+            &AggregateQuery::from_entity::<Order>()
+                .project(vec![AggregateProjection::group_key(Order::customer_id)]),
+        )
+        .unwrap_err();
+        assert_eq!(
+            missing_group_key_error.message(),
+            "SQL Server aggregate group key projection must appear in GROUP BY"
         );
     }
 

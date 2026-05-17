@@ -160,3 +160,57 @@ impl CountQuery {
         self
     }
 }
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExistsQuery {
+    pub from: TableRef,
+    pub joins: Vec<Join>,
+    pub predicate: Option<Predicate>,
+}
+
+impl ExistsQuery {
+    pub fn from_entity<E: Entity>() -> Self {
+        Self {
+            from: TableRef::for_entity::<E>(),
+            joins: Vec::new(),
+            predicate: None,
+        }
+    }
+
+    pub fn from_entity_as<E: Entity>(alias: &'static str) -> Self {
+        Self {
+            from: TableRef::for_entity_as::<E>(alias),
+            joins: Vec::new(),
+            predicate: None,
+        }
+    }
+
+    pub fn filter(mut self, predicate: Predicate) -> Self {
+        self.predicate = Some(match self.predicate.take() {
+            Some(existing) => Predicate::and(vec![existing, predicate]),
+            None => predicate,
+        });
+        self
+    }
+
+    pub fn join(mut self, join: Join) -> Self {
+        self.joins.push(join);
+        self
+    }
+
+    pub fn inner_join<E: Entity>(self, on: Predicate) -> Self {
+        self.join(Join::inner_entity::<E>(on))
+    }
+
+    pub fn left_join<E: Entity>(self, on: Predicate) -> Self {
+        self.join(Join::left_entity::<E>(on))
+    }
+
+    pub fn inner_join_as<E: Entity>(self, alias: &'static str, on: Predicate) -> Self {
+        self.join(Join::inner_entity_as::<E>(alias, on))
+    }
+
+    pub fn left_join_as<E: Entity>(self, alias: &'static str, on: Predicate) -> Self {
+        self.join(Join::left_entity_as::<E>(alias, on))
+    }
+}

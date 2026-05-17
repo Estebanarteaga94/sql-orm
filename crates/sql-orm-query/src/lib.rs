@@ -23,7 +23,7 @@ pub use join::{Join, JoinType};
 pub use order::{OrderBy, SortDirection};
 pub use pagination::Pagination;
 pub use predicate::Predicate;
-pub use select::{CountQuery, SelectProjection, SelectQuery};
+pub use select::{CountQuery, ExistsQuery, SelectProjection, SelectQuery};
 pub use update::UpdateQuery;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -45,6 +45,7 @@ impl CompiledQuery {
 pub enum Query {
     Select(SelectQuery),
     Aggregate(Box<AggregateQuery>),
+    Exists(Box<ExistsQuery>),
     Insert(InsertQuery),
     Update(UpdateQuery),
     Delete(DeleteQuery),
@@ -60,8 +61,8 @@ pub const CRATE_IDENTITY: CrateIdentity = CrateIdentity {
 mod tests {
     use super::{
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
-        BinaryOp, CRATE_IDENTITY, ColumnRef, CompiledQuery, CountQuery, DeleteQuery, Expr,
-        InsertQuery, Join, JoinType, OrderBy, Pagination, Predicate, Query, SelectProjection,
+        BinaryOp, CRATE_IDENTITY, ColumnRef, CompiledQuery, CountQuery, DeleteQuery, ExistsQuery,
+        Expr, InsertQuery, Join, JoinType, OrderBy, Pagination, Predicate, Query, SelectProjection,
         SelectQuery, SortDirection, TableRef, UpdateQuery,
     };
     use sql_orm_core::{
@@ -563,6 +564,15 @@ mod tests {
             Expr::from(Customer::active),
             Expr::value(SqlValue::Bool(true)),
         ));
+        let exists = ExistsQuery::from_entity::<Customer>()
+            .inner_join::<Order>(Predicate::eq(
+                Expr::from(Customer::id),
+                Expr::from(Order::customer_id),
+            ))
+            .filter(Predicate::eq(
+                Expr::from(Customer::active),
+                Expr::value(SqlValue::Bool(true)),
+            ));
 
         assert_eq!(insert.into, TableRef::new("sales", "customers"));
         assert_eq!(insert.values.len(), 2);
@@ -573,11 +583,15 @@ mod tests {
         assert!(delete.predicate.is_some());
         assert_eq!(count.from, TableRef::new("sales", "customers"));
         assert!(count.predicate.is_some());
+        assert_eq!(exists.from, TableRef::new("sales", "customers"));
+        assert_eq!(exists.joins.len(), 1);
+        assert!(exists.predicate.is_some());
 
         assert!(matches!(Query::Insert(insert.clone()), Query::Insert(_)));
         assert!(matches!(Query::Update(update.clone()), Query::Update(_)));
         assert!(matches!(Query::Delete(delete.clone()), Query::Delete(_)));
         assert!(matches!(Query::Count(count.clone()), Query::Count(_)));
+        assert!(matches!(Query::Exists(Box::new(exists)), Query::Exists(_)));
     }
 
     #[test]
