@@ -123,6 +123,28 @@ Connection-string resolution order for `--execute`:
 2. `DATABASE_URL`
 3. `SQL_ORM_TEST_CONNECTION_STRING`
 
+## SQL Script Parsing
+
+`database update` and `database downgrade` read editable `up.sql` and
+`down.sql` files using a deliberately small SQL Server script parser before
+wrapping each executable unit in `EXEC(N'...')`.
+
+The accepted script rules are:
+
+- Semicolons split statements only outside string literals, bracketed
+  identifiers, double-quoted identifiers, line comments, and block comments.
+- `GO` is treated as a batch separator only when it appears alone on a line
+  after trimming whitespace; matching is case-insensitive.
+- Comment-only and whitespace-only statements or batches are ignored.
+- String literals may contain escaped single quotes (`''`), semicolons,
+  `--`, `/* */`, and text such as `GO` without splitting the statement.
+- Bracketed identifiers may contain semicolons or escaped closing brackets
+  (`]]`) without splitting the statement.
+
+This parser is intended for migration DDL and hand-reviewed rollback scripts.
+It is not a general sqlcmd replacement and does not implement sqlcmd commands
+or `GO <count>`.
+
 ## Migration History
 
 The generated script uses a `__sql_orm_migrations` history table. It records migration identity and checksum. Editing an already-applied migration is treated as drift and should fail intentionally.

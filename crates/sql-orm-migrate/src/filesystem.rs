@@ -427,17 +427,187 @@ fn is_unresolved_down_sql_template(sql: &str) -> bool {
 }
 
 fn split_sql_statements(sql: &str) -> Vec<String> {
-    sql.split(';')
-        .map(str::trim)
-        .filter(|statement| !statement.is_empty())
-        .filter(|statement| {
-            statement.lines().any(|line| {
-                let trimmed = line.trim();
-                !trimmed.is_empty() && !trimmed.starts_with("--")
-            })
-        })
-        .map(|statement| format!("{statement};"))
-        .collect()
+    let mut statements = Vec::new();
+    let mut current = String::new();
+    let mut line = String::new();
+    let mut chars = sql.chars().peekable();
+    let mut state = SqlScriptState::Default;
+
+    while let Some(ch) = chars.next() {
+        match state {
+            SqlScriptState::Default => {
+                if ch != '\r' && ch != '\n' {
+                    line.push(ch);
+                }
+
+                match ch {
+                    '\'' => {
+                        current.push(ch);
+                        state = SqlScriptState::StringLiteral;
+                    }
+                    '[' => {
+                        current.push(ch);
+                        state = SqlScriptState::BracketIdentifier;
+                    }
+                    '"' => {
+                        current.push(ch);
+                        state = SqlScriptState::DoubleQuotedIdentifier;
+                    }
+                    '-' if chars.peek() == Some(&'-') => {
+                        current.push(ch);
+                        current.push(chars.next().expect("peeked dash"));
+                        state = SqlScriptState::LineComment;
+                    }
+                    '/' if chars.peek() == Some(&'*') => {
+                        current.push(ch);
+                        current.push(chars.next().expect("peeked star"));
+                        state = SqlScriptState::BlockComment;
+                    }
+                    ';' => {
+                        current.push(ch);
+                        push_sql_statement(&mut statements, &mut current);
+                    }
+                    '\n' => {
+                        if is_go_batch_separator(&line) {
+                            remove_current_line(&mut current);
+                            push_sql_statement(&mut statements, &mut current);
+                        } else {
+                            current.push(ch);
+                        }
+                        line.clear();
+                    }
+                    '\r' => {
+                        current.push(ch);
+                    }
+                    _ => {
+                        current.push(ch);
+                    }
+                }
+            }
+            SqlScriptState::StringLiteral => {
+                current.push(ch);
+                if ch == '\'' {
+                    if chars.peek() == Some(&'\'') {
+                        current.push(chars.next().expect("peeked quote"));
+                    } else {
+                        state = SqlScriptState::Default;
+                    }
+                }
+                if ch == '\n' {
+                    line.clear();
+                }
+            }
+            SqlScriptState::BracketIdentifier => {
+                current.push(ch);
+                if ch == ']' {
+                    if chars.peek() == Some(&']') {
+                        current.push(chars.next().expect("peeked bracket"));
+                    } else {
+                        state = SqlScriptState::Default;
+                    }
+                }
+                if ch == '\n' {
+                    line.clear();
+                }
+            }
+            SqlScriptState::DoubleQuotedIdentifier => {
+                current.push(ch);
+                if ch == '"' {
+                    if chars.peek() == Some(&'"') {
+                        current.push(chars.next().expect("peeked double quote"));
+                    } else {
+                        state = SqlScriptState::Default;
+                    }
+                }
+                if ch == '\n' {
+                    line.clear();
+                }
+            }
+            SqlScriptState::LineComment => {
+                current.push(ch);
+                if ch == '\n' {
+                    state = SqlScriptState::Default;
+                    line.clear();
+                }
+            }
+            SqlScriptState::BlockComment => {
+                current.push(ch);
+                if ch == '*' && chars.peek() == Some(&'/') {
+                    current.push(chars.next().expect("peeked slash"));
+                    state = SqlScriptState::Default;
+                }
+                if ch == '\n' {
+                    line.clear();
+                }
+            }
+        }
+    }
+
+    if is_go_batch_separator(&line) {
+        remove_current_line(&mut current);
+    }
+    push_sql_statement(&mut statements, &mut current);
+
+    statements
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SqlScriptState {
+    Default,
+    StringLiteral,
+    BracketIdentifier,
+    DoubleQuotedIdentifier,
+    LineComment,
+    BlockComment,
+}
+
+fn push_sql_statement(statements: &mut Vec<String>, current: &mut String) {
+    let statement = current.trim();
+    if !statement.is_empty() && has_executable_sql(statement) {
+        statements.push(statement.to_string());
+    }
+    current.clear();
+}
+
+fn remove_current_line(current: &mut String) {
+    match current.rfind('\n') {
+        Some(index) => current.truncate(index + 1),
+        None => current.clear(),
+    }
+}
+
+fn is_go_batch_separator(line: &str) -> bool {
+    line.trim().eq_ignore_ascii_case("GO")
+}
+
+fn has_executable_sql(statement: &str) -> bool {
+    let mut chars = statement.chars().peekable();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '-' if chars.peek() == Some(&'-') => {
+                chars.next();
+                for comment_ch in chars.by_ref() {
+                    if comment_ch == '\n' {
+                        break;
+                    }
+                }
+            }
+            '/' if chars.peek() == Some(&'*') => {
+                chars.next();
+                let mut previous = '\0';
+                for comment_ch in chars.by_ref() {
+                    if previous == '*' && comment_ch == '/' {
+                        break;
+                    }
+                    previous = comment_ch;
+                }
+            }
+            _ if ch.is_whitespace() || ch == ';' => {}
+            _ => return true,
+        }
+    }
+
+    false
 }
 
 #[cfg(test)]
@@ -445,8 +615,8 @@ mod tests {
     use super::{
         build_database_downgrade_script, build_database_update_script, checksum_hex,
         create_migration_scaffold, create_migration_scaffold_with_snapshot, latest_migration,
-        list_migrations, read_latest_model_snapshot, read_model_snapshot, write_migration_down_sql,
-        write_migration_up_sql, write_model_snapshot,
+        list_migrations, read_latest_model_snapshot, read_model_snapshot, split_sql_statements,
+        write_migration_down_sql, write_migration_up_sql, write_model_snapshot,
     };
     use crate::{ModelSnapshot, SchemaSnapshot};
     use std::fs;
@@ -674,6 +844,62 @@ mod tests {
                 "EXEC(N'INSERT INTO [dbo].[messages] ([body]) VALUES (N''O''''Brien'');');"
             )
         );
+    }
+
+    #[test]
+    fn split_sql_statements_respects_literals_comments_and_go_batches() {
+        let statements = split_sql_statements(
+            "CREATE TABLE [dbo].[semi;colon] ([body] nvarchar(200));\n\
+             INSERT INTO [dbo].[semi;colon] ([body]) VALUES (N'one;two -- not comment');\n\
+             -- GO is ignored inside a line comment\n\
+             /* semicolon ; and GO are ignored inside block comments */\n\
+             GO\n\
+             SELECT N'GO; still literal';\n",
+        );
+
+        assert_eq!(
+            statements,
+            vec![
+                "CREATE TABLE [dbo].[semi;colon] ([body] nvarchar(200));",
+                "INSERT INTO [dbo].[semi;colon] ([body]) VALUES (N'one;two -- not comment');",
+                "SELECT N'GO; still literal';",
+            ]
+        );
+    }
+
+    #[test]
+    fn split_sql_statements_discards_comment_only_batches() {
+        let statements = split_sql_statements(
+            "-- comment only\n\
+             GO\n\
+             /* block comment ; only */\n\
+             GO\n\
+             CREATE SCHEMA [sales]\n\
+             GO\n",
+        );
+
+        assert_eq!(statements, vec!["CREATE SCHEMA [sales]"]);
+    }
+
+    #[test]
+    fn database_update_script_splits_go_batches_without_splitting_literals() {
+        let root = temp_project_root();
+        let scaffold = create_migration_scaffold(&root, "Go Batch").unwrap();
+        fs::write(
+            scaffold.directory.join("up.sql"),
+            "CREATE SCHEMA [sales]\nGO\nINSERT INTO [dbo].[messages] ([body]) VALUES (N'a;b');",
+        )
+        .unwrap();
+
+        let script =
+            build_database_update_script(&root, "CREATE TABLE [dbo].[__sql_orm_migrations] (...);")
+                .unwrap();
+
+        assert!(script.contains("EXEC(N'CREATE SCHEMA [sales]');"));
+        assert!(
+            script.contains("EXEC(N'INSERT INTO [dbo].[messages] ([body]) VALUES (N''a;b'');');")
+        );
+        assert!(!script.contains("EXEC(N'GO');"));
     }
 
     #[test]
