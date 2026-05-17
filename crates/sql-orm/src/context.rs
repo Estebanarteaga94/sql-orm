@@ -3335,6 +3335,24 @@ mod tests {
         assert_eq!(registry.entry_count(), 0);
     }
 
+    #[tokio::test]
+    async fn into_current_on_deleted_entry_discards_pending_delete_before_save_phase_validation() {
+        let dbset = DbSet::<CompositeKeyEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(CompositeKeyEntity);
+        tracked.attach_registry(registry.clone());
+        dbset.remove_tracked(&mut tracked);
+
+        assert_eq!(tracked.state(), crate::EntityState::Deleted);
+        assert_eq!(registry.entry_count(), 1);
+
+        let _current = tracked.into_current();
+        let deleted_saved = dbset.save_tracked_deleted().await.unwrap();
+
+        assert_eq!(deleted_saved, 0);
+        assert_eq!(registry.entry_count(), 0);
+    }
+
     #[test]
     fn dbset_remove_tracked_cancels_pending_added_entity() {
         let dbset = DbSet::<TestEntity>::disconnected();
