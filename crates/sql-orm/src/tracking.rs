@@ -1696,6 +1696,27 @@ mod tests {
     }
 
     #[test]
+    fn current_snapshot_for_key_syncs_attached_wrapper_current() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(SnapshotEntity {
+            name: "loaded".to_string(),
+        });
+        tracked
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        tracked.current_mut().name = "changed through wrapper".to_string();
+
+        let snapshot = registry
+            .current_snapshot_for_key::<SnapshotEntity>(SqlValue::I64(7))
+            .expect("tracked identity should have a current snapshot");
+
+        assert_eq!(snapshot.name, "changed through wrapper");
+        assert_eq!(tracked.state(), EntityState::Modified);
+        assert_eq!(registry.registrations()[0].state, EntityState::Modified);
+    }
+
+    #[test]
     fn current_snapshot_for_key_ignores_unregistered_identity() {
         let registry = Arc::new(TrackingRegistry::default());
         let mut tracked = Tracked::from_loaded(SnapshotEntity {
