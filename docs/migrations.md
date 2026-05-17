@@ -174,6 +174,59 @@ Safety requirements for the implementation phase:
 - run each migration rollback in its own transaction;
 - fail clearly when rollback cannot be proven reversible from the local artifacts.
 
+### Downgrade Safety Rules
+
+The first implementation must treat downgrade as a potentially destructive operation and fail closed. These rules are implementation requirements, not optional documentation guidance.
+
+Target rules:
+
+- `--target` is required for both script generation and `--execute`.
+- The target value must be either a known local migration id or the explicit empty-database sentinel `0`.
+- The target is inclusive: after downgrade completes, that migration should still be present in `[dbo].[__sql_orm_migrations]`.
+- A target newer than or equal to the latest applied migration is a no-op script, not an error.
+- A target that exists locally but is not present in the applied history is ambiguous and must fail instead of guessing how far to rollback.
+- A target that is not local and is not `0` must fail before reading or executing `down.sql`.
+- The command must not support an implicit "previous" target in the first implementation.
+
+History and checksum rules:
+
+- Every applied migration selected for rollback must exist as a local migration directory.
+- The local `up.sql` checksum must match the checksum stored in `[dbo].[__sql_orm_migrations]` before any corresponding `down.sql` is executed.
+- Checksum mismatch must abort the entire downgrade script for that migration and all older migrations.
+- A missing local migration or missing checksum must produce a deterministic error naming the migration id.
+- Local migrations that are newer than the database history but are not applied must be ignored for rollback selection.
+
+`down.sql` rules:
+
+- `down.sql` must exist for every migration selected for rollback.
+- `down.sql` must contain at least one executable statement after comments and blank lines are ignored.
+- Template-only or comment-only `down.sql` must be treated as non-reversible.
+- The implementation must not infer reverse SQL from `model_snapshot.json` at downgrade time.
+- The implementation must not read or require `migration.rs`.
+
+Transaction rules:
+
+- Each migration rollback must run in its own SQL Server transaction.
+- The history row for that migration must be deleted in the same transaction as its `down.sql`.
+- If any statement in `down.sql` fails, the transaction must roll back and the history row must remain.
+- The script must stop at the first failed rollback; it must not continue to older migrations after an error.
+- Nested user transactions are outside the first implementation. Generated scripts should manage their own `BEGIN TRY` / `BEGIN CATCH` / `BEGIN TRANSACTION` block per migration.
+
+Script and execution rules:
+
+- Script generation is the default mode and must be usable for review before execution.
+- `--execute` must use the same script body generated for review.
+- `--connection-string` is valid only with `--execute`, matching `database update`.
+- Connection-string resolution for execution should match `database update`: `--connection-string`, then `DATABASE_URL`, then `SQL_ORM_TEST_CONNECTION_STRING`.
+- The generated script should be idempotent with respect to migrations that are no longer applied, but it must still fail checksum mismatches for applied migrations before rollback.
+
+Ambiguity rules:
+
+- Downgrade across a migration that was applied in the database but is missing locally must fail.
+- Downgrade across a migration whose local `down.sql` is not executable must fail.
+- Downgrade from a database history that is not a prefix of the local migration list must fail. This catches edited, deleted, reordered, or branch-diverged migration histories.
+- The CLI should prefer explicit error messages over partial progress whenever it can detect ambiguity before execution.
+
 ## Recreating the Todo App Migration Flow
 
 ```bash
