@@ -3183,6 +3183,24 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn dropping_added_entry_discards_pending_insert_before_save_phase_validation() {
+        let dbset = DbSet::<CompositeKeyEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+
+        {
+            let tracked = dbset.add_tracked(CompositeKeyEntity);
+
+            assert_eq!(tracked.state(), crate::EntityState::Added);
+            assert_eq!(registry.entry_count(), 1);
+        }
+
+        let added_saved = dbset.save_tracked_added().await.unwrap();
+
+        assert_eq!(added_saved, 0);
+        assert_eq!(registry.entry_count(), 0);
+    }
+
     #[test]
     fn dbset_remove_tracked_marks_loaded_entity_as_deleted() {
         let dbset = DbSet::<TestEntity>::disconnected();
