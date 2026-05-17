@@ -1707,6 +1707,40 @@ mod tests {
     }
 
     #[test]
+    fn detached_loaded_identity_can_be_registered_again() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut first = Tracked::from_loaded(SnapshotEntity {
+            name: "first".to_string(),
+        });
+        first
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        first.detach();
+
+        let mut second = Tracked::from_loaded(SnapshotEntity {
+            name: "second".to_string(),
+        });
+        second
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+
+        let registrations = registry.registrations();
+
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(registrations[0].entry_id, 1);
+        assert_eq!(second.current().name, "second");
+        assert_eq!(second.state(), EntityState::Unchanged);
+        assert_eq!(
+            registry
+                .current_snapshot_for_key::<SnapshotEntity>(SqlValue::I64(7))
+                .expect("newly registered identity should be available")
+                .name,
+            "second"
+        );
+    }
+
+    #[test]
     fn current_snapshot_for_key_syncs_attached_wrapper_current() {
         let registry = Arc::new(TrackingRegistry::default());
         let mut tracked = Tracked::from_loaded(SnapshotEntity {
