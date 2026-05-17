@@ -98,13 +98,18 @@ As of 2026-05-07, the first registry slice is implemented:
   direct access to internal registry attachment helpers.
 
 The registry still stores pointers to live `Tracked<T>` wrappers for snapshots
-and state. Removing the wrapper-lifetime dependency remains assigned to the
-next ownership/state transition tasks.
+and current values. Removing the wrapper-lifetime dependency remains assigned
+to the next ownership/snapshot transition tasks.
 
 As of 2026-05-16, registry diagnostics expose a stable `entry_id` through
 `TrackedEntityRegistration`. This is the first observable step toward owned
-registry entries, but it does not change persistence behavior: state and
-snapshots are still read from live wrappers.
+registry entries, but it does not change persistence behavior by itself.
+
+As of 2026-05-16, the observable tracked state stored in
+`TrackingRegistry::registrations()` and used by `tracked_for::<T>()` lives in
+the registry entry itself. `Tracked<T>` state transitions synchronize that
+registry-owned state, while original/current snapshots still live in wrappers.
+Dropping a wrapper still unregisters the entry in this slice.
 
 ## Current Detach And State Policy
 

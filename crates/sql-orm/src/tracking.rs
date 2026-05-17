@@ -145,7 +145,7 @@ struct TrackingRegistration {
     entity_type_id: TypeId,
     entity_rust_name: &'static str,
     inner_address: usize,
-    state_reader: unsafe fn(*const ()) -> EntityState,
+    state: EntityState,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -163,10 +163,11 @@ enum TrackedPrimaryKeyIdentity {
     Temporary(u64),
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct RegisteredTracked<E> {
     registration_id: usize,
     inner_address: usize,
+    tracking_registry: TrackingRegistryHandle,
     _entity: PhantomData<fn() -> E>,
 }
 
@@ -230,7 +231,7 @@ impl<T> Tracked<T> {
     /// wrapper from the tracker.
     pub fn mark_deleted(&mut self) {
         let was_added = self.inner.state == EntityState::Added;
-        self.inner.state = EntityState::Deleted;
+        self.set_state(EntityState::Deleted);
         if was_added {
             self.detach_registry();
         }
@@ -246,7 +247,7 @@ impl<T> Tracked<T> {
         T: Clone,
     {
         self.inner.original = self.inner.current.clone();
-        self.inner.state = EntityState::Unchanged;
+        self.set_state(EntityState::Unchanged);
     }
 
     /// Detaches this wrapper from its context tracker without executing SQL.
@@ -270,7 +271,16 @@ impl<T> Tracked<T> {
 
     fn mark_modified_if_unchanged(&mut self) {
         if self.inner.state == EntityState::Unchanged {
-            self.inner.state = EntityState::Modified;
+            self.set_state(EntityState::Modified);
+        }
+    }
+
+    fn set_state(&mut self, state: EntityState) {
+        self.inner.state = state;
+        if let (Some(registration_id), Some(registry)) =
+            (self.registration_id, self.tracking_registry.as_ref())
+        {
+            registry.set_state(registration_id, state);
         }
     }
 
@@ -315,7 +325,7 @@ impl<T> Tracked<T> {
                 EntityState::Added | EntityState::Modified => {
                     crate::ActiveRecord::save(&mut self.inner.current, db).await?;
                     self.inner.original = self.inner.current.clone();
-                    self.inner.state = EntityState::Unchanged;
+                    self.set_state(EntityState::Unchanged);
 
                     if let (Some(registration_id), Some(registry)) =
                         (self.registration_id, self.tracking_registry.as_ref())
@@ -356,7 +366,7 @@ impl<T> Tracked<T> {
         async move {
             match self.inner.state {
                 EntityState::Added => {
-                    self.inner.state = EntityState::Deleted;
+                    self.set_state(EntityState::Deleted);
                     self.detach_registry();
                     Ok(false)
                 }
@@ -364,7 +374,7 @@ impl<T> Tracked<T> {
                 EntityState::Unchanged | EntityState::Modified => {
                     let deleted = crate::ActiveRecord::delete(&self.inner.current, db).await?;
                     if deleted {
-                        self.inner.state = EntityState::Deleted;
+                        self.set_state(EntityState::Deleted);
                         self.detach_registry();
                     }
                     Ok(deleted)
@@ -456,6 +466,27 @@ impl TrackingRegistry {
             .retain(|entry| entry.registration_id != registration_id);
     }
 
+    pub(crate) fn set_state(&self, registration_id: usize, tracked_state: EntityState) {
+        let mut state = self.state.lock().expect("tracking registry mutex poisoned");
+        if let Some(entry) = state
+            .entries
+            .iter_mut()
+            .find(|entry| entry.registration_id == registration_id)
+        {
+            entry.state = tracked_state;
+        }
+    }
+
+    fn state_of(&self, registration_id: usize) -> Option<EntityState> {
+        self.state
+            .lock()
+            .expect("tracking registry mutex poisoned")
+            .entries
+            .iter()
+            .find(|entry| entry.registration_id == registration_id)
+            .map(|entry| entry.state)
+    }
+
     pub fn clear(&self) {
         self.state
             .lock()
@@ -464,7 +495,7 @@ impl TrackingRegistry {
             .clear();
     }
 
-    pub(crate) fn tracked_for<E: Entity>(&self) -> Vec<RegisteredTracked<E>> {
+    pub(crate) fn tracked_for<E: Entity>(self: &Arc<Self>) -> Vec<RegisteredTracked<E>> {
         let state = self.state.lock().expect("tracking registry mutex poisoned");
 
         state
@@ -474,6 +505,7 @@ impl TrackingRegistry {
             .map(|entry| RegisteredTracked::<E> {
                 registration_id: entry.registration_id,
                 inner_address: entry.inner_address,
+                tracking_registry: Arc::clone(self),
                 _entity: PhantomData,
             })
             .collect()
@@ -526,7 +558,7 @@ impl TrackingRegistry {
             .map(|entry| TrackedEntityRegistration {
                 entry_id: entry.registration_id,
                 entity_rust_name: entry.entity_rust_name,
-                state: unsafe { (entry.state_reader)(entry.inner_address as *const ()) },
+                state: entry.state,
             })
             .collect()
     }
@@ -630,7 +662,7 @@ impl TrackingRegistryState {
             entity_type_id: TypeId::of::<E>(),
             entity_rust_name: E::metadata().rust_name,
             inner_address: tracked.inner.as_ref() as *const TrackedInner<E> as usize,
-            state_reader: state_reader::<E>,
+            state: tracked.inner.state,
         });
         registration_id
     }
@@ -655,7 +687,9 @@ impl<E: Clone> RegisteredTracked<E> {
     }
 
     pub(crate) fn state(&self) -> EntityState {
-        unsafe { (&*(self.inner_address as *const TrackedInner<E>)).state }
+        self.tracking_registry
+            .state_of(self.registration_id)
+            .unwrap_or_else(|| unsafe { (&*(self.inner_address as *const TrackedInner<E>)).state })
     }
 
     pub(crate) fn current_clone(&self) -> E {
@@ -672,6 +706,8 @@ impl<E: Clone> RegisteredTracked<E> {
             (*inner).original = (*inner).current.clone();
             (*inner).state = EntityState::Unchanged;
         }
+        self.tracking_registry
+            .set_state(self.registration_id, EntityState::Unchanged);
     }
 
     pub(crate) fn sync_persisted(&self, persisted: E) {
@@ -681,6 +717,8 @@ impl<E: Clone> RegisteredTracked<E> {
             (*inner).current = persisted;
             (*inner).state = EntityState::Unchanged;
         }
+        self.tracking_registry
+            .set_state(self.registration_id, EntityState::Unchanged);
     }
 }
 
@@ -691,10 +729,6 @@ impl<E: EntityPersist> RegisteredTracked<E> {
             E::has_persisted_changes(&inner.original, &inner.current)
         }
     }
-}
-
-unsafe fn state_reader<E>(ptr: *const ()) -> EntityState {
-    unsafe { (&*(ptr.cast::<TrackedInner<E>>())).state }
 }
 
 impl<T: Clone> Clone for Tracked<T> {
@@ -1132,6 +1166,27 @@ mod tests {
         assert_eq!(registrations[1].entry_id, 1);
         assert_eq!(registrations[0].entity_rust_name, "DummyEntity");
         assert_eq!(registrations[1].entity_rust_name, "DummyEntity");
+    }
+
+    #[test]
+    fn tracking_registry_owns_observable_state_for_registered_entries() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(DummyEntity);
+        tracked.attach_registry(Arc::clone(&registry));
+
+        tracked.inner.state = EntityState::Deleted;
+
+        assert_eq!(tracked.state(), EntityState::Deleted);
+        assert_eq!(registry.registrations()[0].state, EntityState::Unchanged);
+        assert_eq!(
+            registry.tracked_for::<DummyEntity>()[0].state(),
+            EntityState::Unchanged
+        );
+
+        tracked.mark_unchanged();
+
+        assert_eq!(tracked.state(), EntityState::Unchanged);
+        assert_eq!(registry.registrations()[0].state, EntityState::Unchanged);
     }
 
     #[test]
