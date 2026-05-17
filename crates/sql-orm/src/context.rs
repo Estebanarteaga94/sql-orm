@@ -3261,6 +3261,26 @@ mod tests {
         );
     }
 
+    #[tokio::test]
+    async fn mark_unchanged_on_deleted_entry_discards_pending_delete_before_validation() {
+        let dbset = DbSet::<CompositeKeyEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(CompositeKeyEntity);
+        tracked.attach_registry(registry.clone());
+
+        dbset.remove_tracked(&mut tracked);
+        tracked.mark_unchanged();
+        let deleted_saved = dbset.save_tracked_deleted().await.unwrap();
+
+        assert_eq!(deleted_saved, 0);
+        assert_eq!(tracked.state(), crate::EntityState::Unchanged);
+        assert_eq!(registry.entry_count(), 1);
+        assert_eq!(
+            registry.registrations()[0].state,
+            crate::EntityState::Unchanged
+        );
+    }
+
     #[test]
     fn dbset_remove_tracked_cancels_pending_added_entity() {
         let dbset = DbSet::<TestEntity>::disconnected();
