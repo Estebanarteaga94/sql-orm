@@ -3504,6 +3504,24 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn into_current_on_modified_entry_discards_pending_update_before_save_phase_validation() {
+        let dbset = DbSet::<CompositeKeyEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(CompositeKeyEntity);
+        tracked.attach_registry(registry.clone());
+        tracked.mark_modified();
+
+        assert_eq!(tracked.state(), crate::EntityState::Modified);
+        assert_eq!(registry.entry_count(), 1);
+
+        let _current = tracked.into_current();
+        let modified_saved = dbset.save_tracked_modified().await.unwrap();
+
+        assert_eq!(modified_saved, 0);
+        assert_eq!(registry.entry_count(), 0);
+    }
+
+    #[tokio::test]
     async fn save_tracked_modified_skips_update_when_persisted_snapshot_is_unchanged() {
         let dbset = DbSet::<ExplicitLoadRoot>::disconnected();
         let registry = dbset.tracking_registry();
