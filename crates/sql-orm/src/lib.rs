@@ -56,7 +56,9 @@ pub use soft_delete_runtime::{
     SoftDeleteValues,
 };
 pub use sql_orm_core::{EntityMetadata, NavigationKind, NavigationMetadata};
-pub use sql_orm_query::{AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection};
+pub use sql_orm_query::{
+    AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, SqlFunction,
+};
 pub use sql_orm_tiberius::{
     MssqlConnectionConfig, MssqlHealthCheckOptions, MssqlHealthCheckQuery, MssqlOperationalOptions,
     MssqlParameterLogMode, MssqlPoolBackend, MssqlPoolOptions, MssqlRetryOptions,
@@ -407,7 +409,7 @@ pub mod prelude {
     };
     pub use sql_orm_query::{
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, Join, JoinType,
-        SelectProjection,
+        SelectProjection, SqlFunction,
     };
 }
 

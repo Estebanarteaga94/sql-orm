@@ -1,5 +1,5 @@
 use sql_orm::prelude::*;
-use sql_orm::query::{CompiledQuery, Expr};
+use sql_orm::query::{CompiledQuery, Expr, SqlFunction};
 use sql_orm::sqlserver::SqlServerCompiler;
 
 const TEST_CONNECTION_ENV: &str = "SQL_ORM_TEST_CONNECTION_STRING";
@@ -43,7 +43,7 @@ fn public_projection_sql_preserves_aliases_and_parameter_order() {
             .select(vec![
                 SelectProjection::column(ProjectionUser::id),
                 SelectProjection::expr_as(
-                    Expr::function("LOWER", vec![Expr::from(ProjectionUser::name)]),
+                    Expr::function(SqlFunction::Lower, vec![Expr::from(ProjectionUser::name)]),
                     "lower_name",
                 ),
             ])
@@ -118,7 +118,7 @@ async fn public_projection_api_materializes_dtos_against_real_sql_server() -> Re
                 ProjectionUser::id,
                 ProjectionUser::name,
                 SelectProjection::expr_as(
-                    Expr::function("LOWER", vec![Expr::from(ProjectionUser::name)]),
+                    Expr::function(SqlFunction::Lower, vec![Expr::from(ProjectionUser::name)]),
                     "display_name",
                 ),
             ))
@@ -147,7 +147,7 @@ async fn public_projection_api_materializes_dtos_against_real_sql_server() -> Re
             .users
             .query()
             .select(SelectProjection::expr_as(
-                Expr::function("LOWER", vec![Expr::from(ProjectionUser::name)]),
+                Expr::function(SqlFunction::Lower, vec![Expr::from(ProjectionUser::name)]),
                 "lower_name",
             ))
             .filter(ProjectionUser::name.eq("BRUNO".to_string()))

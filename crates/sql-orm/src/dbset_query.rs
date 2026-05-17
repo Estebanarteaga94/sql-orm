@@ -2369,7 +2369,10 @@ mod tests {
 
         let error = dbset
             .query()
-            .select(Expr::function("LOWER", vec![Expr::from(TestEntity::name)]))
+            .select(Expr::function(
+                sql_orm_query::SqlFunction::Lower,
+                vec![Expr::from(TestEntity::name)],
+            ))
             .first_as::<TestProjectionRow>()
             .await
             .unwrap_err();

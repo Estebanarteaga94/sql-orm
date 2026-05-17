@@ -17,7 +17,7 @@ pub use aggregate::{
     AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
 };
 pub use delete::DeleteQuery;
-pub use expr::{BinaryOp, ColumnRef, Expr, TableRef, UnaryOp};
+pub use expr::{BinaryOp, ColumnRef, Expr, SqlFunction, TableRef, UnaryOp};
 pub use insert::InsertQuery;
 pub use join::{Join, JoinType};
 pub use order::{OrderBy, SortDirection};
@@ -63,7 +63,7 @@ mod tests {
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
         BinaryOp, CRATE_IDENTITY, ColumnRef, CompiledQuery, CountQuery, DeleteQuery, ExistsQuery,
         Expr, InsertQuery, Join, JoinType, OrderBy, Pagination, Predicate, Query, SelectProjection,
-        SelectQuery, SortDirection, TableRef, UpdateQuery,
+        SelectQuery, SortDirection, SqlFunction, TableRef, UpdateQuery,
     };
     use sql_orm_core::{
         Changeset, ColumnMetadata, ColumnValue, Entity, EntityColumn, EntityMetadata,
@@ -299,7 +299,7 @@ mod tests {
     #[test]
     fn expr_supports_columns_values_functions_and_operations() {
         let expr = Expr::binary(
-            Expr::function("LOWER", vec![Expr::from(Customer::email)]),
+            Expr::function(SqlFunction::Lower, vec![Expr::from(Customer::email)]),
             BinaryOp::Add,
             Expr::value(SqlValue::String("@example.com".to_string())),
         );
@@ -456,13 +456,15 @@ mod tests {
         assert_eq!(column_projection.expr, Expr::from(Customer::email));
 
         let expression_projection = SelectProjection::expr_as(
-            Expr::function("LOWER", vec![Expr::from(Customer::email)]),
+            Expr::function(SqlFunction::Lower, vec![Expr::from(Customer::email)]),
             "email_lower",
         );
         assert_eq!(expression_projection.alias, Some("email_lower"));
 
-        let unaliased_expression =
-            SelectProjection::expr(Expr::function("LOWER", vec![Expr::from(Customer::email)]));
+        let unaliased_expression = SelectProjection::expr(Expr::function(
+            SqlFunction::Lower,
+            vec![Expr::from(Customer::email)],
+        ));
         assert_eq!(unaliased_expression.alias, None);
     }
 
@@ -470,7 +472,7 @@ mod tests {
     fn aggregate_projection_requires_alias_without_changing_select_projection() {
         let group_key = AggregateProjection::group_key(Order::customer_id);
         let expression_group_key = AggregateProjection::group_key_as(
-            Expr::function("YEAR", vec![Expr::from(Customer::created_at)]),
+            Expr::function(SqlFunction::Year, vec![Expr::from(Customer::created_at)]),
             "created_year",
         );
         let aggregate = AggregateProjection::sum_as(Order::total_cents, "total_cents");
@@ -486,8 +488,10 @@ mod tests {
             )
         );
 
-        let ordinary_projection =
-            SelectProjection::expr(Expr::function("LOWER", vec![Expr::from(Customer::email)]));
+        let ordinary_projection = SelectProjection::expr(Expr::function(
+            SqlFunction::Lower,
+            vec![Expr::from(Customer::email)],
+        ));
         assert_eq!(ordinary_projection.alias, None);
     }
 

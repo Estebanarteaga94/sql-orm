@@ -122,6 +122,31 @@ pub enum UnaryOp {
     Negate,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SqlFunction {
+    Lower,
+    Upper,
+    Year,
+    Month,
+    Day,
+    Len,
+    Trim,
+}
+
+impl SqlFunction {
+    pub const fn sql_name(self) -> &'static str {
+        match self {
+            Self::Lower => "LOWER",
+            Self::Upper => "UPPER",
+            Self::Year => "YEAR",
+            Self::Month => "MONTH",
+            Self::Day => "DAY",
+            Self::Len => "LEN",
+            Self::Trim => "TRIM",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
     Column(ColumnRef),
@@ -136,6 +161,10 @@ pub enum Expr {
         expr: Box<Expr>,
     },
     Function {
+        function: SqlFunction,
+        args: Vec<Expr>,
+    },
+    UnsafeFunction {
         name: String,
         args: Vec<Expr>,
     },
@@ -169,8 +198,12 @@ impl Expr {
         }
     }
 
-    pub fn function(name: impl Into<String>, args: Vec<Expr>) -> Self {
-        Self::Function {
+    pub fn function(function: SqlFunction, args: Vec<Expr>) -> Self {
+        Self::Function { function, args }
+    }
+
+    pub fn unsafe_function(name: impl Into<String>, args: Vec<Expr>) -> Self {
+        Self::UnsafeFunction {
             name: name.into(),
             args,
         }

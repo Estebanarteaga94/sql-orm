@@ -408,7 +408,7 @@ fn validate_non_aggregate_expr_in_grouped_context(
             validate_non_aggregate_expr_in_grouped_context(right, group_by)
         }
         Expr::Unary { expr, .. } => validate_non_aggregate_expr_in_grouped_context(expr, group_by),
-        Expr::Function { args, .. } => {
+        Expr::Function { args, .. } | Expr::UnsafeFunction { args, .. } => {
             for arg in args {
                 validate_non_aggregate_expr_in_grouped_context(arg, group_by)?;
             }
@@ -472,10 +472,16 @@ fn compile_expr(expr: &Expr, parameters: &mut ParameterBuilder) -> Result<String
             compile_unary_op(*op),
             compile_expr(expr, parameters)?,
         )),
-        Expr::Function { name, args } => {
-            if name.trim().is_empty() {
-                return Err(OrmError::new("SQL function name cannot be empty"));
-            }
+        Expr::Function { function, args } => {
+            let args = args
+                .iter()
+                .map(|arg| compile_expr(arg, parameters))
+                .collect::<Result<Vec<_>, _>>()?;
+
+            Ok(format!("{}({})", function.sql_name(), args.join(", ")))
+        }
+        Expr::UnsafeFunction { name, args } => {
+            validate_unsafe_function_name(name)?;
 
             let args = args
                 .iter()
@@ -485,6 +491,33 @@ fn compile_expr(expr: &Expr, parameters: &mut ParameterBuilder) -> Result<String
             Ok(format!("{name}({})", args.join(", ")))
         }
     }
+}
+
+fn validate_unsafe_function_name(name: &str) -> Result<(), OrmError> {
+    if name.trim().is_empty() {
+        return Err(OrmError::new("unsafe SQL function name cannot be empty"));
+    }
+
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return Err(OrmError::new("unsafe SQL function name cannot be empty"));
+    };
+
+    if !is_sql_identifier_start(first) || !chars.all(is_sql_identifier_continue) {
+        return Err(OrmError::new(format!(
+            "unsafe SQL function name `{name}` must be a single unquoted SQL identifier"
+        )));
+    }
+
+    Ok(())
+}
+
+fn is_sql_identifier_start(ch: char) -> bool {
+    ch == '_' || ch.is_ascii_alphabetic()
+}
+
+fn is_sql_identifier_continue(ch: char) -> bool {
+    is_sql_identifier_start(ch) || ch.is_ascii_digit()
 }
 
 fn compile_predicate(
@@ -721,7 +754,8 @@ mod tests {
     use sql_orm_query::{
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
         BinaryOp, CountQuery, DeleteQuery, ExistsQuery, Expr, InsertQuery, OrderBy, Pagination,
-        Predicate, Query, SelectProjection, SelectQuery, TableRef, UnaryOp, UpdateQuery,
+        Predicate, Query, SelectProjection, SelectQuery, SqlFunction, TableRef, UnaryOp,
+        UpdateQuery,
     };
 
     #[allow(dead_code)]
@@ -1406,7 +1440,7 @@ mod tests {
             joins: vec![],
             projection: vec![SelectProjection::expr_as(
                 Expr::function(
-                    "LOWER",
+                    SqlFunction::Lower,
                     vec![Expr::binary(
                         Expr::from(Customer::email),
                         BinaryOp::Add,
@@ -1442,10 +1476,39 @@ mod tests {
     }
 
     #[test]
+    fn compiles_explicit_unsafe_function_only_with_identifier_name() {
+        let compiled = SqlServerCompiler::compile_select(
+            &SelectQuery::from_entity::<Customer>().select(vec![SelectProjection::expr_as(
+                Expr::unsafe_function("SOUNDEX", vec![Expr::from(Customer::email)]),
+                "email_soundex",
+            )]),
+        )
+        .unwrap();
+
+        assert_eq!(
+            compiled.sql,
+            "SELECT SOUNDEX([sales].[customers].[email]) AS [email_soundex] FROM [sales].[customers]"
+        );
+
+        let error = SqlServerCompiler::compile_select(
+            &SelectQuery::from_entity::<Customer>().select(vec![SelectProjection::expr_as(
+                Expr::unsafe_function("LOWER); DROP TABLE [sales].[customers];--", vec![]),
+                "bad",
+            )]),
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "unsafe SQL function name `LOWER); DROP TABLE [sales].[customers];--` must be a single unquoted SQL identifier"
+        );
+    }
+
+    #[test]
     fn rejects_projection_expression_without_alias() {
         let error = SqlServerCompiler::compile_select(
             &SelectQuery::from_entity::<Customer>().select(vec![SelectProjection::expr(
-                Expr::function("LOWER", vec![Expr::from(Customer::email)]),
+                Expr::function(SqlFunction::Lower, vec![Expr::from(Customer::email)]),
             )]),
         )
         .unwrap_err();

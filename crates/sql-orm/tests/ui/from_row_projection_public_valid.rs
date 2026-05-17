@@ -49,7 +49,7 @@ fn main() {
             .query()
             .select(SelectProjection::expr_as(
                 sql_orm::query::Expr::function(
-                    "LOWER",
+                    sql_orm::query::SqlFunction::Lower,
                     vec![sql_orm::query::Expr::from(User::email)],
                 ),
                 "lower_email",

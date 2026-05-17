@@ -1,4 +1,4 @@
-use sql_orm::query::Expr;
+use sql_orm::query::{Expr, SqlFunction};
 use sql_orm::prelude::*;
 
 #[derive(Entity, Debug, Clone)]
@@ -61,7 +61,7 @@ fn main() {
             .users
             .query()
             .select(SelectProjection::expr_as(
-                Expr::function("LOWER", vec![Expr::from(User::email)]),
+                Expr::function(SqlFunction::Lower, vec![Expr::from(User::email)]),
                 "lower_email",
             ))
             .first_as::<LowerEmail>();
