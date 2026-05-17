@@ -29,6 +29,9 @@ impl crate::SqlServerCompiler {
     pub fn compile_query(query: &Query) -> Result<CompiledQuery, OrmError> {
         match query {
             Query::Select(query) => Self::compile_select(query),
+            Query::Aggregate(_) => Err(OrmError::new(
+                "SQL Server aggregate query compilation is not implemented yet",
+            )),
             Query::Insert(query) => Self::compile_insert(query),
             Query::Update(query) => Self::compile_update(query),
             Query::Delete(query) => Self::compile_delete(query),
@@ -373,8 +376,8 @@ mod tests {
         IdentityMetadata, Insertable, PrimaryKeyMetadata, SqlServerType, SqlValue,
     };
     use sql_orm_query::{
-        BinaryOp, CountQuery, DeleteQuery, Expr, InsertQuery, OrderBy, Pagination, Predicate,
-        Query, SelectProjection, SelectQuery, TableRef, UnaryOp, UpdateQuery,
+        AggregateQuery, BinaryOp, CountQuery, DeleteQuery, Expr, InsertQuery, OrderBy, Pagination,
+        Predicate, Query, SelectProjection, SelectQuery, TableRef, UnaryOp, UpdateQuery,
     };
 
     #[allow(dead_code)]
@@ -863,6 +866,18 @@ mod tests {
             "SELECT COUNT(*) AS [count] FROM [sales].[customers] WHERE ([sales].[customers].[active] = @P1)"
         );
         assert_eq!(compiled.params, vec![SqlValue::Bool(true)]);
+    }
+
+    #[test]
+    fn aggregate_query_enum_variant_is_explicitly_not_compiled_yet() {
+        let query = Query::Aggregate(Box::new(AggregateQuery::from_entity::<Customer>()));
+
+        let error = SqlServerCompiler::compile_query(&query).unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "SQL Server aggregate query compilation is not implemented yet"
+        );
     }
 
     #[test]

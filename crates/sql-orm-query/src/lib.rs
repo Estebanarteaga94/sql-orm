@@ -1,5 +1,6 @@
 //! Query AST foundations for the ORM.
 
+mod aggregate;
 mod delete;
 mod expr;
 mod insert;
@@ -12,6 +13,9 @@ mod update;
 
 use sql_orm_core::{CrateIdentity, SqlValue};
 
+pub use aggregate::{
+    AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
+};
 pub use delete::DeleteQuery;
 pub use expr::{BinaryOp, ColumnRef, Expr, TableRef, UnaryOp};
 pub use insert::InsertQuery;
@@ -40,6 +44,7 @@ impl CompiledQuery {
 #[derive(Debug, Clone, PartialEq)]
 pub enum Query {
     Select(SelectQuery),
+    Aggregate(Box<AggregateQuery>),
     Insert(InsertQuery),
     Update(UpdateQuery),
     Delete(DeleteQuery),
@@ -54,6 +59,7 @@ pub const CRATE_IDENTITY: CrateIdentity = CrateIdentity {
 #[cfg(test)]
 mod tests {
     use super::{
+        AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
         BinaryOp, CRATE_IDENTITY, ColumnRef, CompiledQuery, CountQuery, DeleteQuery, Expr,
         InsertQuery, Join, JoinType, OrderBy, Pagination, Predicate, Query, SelectProjection,
         SelectQuery, SortDirection, TableRef, UpdateQuery,
@@ -457,6 +463,58 @@ mod tests {
         let unaliased_expression =
             SelectProjection::expr(Expr::function("LOWER", vec![Expr::from(Customer::email)]));
         assert_eq!(unaliased_expression.alias, None);
+    }
+
+    #[test]
+    fn aggregate_query_captures_grouping_having_and_projection_without_sql_rendering() {
+        let query = AggregateQuery::from_entity::<Order>()
+            .inner_join::<Customer>(Predicate::eq(
+                Expr::from(Order::customer_id),
+                Expr::from(Customer::id),
+            ))
+            .filter(Predicate::eq(
+                Expr::from(Customer::active),
+                Expr::value(SqlValue::Bool(true)),
+            ))
+            .group_by(vec![Expr::from(Order::customer_id)])
+            .project(vec![
+                AggregateProjection::group_key(Order::customer_id),
+                AggregateProjection::count_as("order_count"),
+                AggregateProjection::sum_as(Order::total_cents, "total_cents"),
+            ])
+            .having(AggregatePredicate::gt(
+                AggregateExpr::count_all(),
+                Expr::value(SqlValue::I64(1)),
+            ))
+            .order_by(AggregateOrderBy::desc(AggregateExpr::sum(Expr::from(
+                Order::total_cents,
+            ))))
+            .paginate(Pagination::page(1, 10));
+
+        assert_eq!(query.from, TableRef::new("sales", "orders"));
+        assert_eq!(query.joins.len(), 1);
+        assert!(query.predicate.is_some());
+        assert_eq!(query.group_by, vec![Expr::from(Order::customer_id)]);
+        assert_eq!(
+            query.projection,
+            vec![
+                AggregateProjection::group_key(Order::customer_id),
+                AggregateProjection::count_as("order_count"),
+                AggregateProjection::sum_as(Order::total_cents, "total_cents")
+            ]
+        );
+        assert!(matches!(query.having, Some(AggregatePredicate::Gt(_, _))));
+        assert_eq!(
+            query.order_by,
+            vec![AggregateOrderBy::desc(AggregateExpr::sum(Expr::from(
+                Order::total_cents
+            )))]
+        );
+        assert_eq!(query.pagination, Some(Pagination::new(0, 10)));
+        assert!(matches!(
+            Query::Aggregate(Box::new(query)),
+            Query::Aggregate(_)
+        ));
     }
 
     #[test]
