@@ -1775,6 +1775,30 @@ mod tests {
     }
 
     #[test]
+    fn tracked_for_does_not_return_stale_handles_after_clear() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut first = Tracked::from_loaded(SnapshotEntity {
+            name: "first".to_string(),
+        });
+        let mut second = Tracked::from_loaded(SnapshotEntity {
+            name: "second".to_string(),
+        });
+        first
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(7))
+            .unwrap();
+        second
+            .attach_registry_loaded(Arc::clone(&registry), SqlValue::I64(8))
+            .unwrap();
+
+        registry.clear();
+
+        assert!(registry.tracked_for::<SnapshotEntity>().is_empty());
+        assert!(registry.registrations().is_empty());
+        assert_eq!(first.state(), EntityState::Unchanged);
+        assert_eq!(second.state(), EntityState::Unchanged);
+    }
+
+    #[test]
     fn current_snapshot_for_key_syncs_attached_wrapper_current() {
         let registry = Arc::new(TrackingRegistry::default());
         let mut tracked = Tracked::from_loaded(SnapshotEntity {
