@@ -11,8 +11,7 @@ use sql_orm::prelude::*;
 The root crate concentrates the user API and reexports selected internals for tests, tooling, and advanced cases. Responsibilities remain separated by crate: `query` builds ASTs, `sqlserver` compiles SQL, `tiberius` executes, `migrate` manages snapshots/diffs/migrations, and `core` defines shared contracts.
 
 See also [Core concepts](core-concepts.md) and
-[Navigation properties](navigation.md). Aggregate queries are covered in
-[Typed aggregations](aggregations.md).
+[Navigation properties](navigation.md).
 
 ## Public Derives
 
@@ -204,12 +203,6 @@ The public query extensions include:
 - `EntityColumnOrderExt`
 - `PageRequest`
 - `SelectProjections`
-- `GroupByExpressions`
-- `AggregateProjections`
-- `AggregateExpr`
-- `AggregateProjection`
-- `AggregatePredicate`
-- `AggregateOrderBy`
 
 Common query methods:
 
@@ -232,13 +225,6 @@ Common query methods:
 - `all().await`
 - `first().await`
 - `count().await`
-- `exists().await`
-- `any().await`
-- `sum::<T>(...).await`
-- `avg::<T>(...).await`
-- `min::<T>(...).await`
-- `max::<T>(...).await`
-- `group_by(...)`
 - `all_as::<T>().await`
 - `first_as::<T>().await`
 
@@ -301,45 +287,6 @@ Navigation includes are not projection builders. After `include(...)` or
 `include_many(...)`, the returned builder does not expose `select(...)`,
 `all_as::<T>()` or `first_as::<T>()`; use plain `DbSetQuery` with explicit
 joins for DTO projections, or raw SQL for fully manual result shapes.
-
-Scalar aggregate methods on plain `DbSetQuery` include `count()`, `exists()`,
-`any()`, `sum::<T>(...)`, `avg::<T>(...)`, `min::<T>(...)` and
-`max::<T>(...)`. `count()` returns `i64`; `exists()` and `any()` return
-`bool`; the other scalar aggregates return `Option<T>` because SQL Server can
-return `NULL`.
-
-Grouped aggregates start with `group_by(...)` and return a
-`DbSetGroupedQuery<E>`. The grouped builder exposes `select_aggregate(...)`,
-`try_select_aggregate(...)`, `having(...)`, `order_by(...)`, `limit(...)`,
-`take(...)`, `paginate(...)`, `all_as::<T>()` and `first_as::<T>()`. It does
-not expose `all()` or `first()` for full entities. Aggregate DTOs use the same
-`FromRow` alias contract as ordinary projections.
-
-```rust
-#[derive(Debug, FromRow)]
-struct OrderTotal {
-    customer_id: i64,
-    order_count: i64,
-    total_cents: Option<i64>,
-}
-
-let rows = db
-    .orders
-    .query()
-    .group_by(Order::customer_id)?
-    .try_select_aggregate((
-        AggregateProjection::group_key(Order::customer_id),
-        AggregateProjection::count_as("order_count"),
-        AggregateProjection::sum_as(Order::total_cents, "total_cents"),
-    ))?
-    .all_as::<OrderTotal>()
-    .await?;
-```
-
-Aggregations preserve explicit joins configured before the aggregate call and
-root-entity runtime filters. They do not infer hidden joins from navigation
-properties, and manually joined entities do not receive automatic policy
-filters in this cut.
 
 Projection DTOs can derive `FromRow`:
 
@@ -480,10 +427,7 @@ These are useful for tests, tooling, snapshots, and advanced diagnostics. Normal
 - SQL Server is the only backend.
 - Navigation properties currently expose metadata, explicit join inference, single-navigation eager loading for `belongs_to` / `has_one`, join-based `has_many` eager loading, and explicit `has_many` collection loading.
 - Lazy wrappers are implemented as opt-in state containers, but they never query by themselves. There is no automatic single-navigation lazy loader yet.
-- Typed scalar and grouped aggregations are available on `DbSetQuery`, with
-  explicit joins and root policy filters preserved. Window functions, rollups,
-  cubes, distinct aggregates and automatic policy filters over manually joined
-  entities remain outside the current cut.
+- High-level typed aggregations are not available.
 - Composite primary-key persistence is not complete across public CRUD and Active Record.
 - `database downgrade` does not infer reverse SQL from snapshots and does not
   read `migration.rs`; migrations without executable `down.sql` are treated as

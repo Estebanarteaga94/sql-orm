@@ -3,8 +3,7 @@
 The public query builder does not build SQL directly from the root crate. It produces a `sql-orm-query` AST. SQL Server parameterized SQL is compiled by `sql-orm-sqlserver`, and execution happens in the Tiberius adapter.
 
 See also [Core concepts](core-concepts.md) and
-[Navigation properties](navigation.md). Typed scalar and grouped aggregate
-queries are covered in [Typed aggregations](aggregations.md).
+[Navigation properties](navigation.md).
 
 ## Entry Point
 
@@ -219,76 +218,7 @@ queries.
 
 ## Count
 
-`count()` now uses the aggregate query path. It preserves the effective root
-query, including explicit joins and root `tenant` / `soft_delete` filters, and
-returns `i64`.
-
-Ordering and pagination are ignored for scalar aggregates because they answer
-questions about the matching query shape before page slicing.
-
-## Aggregations
-
-Scalar aggregates are available directly on `DbSetQuery`:
-
-```rust
-let has_paid_orders = db
-    .orders
-    .query()
-    .filter(Order::status.eq("paid"))
-    .exists()
-    .await?;
-
-let total_cents = db
-    .orders
-    .query()
-    .filter(Order::status.eq("paid"))
-    .sum::<i64>(Order::total_cents)
-    .await?;
-```
-
-Available scalar methods are `count()`, `exists()`, `any()`, `sum::<T>(...)`,
-`avg::<T>(...)`, `min::<T>(...)` and `max::<T>(...)`. `sum`, `avg`, `min` and
-`max` return `Option<T>` because SQL Server can return `NULL` for empty sets or
-nullable expressions.
-
-Grouped aggregates use a separate builder and materialize DTOs through
-`FromRow`:
-
-```rust
-use sql_orm::prelude::*;
-
-#[derive(Debug, FromRow)]
-struct CustomerTotals {
-    customer_id: i64,
-    order_count: i64,
-    total_cents: Option<i64>,
-}
-
-let rows = db
-    .orders
-    .query()
-    .filter(Order::status.eq("paid"))
-    .group_by(Order::customer_id)?
-    .try_select_aggregate((
-        AggregateProjection::group_key(Order::customer_id),
-        AggregateProjection::count_as("order_count"),
-        AggregateProjection::sum_as(Order::total_cents, "total_cents"),
-    ))?
-    .having(AggregateExpr::count_all().gt(1_i64))
-    .order_by(AggregateOrderBy::desc(AggregateExpr::sum(Order::total_cents)))
-    .all_as::<CustomerTotals>()
-    .await?;
-```
-
-Grouped aggregate queries expose `select_aggregate(...)`,
-`try_select_aggregate(...)`, `having(...)`, `order_by(...)`, `limit(...)`,
-`take(...)`, `paginate(...)`, `all_as::<T>()` and `first_as::<T>()`. They do
-not expose `all()` or `first()` for full-entity materialization.
-
-Projection aliases are the contract with `FromRow`. Use
-`try_select_aggregate(...)` when you want empty aliases, duplicate aliases or
-empty projection lists rejected before execution. The SQL Server compiler also
-validates aggregate aliases and non-grouped expressions before rendering SQL.
+`count()` preserves the base `from` and filters. In the current state it does not carry joins, ordering, or pagination into the internal `CountQuery`; use it for base-entity counts with filters that do not depend on joined tables.
 
 ## Projections
 
@@ -340,14 +270,11 @@ Projection DTOs can use `#[derive(FromRow)]`; fields read aliases by field name 
 - `include_many::<T>(...)` defaults to join loading with a 10,000 joined-row safety limit. Split-query loading is explicit but not implemented yet.
 - Direct `many_to_many` navigation is rejected; use an explicit join entity until relationship-update semantics are stable.
 - Included `tenant` and `soft_delete` policies use the default visibility only; there is no include-specific visibility override yet.
-- Manual joins do not receive automatic `tenant` or `soft_delete` filters for joined entities.
-- Aggregations do not infer hidden navigation joins. Add explicit joins or
-  navigation join helpers before calling scalar aggregates or `group_by(...)`.
+- Initial public projections exist, but high-level typed aggregations are not available.
 
 ## Related
 
 - Navigation properties: [navigation.md](navigation.md)
 - Projections: [projections.md](projections.md)
-- Typed aggregations: [aggregations.md](aggregations.md)
 - Raw SQL escape hatch: [raw-sql.md](raw-sql.md)
 - Real example queries: [examples/todo-app/src/queries.rs](../examples/todo-app/src/queries.rs)

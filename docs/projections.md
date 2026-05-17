@@ -2,8 +2,7 @@
 
 Typed projections are the Stage 18 public query-builder feature. They let a query select specific columns or expressions from SQL Server and materialize them into DTOs that implement `FromRow`, without breaking the existing full-entity materialization path through `all()` and `first()`.
 
-See also [Core concepts](core-concepts.md) and
-[Typed aggregations](aggregations.md).
+See also [Core concepts](core-concepts.md).
 
 ## Public Surface
 
@@ -161,40 +160,6 @@ Projections reuse the effective `DbSetQuery` path. Mandatory tenant filters and 
 
 Raw SQL remains different: `raw<T>()` does not apply ORM runtime filters automatically.
 
-## Aggregate DTOs
-
-Grouped aggregate queries also materialize DTOs through `FromRow`, but they use
-the separate `group_by(...).select_aggregate(...)` route instead of
-`select(...)`.
-
-```rust
-use sql_orm::prelude::*;
-
-#[derive(Debug, FromRow)]
-struct CustomerTotals {
-    customer_id: i64,
-    order_count: i64,
-    total_cents: Option<i64>,
-}
-
-let rows = db
-    .orders
-    .query()
-    .group_by(Order::customer_id)?
-    .try_select_aggregate((
-        AggregateProjection::group_key(Order::customer_id),
-        AggregateProjection::count_as("order_count"),
-        AggregateProjection::sum_as(Order::total_cents, "total_cents"),
-    ))?
-    .all_as::<CustomerTotals>()
-    .await?;
-```
-
-The alias rules are the same core contract: DTO fields read row aliases by
-field name unless `#[orm(column = "...")]` overrides the alias. Aggregate
-expressions require aliases, and aggregate values that SQL Server may return as
-`NULL` should be modeled as `Option<T>` fields.
-
 ## Navigation Boundaries
 
 Projection DTOs and navigation loading are intentionally separate. A query that
@@ -214,18 +179,18 @@ navigation wrappers to be populated.
 - only structs with named fields are supported;
 - tuple structs and unit structs are rejected at compile time;
 - the only supported field attribute is `#[orm(column = "...")]`;
-- it does not infer SQL expressions, joins, projections, or aggregate aliases;
+- it does not infer SQL expressions, joins, or aggregate aliases;
 - it does not generate query projections from the DTO shape.
 
 Manual `impl FromRow` is still available for DTOs that need custom decoding logic.
 
-## Boundaries
+## Not in This Cut
 
+- High-level typed aggregation DSL.
 - Automatic table aliases.
+- Self-join support.
 - Navigation-property projection.
 - Automatic query projection generation from DTO definitions.
-- Window functions, rollups, cubes, distinct aggregates and automatic
-  aggregate projection generation from DTO definitions.
 
 ## Validation
 
@@ -234,8 +199,6 @@ Coverage lives in:
 - `crates/sql-orm/tests/stage18_public_projections.rs`
 - `crates/sql-orm/tests/stage18_from_row_derive.rs`
 - `crates/sql-orm/tests/ui/query_projection_public_valid.rs`
-- `crates/sql-orm/tests/ui/query_aggregates_public_valid.rs`
-- `crates/sql-orm/tests/ui/query_aggregates_public_invalid.rs`
 - `crates/sql-orm/tests/ui/from_row_projection_public_valid.rs`
 - `crates/sql-orm/tests/ui/from_row_tuple_struct.rs`
 - `crates/sql-orm/tests/ui/from_row_unit_struct.rs`

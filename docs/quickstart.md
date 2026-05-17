@@ -17,14 +17,14 @@ From an external project, use the root crate:
 
 ```toml
 [dependencies]
-sql-orm = "0.2.0-rc.1"
+sql-orm = "0.1.0"
 ```
 
 If you want optional pooling:
 
 ```toml
 [dependencies]
-sql-orm = { version = "0.2.0-rc.1", features = ["pool-bb8"] }
+sql-orm = { version = "0.1.0", features = ["pool-bb8"] }
 ```
 
 ## 2. Import the Prelude

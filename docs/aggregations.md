@@ -1,18 +1,20 @@
 # Typed Aggregations Design
 
-Status: Etapa 24 implemented except for final full-workspace validation. The
-neutral AST exists in `sql-orm-query`; SQL Server compilation for aggregate AST
-and `EXISTS` exists in `sql-orm-sqlserver`; scalar and grouped public
-`DbSetQuery` APIs are implemented; return-type validation, SQL snapshots,
-public `trybuild` fixtures, optional runtime SQL Server tests and public
-documentation updates are in place. Joins configured explicitly before an
-aggregation, including fallible navigation joins with explicit aliases, are
-covered by the public and unit-test surface. Ambiguous aggregate aliases and
-ungrouped group-key expressions are rejected through public builder validation
-where available and SQL Server compiler validation before SQL rendering.
+Status: Etapa 24 in progress. The neutral AST cut exists in `sql-orm-query`;
+SQL Server compilation for aggregate AST and `EXISTS` exists in
+`sql-orm-sqlserver`; scalar and grouped public `DbSetQuery` APIs are
+implemented. Return-type validation, expanded snapshots, runtime SQL Server
+tests and final public documentation are still pending. Joins configured
+explicitly before an aggregation, including fallible navigation joins with
+explicit aliases, are now covered by the public and unit-test surface.
+Ambiguous aggregate aliases and ungrouped group-key expressions are rejected
+through public builder validation where available and SQL Server compiler
+validation before SQL rendering.
 
-This document defines the public aggregation surface implemented on top of
-`DbSetQuery` and records the current limits.
+This document defines the public aggregation surface that Etapa 24 should
+implement on top of `DbSetQuery`. It remains a design contract for the
+remaining implementation tasks until grouped aggregates and final public docs
+land.
 
 ## Goals
 
@@ -71,7 +73,7 @@ let last_created_at = db
     .await?;
 ```
 
-Signatures:
+Planned signatures:
 
 ```rust
 impl<E: Entity> DbSetQuery<E> {
@@ -160,7 +162,7 @@ let rows = db
     .await?;
 ```
 
-Public types:
+Planned public types:
 
 ```rust
 pub struct DbSetGroupedQuery<E: Entity> { /* opaque */ }
@@ -189,7 +191,7 @@ pub enum AggregateExpr {
 }
 ```
 
-Builder shape:
+Planned builder shape:
 
 ```rust
 impl<E: Entity> DbSetQuery<E> {
@@ -310,12 +312,13 @@ expressions are compiled deterministically into `@P1`, `@P2`, ...
 
 ## Validation Plan
 
-Coverage includes:
+The implementation tasks that follow this design should add:
 
 - SQL compiler snapshot tests for `COUNT`, `EXISTS`, `SUM`, `AVG`, `MIN`,
   `MAX`, `GROUP BY`, `HAVING`, joins and parameter ordering.
 - Public `trybuild` fixtures for valid and invalid aggregation APIs from
   `sql_orm::prelude`.
 - Optional SQL Server runtime tests for scalar aggregates and grouped DTOs.
-- Public documentation updates in `docs/query-builder.md`,
-  `docs/projections.md`, `docs/api.md`, `README.md` and `CHANGELOG.md`.
+- Documentation updates to `docs/query-builder.md`, `docs/projections.md`,
+  `docs/api.md`, `README.md` and `CHANGELOG.md` only after executable behavior
+  lands.

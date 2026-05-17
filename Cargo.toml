@@ -12,7 +12,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "0.2.0-rc.1"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 license = "MIT"
@@ -24,11 +24,11 @@ keywords = ["mssql", "sqlserver", "orm", "tiberius", "database"]
 categories = ["database", "asynchronous"]
 
 [workspace.dependencies]
-sql-orm = { path = "crates/sql-orm", version = "0.2.0-rc.1" }
-sql-orm-core = { path = "crates/sql-orm-core", version = "0.2.0-rc.1" }
-sql-orm-macros = { path = "crates/sql-orm-macros", version = "0.2.0-rc.1" }
-sql-orm-query = { path = "crates/sql-orm-query", version = "0.2.0-rc.1" }
-sql-orm-sqlserver = { path = "crates/sql-orm-sqlserver", version = "0.2.0-rc.1" }
-sql-orm-tiberius = { path = "crates/sql-orm-tiberius", version = "0.2.0-rc.1" }
-sql-orm-migrate = { path = "crates/sql-orm-migrate", version = "0.2.0-rc.1" }
-sql-orm-cli = { path = "crates/sql-orm-cli", version = "0.2.0-rc.1" }
+sql-orm = { path = "crates/sql-orm", version = "0.1.0" }
+sql-orm-core = { path = "crates/sql-orm-core", version = "0.1.0" }
+sql-orm-macros = { path = "crates/sql-orm-macros", version = "0.1.0" }
+sql-orm-query = { path = "crates/sql-orm-query", version = "0.1.0" }
+sql-orm-sqlserver = { path = "crates/sql-orm-sqlserver", version = "0.1.0" }
+sql-orm-tiberius = { path = "crates/sql-orm-tiberius", version = "0.1.0" }
+sql-orm-migrate = { path = "crates/sql-orm-migrate", version = "0.1.0" }
+sql-orm-cli = { path = "crates/sql-orm-cli", version = "0.1.0" }

@@ -9,7 +9,7 @@
 </p>
 
 <p align="center">
-  <img alt="Status" src="https://img.shields.io/badge/status-0.2.0--rc.1-yellow">
+  <img alt="Status" src="https://img.shields.io/badge/status-experimental-orange">
   <img alt="Rust" src="https://img.shields.io/badge/rust-1.85%2B-blue">
   <img alt="Database" src="https://img.shields.io/badge/database-SQL%20Server-red">
   <a href="https://crates.io/crates/sql-orm"><img alt="Crates.io" src="https://img.shields.io/crates/v/sql-orm"></a>
@@ -52,7 +52,6 @@ The goal is to keep application code strongly typed, expressive, and close to yo
 - [Quick Example](#quick-example)
 - [Query Builder](#query-builder)
 - [DTO Projections](#dto-projections)
-- [Aggregations](#aggregations)
 - [Relationships](#relationships)
 - [Entity Policies](#entity-policies)
 - [Raw SQL](#raw-sql)
@@ -70,7 +69,7 @@ The goal is to keep application code strongly typed, expressive, and close to yo
 |---|---|
 | Code-first models | Rust structs define database metadata, schema snapshots, and migrations |
 | SQL Server-first | Designed specifically for SQL Server syntax, parameters, DDL, and `rowversion` |
-| Typed queries | Build filters, ordering, pagination, joins, includes, projections, and aggregations safely |
+| Typed queries | Build filters, ordering, pagination, joins, includes, and projections safely |
 | Derive-based API | Use `Entity`, `Insertable`, `Changeset`, `DbContext`, and `FromRow` |
 | Safe raw SQL | Execute manual SQL using parameters and typed result mapping |
 | Migrations | Generate reviewable SQL from Rust metadata snapshots |
@@ -94,9 +93,7 @@ Use `sql-orm` if you want:
 > SQL Server is currently the only supported backend.
 
 > [!WARNING]
-> This project is currently prepared as the `0.2.0-rc.1` pre-release. The
-> release candidate has full workspace validation for the documented surface,
-> but keeps explicit limits listed in [Current Limits](#current-limits).
+> This project is still `0.1.0`. Some APIs are experimental or intentionally limited. See [Current Limits](#current-limits).
 
 ---
 
@@ -106,14 +103,14 @@ Use the public root crate from crates.io:
 
 ```toml
 [dependencies]
-sql-orm = "0.2.0-rc.1"
+sql-orm = "0.1.0"
 ```
 
 With optional `bb8` pooling support:
 
 ```toml
 [dependencies]
-sql-orm = { version = "0.2.0-rc.1", features = ["pool-bb8"] }
+sql-orm = { version = "0.1.0", features = ["pool-bb8"] }
 ```
 
 Import the prelude:
@@ -125,7 +122,7 @@ use sql_orm::prelude::*;
 Install the migration CLI from crates.io when you need migration commands:
 
 ```bash
-cargo install sql-orm-cli --version 0.2.0-rc.1
+cargo install sql-orm-cli
 ```
 
 <details>
@@ -320,55 +317,6 @@ DTO projections can use:
 - Custom `FromRow` mappings
 
 </details>
-
----
-
-## Aggregations
-
-Scalar aggregate methods are available from `DbSetQuery`:
-
-```rust
-let count = db.orders.query().count().await?;
-let has_paid_orders = db
-    .orders
-    .query()
-    .filter(Order::status.eq("paid"))
-    .exists()
-    .await?;
-let total_cents = db
-    .orders
-    .query()
-    .filter(Order::status.eq("paid"))
-    .sum::<i64>(Order::total_cents)
-    .await?;
-```
-
-Grouped aggregates use DTO materialization through `FromRow`:
-
-```rust
-#[derive(Debug, FromRow)]
-struct CustomerTotals {
-    customer_id: i64,
-    order_count: i64,
-    total_cents: Option<i64>,
-}
-
-let totals = db
-    .orders
-    .query()
-    .group_by(Order::customer_id)?
-    .try_select_aggregate((
-        AggregateProjection::group_key(Order::customer_id),
-        AggregateProjection::count_as("order_count"),
-        AggregateProjection::sum_as(Order::total_cents, "total_cents"),
-    ))?
-    .all_as::<CustomerTotals>()
-    .await?;
-```
-
-Aggregations preserve explicit joins and root `tenant` / `soft_delete` filters.
-They do not infer hidden navigation joins; add explicit joins or navigation
-join helpers before calling aggregate methods.
 
 ---
 
@@ -689,7 +637,6 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | Many-to-many navigation | Use an explicit join entity |
 | Lazy loading | No automatic I/O from field access |
 | `include_many(...).split_query()` | API exists, execution returns not implemented |
-| Aggregations | Scalar and grouped APIs exist; window functions, rollups, cubes, distinct aggregates and automatic policy filters over manually joined entities are deferred |
 | Raw SQL filters | Tenant and soft-delete filters must be written manually |
 | `database downgrade` | Available through explicit `--target`; requires local checksums and executable `down.sql` |
 | `migration.rs` | Deferred |
@@ -708,10 +655,9 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | [Quickstart](docs/quickstart.md) | Repository guide for connection, CRUD, and query builder |
 | [Code-first guide](docs/code-first.md) | Repository guide for entities, derives, `DbContext`, and metadata |
 | [Public API](docs/api.md) | Repository guide for the public surface exported from the root crate |
-| [Query builder](docs/query-builder.md) | Repository guide for filters, ordering, pagination, joins, includes, projections, and aggregations |
+| [Query builder](docs/query-builder.md) | Repository guide for filters, ordering, pagination, joins, includes, and projections |
 | [Navigation properties](docs/navigation.md) | Repository guide for `belongs_to`, `has_one`, `has_many`, includes, and limits |
 | [Typed projections](docs/projections.md) | Repository guide for `select(...)`, `all_as::<T>()`, aliases, and DTOs |
-| [Typed aggregations](docs/aggregations.md) | Repository guide for `count`, `exists`, scalar aggregates, `group_by`, `HAVING`, and DTOs |
 | [Typed raw SQL](docs/raw-sql.md) | Repository guide for `raw<T>()`, `raw_exec()`, parameters, and security |
 | [Relationships](docs/relationships.md) | Repository guide for foreign keys, joins, navigation, and loading |
 | [Transactions](docs/transactions.md) | Repository guide for runtime behavior and pooled transactions |
