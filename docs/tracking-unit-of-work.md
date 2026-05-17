@@ -108,8 +108,15 @@ registry entries, but it does not change persistence behavior by itself.
 As of 2026-05-16, the observable tracked state stored in
 `TrackingRegistry::registrations()` and used by `tracked_for::<T>()` lives in
 the registry entry itself. `Tracked<T>` state transitions synchronize that
-registry-owned state, while original/current snapshots still live in wrappers.
-Dropping a wrapper still unregisters the entry in this slice.
+registry-owned state.
+
+As of 2026-05-16, registry entries also own typed original/current snapshot
+clones captured at registration time. `mark_unchanged()`, immediate tracked
+save and successful tracked persistence helpers synchronize those owned
+snapshots when they accept or replace the wrapper value. `save_changes()` still
+uses live wrapper pointers for current values and change detection; adapting it
+to read registry-owned snapshots remains the next task. Dropping a wrapper
+still unregisters the entry in this slice.
 
 ## Current Detach And State Policy
 

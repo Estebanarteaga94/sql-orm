@@ -61,7 +61,8 @@
 use crate::EntityPersist;
 use core::ops::{Deref, DerefMut};
 use sql_orm_core::{Entity, EntityMetadata, OrmError, SqlValue};
-use std::any::TypeId;
+use std::any::{Any, TypeId};
+use std::fmt;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex};
 
@@ -138,7 +139,6 @@ struct TrackingRegistryState {
     entries: Vec<TrackingRegistration>,
 }
 
-#[derive(Debug)]
 struct TrackingRegistration {
     registration_id: usize,
     identity: TrackedIdentity,
@@ -146,6 +146,20 @@ struct TrackingRegistration {
     entity_rust_name: &'static str,
     inner_address: usize,
     state: EntityState,
+    snapshots: Box<dyn Any + Send + Sync>,
+}
+
+impl fmt::Debug for TrackingRegistration {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("TrackingRegistration")
+            .field("registration_id", &self.registration_id)
+            .field("identity", &self.identity)
+            .field("entity_type_id", &self.entity_type_id)
+            .field("entity_rust_name", &self.entity_rust_name)
+            .field("inner_address", &self.inner_address)
+            .field("state", &self.state)
+            .finish_non_exhaustive()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -161,6 +175,13 @@ struct TrackedIdentity {
 enum TrackedPrimaryKeyIdentity {
     Simple(SqlValue),
     Temporary(u64),
+}
+
+#[derive(Clone)]
+#[allow(dead_code)]
+struct TrackingSnapshots<E> {
+    original: E,
+    current: E,
 }
 
 #[derive(Clone)]
@@ -244,9 +265,18 @@ impl<T> Tracked<T> {
     /// mutably accessed again.
     pub fn mark_unchanged(&mut self)
     where
-        T: Clone,
+        T: Clone + Send + Sync + 'static,
     {
         self.inner.original = self.inner.current.clone();
+        if let (Some(registration_id), Some(registry)) =
+            (self.registration_id, self.tracking_registry.as_ref())
+        {
+            registry.set_snapshots(
+                registration_id,
+                self.inner.original.clone(),
+                self.inner.current.clone(),
+            );
+        }
         self.set_state(EntityState::Unchanged);
     }
 
@@ -391,7 +421,7 @@ impl<T: Clone> Tracked<T> {
     }
 }
 
-impl<T: Entity> Tracked<T> {
+impl<T: Entity + Clone> Tracked<T> {
     pub(crate) fn attach_registry_loaded(
         &mut self,
         registry: TrackingRegistryHandle,
@@ -430,7 +460,7 @@ impl<T> DerefMut for Tracked<T> {
 }
 
 impl TrackingRegistry {
-    pub(crate) fn register_loaded<E: Entity>(
+    pub(crate) fn register_loaded<E: Entity + Clone>(
         &self,
         tracked: &Tracked<E>,
         key: SqlValue,
@@ -449,7 +479,7 @@ impl TrackingRegistry {
         Ok(state.push_registration(tracked, identity))
     }
 
-    pub(crate) fn register_added<E: Entity>(&self, tracked: &Tracked<E>) -> usize {
+    pub(crate) fn register_added<E: Entity + Clone>(&self, tracked: &Tracked<E>) -> usize {
         let mut state = self.state.lock().expect("tracking registry mutex poisoned");
         let temporary_identity = state.next_temporary_identity;
         state.next_temporary_identity += 1;
@@ -477,6 +507,22 @@ impl TrackingRegistry {
         }
     }
 
+    pub(crate) fn set_snapshots<E: Clone + Send + Sync + 'static>(
+        &self,
+        registration_id: usize,
+        original: E,
+        current: E,
+    ) {
+        let mut state = self.state.lock().expect("tracking registry mutex poisoned");
+        if let Some(entry) = state
+            .entries
+            .iter_mut()
+            .find(|entry| entry.registration_id == registration_id)
+        {
+            entry.snapshots = Box::new(TrackingSnapshots::<E> { original, current });
+        }
+    }
+
     fn state_of(&self, registration_id: usize) -> Option<EntityState> {
         self.state
             .lock()
@@ -485,6 +531,30 @@ impl TrackingRegistry {
             .iter()
             .find(|entry| entry.registration_id == registration_id)
             .map(|entry| entry.state)
+    }
+
+    #[allow(dead_code)]
+    fn original_snapshot_of<E: Entity + Clone>(&self, registration_id: usize) -> Option<E> {
+        self.state
+            .lock()
+            .expect("tracking registry mutex poisoned")
+            .entries
+            .iter()
+            .find(|entry| entry.registration_id == registration_id)
+            .and_then(|entry| entry.snapshots.downcast_ref::<TrackingSnapshots<E>>())
+            .map(|snapshots| snapshots.original.clone())
+    }
+
+    #[allow(dead_code)]
+    fn current_snapshot_of<E: Entity + Clone>(&self, registration_id: usize) -> Option<E> {
+        self.state
+            .lock()
+            .expect("tracking registry mutex poisoned")
+            .entries
+            .iter()
+            .find(|entry| entry.registration_id == registration_id)
+            .and_then(|entry| entry.snapshots.downcast_ref::<TrackingSnapshots<E>>())
+            .map(|snapshots| snapshots.current.clone())
     }
 
     pub fn clear(&self) {
@@ -649,7 +719,7 @@ fn topological_entity_order(entities: &[&'static EntityMetadata]) -> Result<Vec<
 }
 
 impl TrackingRegistryState {
-    fn push_registration<E: Entity>(
+    fn push_registration<E: Entity + Clone>(
         &mut self,
         tracked: &Tracked<E>,
         identity: TrackedIdentity,
@@ -663,6 +733,10 @@ impl TrackingRegistryState {
             entity_rust_name: E::metadata().rust_name,
             inner_address: tracked.inner.as_ref() as *const TrackedInner<E> as usize,
             state: tracked.inner.state,
+            snapshots: Box::new(TrackingSnapshots::<E> {
+                original: tracked.inner.original.clone(),
+                current: tracked.inner.current.clone(),
+            }),
         });
         registration_id
     }
@@ -681,7 +755,7 @@ impl TrackedIdentity {
     }
 }
 
-impl<E: Clone> RegisteredTracked<E> {
+impl<E: Clone + Send + Sync + 'static> RegisteredTracked<E> {
     pub(crate) fn registration_id(&self) -> usize {
         self.registration_id
     }
@@ -701,22 +775,28 @@ impl<E: Clone> RegisteredTracked<E> {
     }
 
     pub(crate) fn accept_current(&self) {
+        let current = self.current_clone();
         unsafe {
             let inner = self.inner_address as *mut TrackedInner<E>;
-            (*inner).original = (*inner).current.clone();
+            (*inner).original = current.clone();
             (*inner).state = EntityState::Unchanged;
         }
+        self.tracking_registry
+            .set_snapshots(self.registration_id, current.clone(), current);
         self.tracking_registry
             .set_state(self.registration_id, EntityState::Unchanged);
     }
 
     pub(crate) fn sync_persisted(&self, persisted: E) {
+        let snapshot = persisted.clone();
         unsafe {
             let inner = self.inner_address as *mut TrackedInner<E>;
             (*inner).original = persisted.clone();
             (*inner).current = persisted;
             (*inner).state = EntityState::Unchanged;
         }
+        self.tracking_registry
+            .set_snapshots(self.registration_id, snapshot.clone(), snapshot);
         self.tracking_registry
             .set_state(self.registration_id, EntityState::Unchanged);
     }
@@ -791,6 +871,11 @@ mod tests {
 
     #[derive(Clone)]
     struct DummyEntityAlias;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct SnapshotEntity {
+        name: String,
+    }
 
     static DUMMY_ENTITY_METADATA: EntityMetadata = EntityMetadata {
         rust_name: "DummyEntity",
@@ -929,6 +1014,12 @@ mod tests {
     }
 
     impl Entity for DummyEntityAlias {
+        fn metadata() -> &'static EntityMetadata {
+            &DUMMY_ENTITY_METADATA
+        }
+    }
+
+    impl Entity for SnapshotEntity {
         fn metadata() -> &'static EntityMetadata {
             &DUMMY_ENTITY_METADATA
         }
@@ -1187,6 +1278,62 @@ mod tests {
 
         assert_eq!(tracked.state(), EntityState::Unchanged);
         assert_eq!(registry.registrations()[0].state, EntityState::Unchanged);
+    }
+
+    #[test]
+    fn tracking_registry_owns_initial_snapshots_for_registered_entries() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(SnapshotEntity {
+            name: "loaded".to_string(),
+        });
+        tracked.attach_registry(Arc::clone(&registry));
+        let registration_id = tracked.registration_id.expect("registered");
+
+        tracked.inner.original.name = "wrapper original changed".to_string();
+        tracked.inner.current.name = "wrapper current changed".to_string();
+
+        assert_eq!(
+            registry
+                .original_snapshot_of::<SnapshotEntity>(registration_id)
+                .unwrap()
+                .name,
+            "loaded"
+        );
+        assert_eq!(
+            registry
+                .current_snapshot_of::<SnapshotEntity>(registration_id)
+                .unwrap()
+                .name,
+            "loaded"
+        );
+    }
+
+    #[test]
+    fn mark_unchanged_syncs_registry_owned_snapshots() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut tracked = Tracked::from_loaded(SnapshotEntity {
+            name: "loaded".to_string(),
+        });
+        tracked.attach_registry(Arc::clone(&registry));
+        let registration_id = tracked.registration_id.expect("registered");
+
+        tracked.current_mut().name = "accepted".to_string();
+        tracked.mark_unchanged();
+
+        assert_eq!(
+            registry
+                .original_snapshot_of::<SnapshotEntity>(registration_id)
+                .unwrap()
+                .name,
+            "accepted"
+        );
+        assert_eq!(
+            registry
+                .current_snapshot_of::<SnapshotEntity>(registration_id)
+                .unwrap()
+                .name,
+            "accepted"
+        );
     }
 
     #[test]
