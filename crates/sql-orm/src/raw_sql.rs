@@ -371,7 +371,7 @@ fn render_raw_sql_with_hints(
     }
 
     if contains_top_level_option_clause(sql) {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "raw SQL already contains OPTION (...); remove it before using query_hint(...)",
         ));
     }
@@ -395,7 +395,7 @@ pub(crate) fn validate_raw_sql_parameters(sql: &str, param_count: usize) -> Resu
     let plan = analyze_placeholders(sql)?;
 
     if plan.expected_param_count() != param_count {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "raw SQL parameter count mismatch: SQL expects {} parameter(s), received {}",
             plan.expected_param_count(),
             param_count
@@ -424,12 +424,12 @@ fn analyze_placeholders(sql: &str) -> Result<RawPlaceholderPlan, OrmError> {
                 index += 1;
             }
 
-            let raw_index = sql[start..index]
-                .parse::<usize>()
-                .map_err(|_| OrmError::new("raw SQL placeholder index is larger than supported"))?;
+            let raw_index = sql[start..index].parse::<usize>().map_err(|_| {
+                OrmError::compile("raw SQL placeholder index is larger than supported")
+            })?;
 
             if raw_index == 0 {
-                return Err(OrmError::new("raw SQL placeholders must start at @P1"));
+                return Err(OrmError::compile("raw SQL placeholders must start at @P1"));
             }
 
             placeholders.insert(raw_index);
@@ -442,7 +442,7 @@ fn analyze_placeholders(sql: &str) -> Result<RawPlaceholderPlan, OrmError> {
     let max_index = placeholders.iter().next_back().copied().unwrap_or(0);
     for expected in 1..=max_index {
         if !placeholders.contains(&expected) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "raw SQL placeholders must be continuous from @P1 to @P{}",
                 max_index
             )));
@@ -637,7 +637,7 @@ mod tests {
     };
     use chrono::NaiveDate;
     use rust_decimal::Decimal;
-    use sql_orm_core::SqlValue;
+    use sql_orm_core::{OrmErrorKind, SqlValue};
     use sql_orm_query::QueryExecution;
     use std::collections::BTreeSet;
     use uuid::Uuid;
@@ -665,6 +665,7 @@ mod tests {
     fn rejects_extra_params_without_placeholders() {
         let error = validate_raw_sql_parameters("SELECT 1", 1).unwrap_err();
 
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert!(error.message().contains("expects 0 parameter"));
     }
 
@@ -911,6 +912,7 @@ mod tests {
         )
         .unwrap_err();
 
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert!(error.message().contains("already contains OPTION"));
     }
 
