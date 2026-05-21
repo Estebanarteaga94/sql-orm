@@ -48,7 +48,7 @@ pub fn create_migration_scaffold_with_snapshot(
     snapshot: &ModelSnapshot,
 ) -> Result<MigrationScaffold, OrmError> {
     if name.trim().is_empty() {
-        return Err(OrmError::new("migration name cannot be empty"));
+        return Err(OrmError::migration("migration name cannot be empty"));
     }
 
     let slug = slugify(name);
@@ -58,11 +58,11 @@ pub fn create_migration_scaffold_with_snapshot(
     let directory = migrations_dir.join(&id);
 
     fs::create_dir_all(&directory)
-        .map_err(|_| OrmError::new("failed to create migration directory"))?;
+        .map_err(|_| OrmError::migration("failed to create migration directory"))?;
     fs::write(directory.join("up.sql"), initial_up_sql_template(&id))
-        .map_err(|_| OrmError::new("failed to write migration up.sql"))?;
+        .map_err(|_| OrmError::migration("failed to write migration up.sql"))?;
     fs::write(directory.join("down.sql"), initial_down_sql_template(&id))
-        .map_err(|_| OrmError::new("failed to write migration down.sql"))?;
+        .map_err(|_| OrmError::migration("failed to write migration down.sql"))?;
     write_model_snapshot(&directory.join("model_snapshot.json"), snapshot)?;
 
     Ok(MigrationScaffold {
@@ -84,7 +84,7 @@ fn initial_down_sql_template(id: &str) -> String {
 
 pub fn write_model_snapshot(path: &Path, snapshot: &ModelSnapshot) -> Result<(), OrmError> {
     fs::write(path, snapshot.to_json_pretty()?)
-        .map_err(|_| OrmError::new("failed to write migration model snapshot"))
+        .map_err(|_| OrmError::migration("failed to write migration model snapshot"))
 }
 
 pub fn write_migration_up_sql(path: &Path, sql_statements: &[String]) -> Result<(), OrmError> {
@@ -96,7 +96,7 @@ pub fn write_migration_up_sql(path: &Path, sql_statements: &[String]) -> Result<
         sql
     };
 
-    fs::write(path, sql).map_err(|_| OrmError::new("failed to write migration up.sql"))
+    fs::write(path, sql).map_err(|_| OrmError::migration("failed to write migration up.sql"))
 }
 
 pub fn write_migration_down_sql(path: &Path, sql_statements: &[String]) -> Result<(), OrmError> {
@@ -108,12 +108,12 @@ pub fn write_migration_down_sql(path: &Path, sql_statements: &[String]) -> Resul
         sql
     };
 
-    fs::write(path, sql).map_err(|_| OrmError::new("failed to write migration down.sql"))
+    fs::write(path, sql).map_err(|_| OrmError::migration("failed to write migration down.sql"))
 }
 
 pub fn read_model_snapshot(path: &Path) -> Result<ModelSnapshot, OrmError> {
     let json = fs::read_to_string(path)
-        .map_err(|_| OrmError::new("failed to read migration model snapshot"))?;
+        .map_err(|_| OrmError::migration("failed to read migration model snapshot"))?;
     ModelSnapshot::from_json(&json)
 }
 
@@ -124,7 +124,7 @@ pub fn list_migrations(root: &Path) -> Result<Vec<MigrationEntry>, OrmError> {
     }
 
     let mut entries = fs::read_dir(&migrations_dir)
-        .map_err(|_| OrmError::new("failed to read migrations directory"))?
+        .map_err(|_| OrmError::migration("failed to read migrations directory"))?
         .filter_map(Result::ok)
         .filter(|entry| entry.file_type().map(|kind| kind.is_dir()).unwrap_or(false))
         .filter_map(|entry| parse_migration_entry(entry.path()))
@@ -168,7 +168,7 @@ pub fn build_database_update_script(
 
     for migration in migrations {
         let up_sql = fs::read_to_string(&migration.up_sql_path)
-            .map_err(|_| OrmError::new("failed to read migration up.sql"))?;
+            .map_err(|_| OrmError::migration("failed to read migration up.sql"))?;
         let checksum = checksum_hex(up_sql.as_bytes());
         let statements = split_sql_statements(&up_sql);
         let body = if statements.is_empty() {
@@ -199,14 +199,14 @@ pub fn build_database_downgrade_script(
 ) -> Result<String, OrmError> {
     let target = target.trim();
     if target.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "database downgrade requires an explicit target",
         ));
     }
 
     let migrations = list_migrations(root)?;
     if target != "0" && !migrations.iter().any(|migration| migration.id == target) {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::migration(format!(
             "database downgrade target `{target}` is not a known local migration"
         )));
     }
@@ -217,26 +217,26 @@ pub fn build_database_downgrade_script(
         .rev()
         .map(|migration| {
             let up_sql = fs::read_to_string(&migration.up_sql_path).map_err(|_| {
-                OrmError::new(format!(
+                OrmError::migration(format!(
                     "database downgrade migration `{}` is missing local up.sql for checksum validation",
                     migration.id
                 ))
             })?;
             let down_sql = fs::read_to_string(&migration.down_sql_path).map_err(|_| {
-                OrmError::new(format!(
+                OrmError::migration(format!(
                     "database downgrade migration `{}` is missing local down.sql",
                     migration.id
                 ))
             })?;
             if is_unresolved_down_sql_template(&down_sql) {
-                return Err(OrmError::new(format!(
+                return Err(OrmError::migration(format!(
                     "database downgrade migration `{}` has no reversible payload in down.sql; edit down.sql with executable rollback SQL",
                     migration.id
                 )));
             }
             let down_statements = split_sql_statements(&down_sql);
             if down_statements.is_empty() {
-                return Err(OrmError::new(format!(
+                return Err(OrmError::migration(format!(
                     "database downgrade migration `{}` has no executable down.sql statements",
                     migration.id
                 )));
@@ -368,7 +368,7 @@ fn parse_migration_entry(path: PathBuf) -> Option<MigrationEntry> {
 fn migration_timestamp() -> Result<String, OrmError> {
     let duration = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map_err(|_| OrmError::new("system clock is before UNIX_EPOCH"))?;
+        .map_err(|_| OrmError::migration("system clock is before UNIX_EPOCH"))?;
     Ok(duration.as_nanos().to_string())
 }
 
@@ -619,6 +619,7 @@ mod tests {
         write_migration_down_sql, write_migration_up_sql, write_model_snapshot,
     };
     use crate::{ModelSnapshot, SchemaSnapshot};
+    use sql_orm_core::OrmErrorKind;
     use std::fs;
     use std::path::{Path, PathBuf};
     use std::time::{SystemTime, UNIX_EPOCH};
@@ -1069,6 +1070,7 @@ mod tests {
             "   ",
         )
         .unwrap_err();
+        assert_eq!(error.kind(), OrmErrorKind::Migration);
         assert!(
             error
                 .to_string()

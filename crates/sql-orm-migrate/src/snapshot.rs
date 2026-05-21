@@ -48,12 +48,12 @@ impl ModelSnapshot {
     pub fn to_json_pretty(&self) -> Result<String, sql_orm_core::OrmError> {
         serde_json::to_string_pretty(self)
             .map(|json| format!("{json}\n"))
-            .map_err(|_| sql_orm_core::OrmError::new("failed to serialize model snapshot"))
+            .map_err(|_| sql_orm_core::OrmError::migration("failed to serialize model snapshot"))
     }
 
     pub fn from_json(json: &str) -> Result<Self, sql_orm_core::OrmError> {
         serde_json::from_str(json)
-            .map_err(|_| sql_orm_core::OrmError::new("failed to deserialize model snapshot"))
+            .map_err(|_| sql_orm_core::OrmError::migration("failed to deserialize model snapshot"))
     }
 }
 
@@ -508,7 +508,7 @@ mod tests {
         ColumnSnapshot, ForeignKeySnapshot, IndexColumnSnapshot, IndexSnapshot, ModelSnapshot,
         SchemaSnapshot, TableSnapshot,
     };
-    use sql_orm_core::{IdentityMetadata, ReferentialAction, SqlServerType};
+    use sql_orm_core::{IdentityMetadata, OrmErrorKind, ReferentialAction, SqlServerType};
 
     #[test]
     fn serializes_empty_model_snapshot_as_stable_json() {
@@ -519,6 +519,14 @@ mod tests {
             ModelSnapshot::from_json(&json).unwrap(),
             ModelSnapshot::default()
         );
+    }
+
+    #[test]
+    fn classifies_invalid_model_snapshot_json_as_migration_error() {
+        let error = ModelSnapshot::from_json("{").unwrap_err();
+
+        assert_eq!(error.kind(), OrmErrorKind::Migration);
+        assert_eq!(error.message(), "failed to deserialize model snapshot");
     }
 
     #[test]
