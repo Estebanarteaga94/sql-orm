@@ -903,6 +903,61 @@ mod tests {
     }
 
     #[test]
+    fn database_update_script_preserves_comments_and_semicolons_inside_strings() {
+        let root = temp_project_root();
+        let scaffold = create_migration_scaffold(&root, "Commented Literal").unwrap();
+        fs::write(
+            scaffold.directory.join("up.sql"),
+            "-- comment with ; and GO text\n\
+             INSERT INTO [dbo].[messages] ([body]) VALUES (N'alpha; beta GO');\n\
+             /* block comment with ; before next statement */\n\
+             UPDATE [dbo].[messages] SET [body] = N'O''Brien; still one literal';",
+        )
+        .unwrap();
+
+        let script =
+            build_database_update_script(&root, "CREATE TABLE [dbo].[__sql_orm_migrations] (...);")
+                .unwrap();
+
+        assert!(script.contains(
+            "EXEC(N'-- comment with ; and GO text\nINSERT INTO [dbo].[messages] ([body]) VALUES (N''alpha; beta GO'');');"
+        ));
+        assert!(script.contains(
+            "EXEC(N'/* block comment with ; before next statement */\nUPDATE [dbo].[messages] SET [body] = N''O''''Brien; still one literal'';');"
+        ));
+        assert_eq!(script.matches("EXEC(N'").count(), 2);
+    }
+
+    #[test]
+    fn database_downgrade_script_preserves_comments_and_semicolons_inside_strings() {
+        let root = temp_project_root();
+        write_local_migration(
+            &root,
+            "100_create_messages",
+            "CREATE TABLE [dbo].[messages] ([body] nvarchar(200) NOT NULL);",
+            "-- comment with ; and GO text\n\
+             UPDATE [dbo].[messages] SET [body] = N'alpha; beta GO';\n\
+             /* block comment with ; before drop */\n\
+             DROP TABLE [dbo].[messages];",
+        );
+
+        let script = build_database_downgrade_script(
+            &root,
+            "CREATE TABLE [dbo].[__sql_orm_migrations] (...);",
+            "0",
+        )
+        .unwrap();
+
+        assert!(script.contains(
+            "EXEC(N'-- comment with ; and GO text\nUPDATE [dbo].[messages] SET [body] = N''alpha; beta GO'';');"
+        ));
+        assert!(script.contains(
+            "EXEC(N'/* block comment with ; before drop */\nDROP TABLE [dbo].[messages];');"
+        ));
+        assert_eq!(script.matches("        EXEC(N'").count(), 2);
+    }
+
+    #[test]
     fn builds_database_downgrade_script_in_reverse_order() {
         let root = temp_project_root();
         write_local_migration(

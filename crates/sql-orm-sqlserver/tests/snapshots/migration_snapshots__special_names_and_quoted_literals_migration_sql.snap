@@ -1,0 +1,15 @@
+---
+source: crates/sql-orm-sqlserver/tests/migration_snapshots.rs
+expression: render_statements(&sql)
+---
+IF SCHEMA_ID(N'tenant''s archive]2026') IS NULL EXEC(N'CREATE SCHEMA [tenant''s archive]]2026]')
+GO
+CREATE TABLE [tenant's archive]]2026].[orders; GO] (
+    [id] bigint NOT NULL,
+    [display]] name] nvarchar(120) NOT NULL DEFAULT N'O''Brien; still literal',
+    CONSTRAINT [pk_orders; go] PRIMARY KEY ([id])
+)
+GO
+EXEC sp_rename N'[tenant''s archive]]2026].[orders; GO]', N'orders'' archived]', N'OBJECT'
+GO
+EXEC sp_rename N'[tenant''s archive]]2026].[orders'' archived]]].[display]] name]', N'owner''s display]', N'COLUMN'

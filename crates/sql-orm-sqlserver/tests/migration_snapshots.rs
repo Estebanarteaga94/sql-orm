@@ -1,8 +1,9 @@
 use insta::assert_snapshot;
 use sql_orm_core::{ReferentialAction, SqlServerType};
 use sql_orm_migrate::{
-    AddColumn, AddForeignKey, ColumnSnapshot, DropColumn, DropForeignKey, ForeignKeySnapshot,
-    MigrationOperation, RenameColumn, RenameTable,
+    AddColumn, AddForeignKey, ColumnSnapshot, CreateSchema, CreateTable, DropColumn,
+    DropForeignKey, ForeignKeySnapshot, MigrationOperation, RenameColumn, RenameTable,
+    TableSnapshot,
 };
 use sql_orm_sqlserver::SqlServerCompiler;
 
@@ -254,6 +255,73 @@ fn snapshots_rename_table_migration_sql() {
     let sql = SqlServerCompiler::compile_migration_operations(&operations).unwrap();
 
     assert_snapshot!("rename_table_migration_sql", render_statements(&sql));
+}
+
+#[test]
+fn snapshots_special_names_and_quoted_literals_migration_sql() {
+    let operations = vec![
+        MigrationOperation::CreateSchema(CreateSchema::new("tenant's archive]2026")),
+        MigrationOperation::CreateTable(CreateTable::new(
+            "tenant's archive]2026",
+            TableSnapshot::new(
+                "orders; GO",
+                vec![
+                    ColumnSnapshot::new(
+                        "id",
+                        SqlServerType::BigInt,
+                        false,
+                        true,
+                        None,
+                        None,
+                        None,
+                        false,
+                        false,
+                        false,
+                        None,
+                        None,
+                        None,
+                    ),
+                    ColumnSnapshot::new(
+                        "display] name",
+                        SqlServerType::NVarChar,
+                        false,
+                        false,
+                        None,
+                        Some("N'O''Brien; still literal'".to_string()),
+                        None,
+                        false,
+                        true,
+                        true,
+                        Some(120),
+                        None,
+                        None,
+                    ),
+                ],
+                Some("pk_orders; go".to_string()),
+                vec!["id".to_string()],
+                Vec::new(),
+                Vec::new(),
+            ),
+        )),
+        MigrationOperation::RenameTable(RenameTable::new(
+            "tenant's archive]2026",
+            "orders; GO",
+            "orders' archived]",
+        )),
+        MigrationOperation::RenameColumn(RenameColumn::new(
+            "tenant's archive]2026",
+            "orders' archived]",
+            "display] name",
+            "owner's display]",
+        )),
+    ];
+
+    let sql = SqlServerCompiler::compile_migration_operations(&operations).unwrap();
+
+    assert_snapshot!(
+        "special_names_and_quoted_literals_migration_sql",
+        render_statements(&sql)
+    );
 }
 
 fn render_statements(statements: &[String]) -> String {
