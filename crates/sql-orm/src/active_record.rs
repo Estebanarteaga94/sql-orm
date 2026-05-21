@@ -113,7 +113,7 @@ pub trait ActiveRecord: Entity + Sized {
                         {
                             <Self as EntityPersist>::sync_persisted(self, persisted);
                         } else {
-                            return Err(OrmError::new(
+                            return Err(OrmError::concurrency(
                                 "ActiveRecord save could not update a row for the current primary key",
                             ));
                         }
@@ -134,7 +134,7 @@ pub trait ActiveRecord: Entity + Sized {
                         )
                         .await?
                         .ok_or_else(|| {
-                            OrmError::new(
+                            OrmError::concurrency(
                                 "ActiveRecord save could not update a row for the current primary key",
                             )
                         })?;
@@ -157,7 +157,7 @@ mod tests {
     };
     use sql_orm_core::{
         ColumnMetadata, ColumnValue, Entity, EntityMetadata, EntityPolicyMetadata, FromRow,
-        OrmError, PrimaryKeyMetadata, Row, SqlServerType,
+        OrmError, OrmErrorKind, PrimaryKeyMetadata, Row, SqlServerType,
     };
     use sql_orm_query::SelectQuery;
 
@@ -471,9 +471,10 @@ mod tests {
         };
 
         assert_eq!(
-            error,
-            OrmError::new("DbSetQuery requires an initialized shared connection")
+            error.message(),
+            "DbSetQuery requires an initialized shared connection"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 
     #[test]
@@ -495,9 +496,10 @@ mod tests {
         };
 
         assert_eq!(
-            error,
-            OrmError::new("DbSet requires an initialized shared connection")
+            error.message(),
+            "DbSet requires an initialized shared connection"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 
     #[test]
@@ -517,8 +519,9 @@ mod tests {
         };
 
         assert_eq!(
-            error,
-            OrmError::new("DbSet requires an initialized shared connection")
+            error.message(),
+            "DbSet requires an initialized shared connection"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 }
