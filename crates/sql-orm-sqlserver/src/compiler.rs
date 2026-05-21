@@ -65,7 +65,7 @@ impl crate::SqlServerCompiler {
 
         if let Some(pagination) = query.pagination {
             if query.order_by.is_empty() {
-                return Err(OrmError::new(
+                return Err(OrmError::compile(
                     "SQL Server pagination requires ORDER BY before OFFSET/FETCH",
                 ));
             }
@@ -79,7 +79,7 @@ impl crate::SqlServerCompiler {
 
     pub fn compile_insert(query: &InsertQuery) -> Result<CompiledQuery, OrmError> {
         if query.values.is_empty() {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "SQL Server insert compilation requires at least one value",
             ));
         }
@@ -97,12 +97,12 @@ impl crate::SqlServerCompiler {
 
     pub fn compile_update(query: &UpdateQuery) -> Result<CompiledQuery, OrmError> {
         if query.changes.is_empty() {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "SQL Server update compilation requires at least one change",
             ));
         }
         if query.predicate.is_none() && !query.allow_all_rows {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "SQL Server update compilation requires a WHERE predicate or explicit allow_all_rows()",
             ));
         }
@@ -126,7 +126,7 @@ impl crate::SqlServerCompiler {
 
     pub fn compile_delete(query: &DeleteQuery) -> Result<CompiledQuery, OrmError> {
         if query.predicate.is_none() && !query.allow_all_rows {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "SQL Server delete compilation requires a WHERE predicate or explicit allow_all_rows()",
             ));
         }
@@ -219,7 +219,7 @@ impl crate::SqlServerCompiler {
 
         if let Some(pagination) = query.pagination {
             if query.order_by.is_empty() {
-                return Err(OrmError::new(
+                return Err(OrmError::compile(
                     "SQL Server aggregate pagination requires ORDER BY before OFFSET/FETCH",
                 ));
             }
@@ -234,13 +234,13 @@ impl crate::SqlServerCompiler {
 
 fn validate_insert_query(query: &InsertQuery) -> Result<(), OrmError> {
     let Some(metadata) = query.entity else {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "SQL Server insert compilation requires entity metadata",
         ));
     };
 
     if metadata.schema != query.into.schema || metadata.table != query.into.table {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server insert target [{}].[{}] does not match entity metadata [{}].[{}]",
             query.into.schema, query.into.table, metadata.schema, metadata.table
         )));
@@ -249,14 +249,14 @@ fn validate_insert_query(query: &InsertQuery) -> Result<(), OrmError> {
     let mut seen_columns = BTreeSet::new();
     for value in &query.values {
         if !seen_columns.insert(value.column_name) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "SQL Server insert column `{}` is duplicated",
                 value.column_name
             )));
         }
 
         let column = metadata.column(value.column_name).ok_or_else(|| {
-            OrmError::new(format!(
+            OrmError::compile(format!(
                 "SQL Server insert column `{}` is not defined on entity `{}`",
                 value.column_name, metadata.rust_name
             ))
@@ -272,25 +272,25 @@ fn validate_insert_column(
     column: &ColumnMetadata,
 ) -> Result<(), OrmError> {
     if column.rowversion {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server insert column `{}` on entity `{}` is rowversion and cannot be inserted",
             column.column_name, metadata.rust_name
         )));
     }
     if column.is_computed() {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server insert column `{}` on entity `{}` is computed and cannot be inserted",
             column.column_name, metadata.rust_name
         )));
     }
     if column.primary_key && column.identity.is_some() {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server insert column `{}` on entity `{}` is an identity primary key and cannot be inserted",
             column.column_name, metadata.rust_name
         )));
     }
     if !column.insertable {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server insert column `{}` on entity `{}` is not insertable",
             column.column_name, metadata.rust_name
         )));
@@ -301,13 +301,13 @@ fn validate_insert_column(
 
 fn validate_update_query(query: &UpdateQuery) -> Result<(), OrmError> {
     let Some(metadata) = query.entity else {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "SQL Server update compilation requires entity metadata",
         ));
     };
 
     if metadata.schema != query.table.schema || metadata.table != query.table.table {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server update target [{}].[{}] does not match entity metadata [{}].[{}]",
             query.table.schema, query.table.table, metadata.schema, metadata.table
         )));
@@ -316,14 +316,14 @@ fn validate_update_query(query: &UpdateQuery) -> Result<(), OrmError> {
     let mut seen_columns = BTreeSet::new();
     for change in &query.changes {
         if !seen_columns.insert(change.column_name) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "SQL Server update column `{}` is duplicated",
                 change.column_name
             )));
         }
 
         let column = metadata.column(change.column_name).ok_or_else(|| {
-            OrmError::new(format!(
+            OrmError::compile(format!(
                 "SQL Server update column `{}` is not defined on entity `{}`",
                 change.column_name, metadata.rust_name
             ))
@@ -339,25 +339,25 @@ fn validate_update_column(
     column: &ColumnMetadata,
 ) -> Result<(), OrmError> {
     if column.primary_key {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server update column `{}` on entity `{}` is a primary key and cannot be updated",
             column.column_name, metadata.rust_name
         )));
     }
     if column.rowversion {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server update column `{}` on entity `{}` is rowversion and cannot be updated",
             column.column_name, metadata.rust_name
         )));
     }
     if column.is_computed() {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server update column `{}` on entity `{}` is computed and cannot be updated",
             column.column_name, metadata.rust_name
         )));
     }
     if !column.updatable {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "SQL Server update column `{}` on entity `{}` is not updatable",
             column.column_name, metadata.rust_name
         )));
@@ -368,7 +368,7 @@ fn validate_update_column(
 
 fn validate_aggregate_query(query: &AggregateQuery) -> Result<(), OrmError> {
     if query.projection.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "SQL Server aggregate query compilation requires at least one projection",
         ));
     }
@@ -396,7 +396,7 @@ fn compile_joins(
 
     for join in joins {
         if seen_tables.contains(&join.table) {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "SQL Server join compilation requires aliases for repeated table sources",
             ));
         }
@@ -428,13 +428,15 @@ fn compile_projection(
         .iter()
         .map(|projection| {
             let alias = projection.alias.as_deref().ok_or_else(|| {
-                OrmError::new("SQL Server projection expressions require an explicit alias")
+                OrmError::compile("SQL Server projection expressions require an explicit alias")
             })?;
             if alias.trim().is_empty() {
-                return Err(OrmError::new("SQL Server projection alias cannot be empty"));
+                return Err(OrmError::compile(
+                    "SQL Server projection alias cannot be empty",
+                ));
             }
             if !aliases.insert(alias) {
-                return Err(OrmError::new(format!(
+                return Err(OrmError::compile(format!(
                     "SQL Server projection alias `{alias}` is duplicated"
                 )));
             }
@@ -459,12 +461,12 @@ fn compile_aggregate_projection(
         .iter()
         .map(|projection| {
             if projection.alias.trim().is_empty() {
-                return Err(OrmError::new(
+                return Err(OrmError::compile(
                     "SQL Server aggregate projection alias cannot be empty",
                 ));
             }
             if !aliases.insert(projection.alias) {
-                return Err(OrmError::new(format!(
+                return Err(OrmError::compile(format!(
                     "SQL Server aggregate projection alias `{}` is duplicated",
                     projection.alias
                 )));
@@ -488,12 +490,12 @@ fn validate_aggregate_projection(
 
     for projection in projection {
         if projection.alias.trim().is_empty() {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "SQL Server aggregate projection alias cannot be empty",
             ));
         }
         if !aliases.insert(projection.alias) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "SQL Server aggregate projection alias `{}` is duplicated",
                 projection.alias
             )));
@@ -533,7 +535,7 @@ fn validate_aggregate_predicate(
         }
         AggregatePredicate::And(predicates) | AggregatePredicate::Or(predicates) => {
             if predicates.is_empty() {
-                return Err(OrmError::new(
+                return Err(OrmError::compile(
                     "aggregate logical predicate compilation requires at least one child predicate",
                 ));
             }
@@ -603,7 +605,7 @@ fn validate_group_key(expr: &Expr, group_by: &[Expr]) -> Result<(), OrmError> {
         return Ok(());
     }
 
-    Err(OrmError::new(
+    Err(OrmError::compile(
         "SQL Server aggregate group key projection must appear in GROUP BY",
     ))
 }
@@ -646,16 +648,20 @@ fn compile_expr(expr: &Expr, parameters: &mut ParameterBuilder) -> Result<String
 
 fn validate_unsafe_function_name(name: &str) -> Result<(), OrmError> {
     if name.trim().is_empty() {
-        return Err(OrmError::new("unsafe SQL function name cannot be empty"));
+        return Err(OrmError::compile(
+            "unsafe SQL function name cannot be empty",
+        ));
     }
 
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
-        return Err(OrmError::new("unsafe SQL function name cannot be empty"));
+        return Err(OrmError::compile(
+            "unsafe SQL function name cannot be empty",
+        ));
     };
 
     if !is_sql_identifier_start(first) || !chars.all(is_sql_identifier_continue) {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "unsafe SQL function name `{name}` must be a single unquoted SQL identifier"
         )));
     }
@@ -757,7 +763,7 @@ fn compile_aggregate_logical(
     parameters: &mut ParameterBuilder,
 ) -> Result<String, OrmError> {
     if predicates.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "aggregate logical predicate compilation requires at least one child predicate",
         ));
     }
@@ -800,7 +806,7 @@ fn compile_like_escaped(
 
 fn validate_like_escape_char(escape: char) -> Result<(), OrmError> {
     if !escape.is_ascii() || escape == '\'' || escape.is_ascii_alphanumeric() {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "SQL Server LIKE ESCAPE character must be a single non-alphanumeric ASCII character other than quote",
         ));
     }
@@ -818,7 +824,7 @@ fn compile_logical(
     parameters: &mut ParameterBuilder,
 ) -> Result<String, OrmError> {
     if predicates.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "logical predicate compilation requires at least one child predicate",
         ));
     }
@@ -932,7 +938,7 @@ mod tests {
     use super::super::SqlServerCompiler;
     use sql_orm_core::{
         Changeset, ColumnMetadata, ColumnValue, Entity, EntityColumn, EntityMetadata,
-        IdentityMetadata, Insertable, PrimaryKeyMetadata, SqlServerType, SqlValue,
+        IdentityMetadata, Insertable, OrmErrorKind, PrimaryKeyMetadata, SqlServerType, SqlValue,
     };
     use sql_orm_query::{
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, AggregateQuery,
@@ -1270,6 +1276,7 @@ mod tests {
 
         let error = SqlServerCompiler::compile_select(&query).unwrap_err();
 
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert_eq!(
             error.message(),
             "SQL Server LIKE ESCAPE character must be a single non-alphanumeric ASCII character other than quote"
@@ -1292,6 +1299,7 @@ mod tests {
         )
         .unwrap_err();
 
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert_eq!(
             error.message(),
             "SQL Server pagination requires ORDER BY before OFFSET/FETCH"

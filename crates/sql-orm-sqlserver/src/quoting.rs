@@ -46,17 +46,17 @@ pub fn quote_column_ref(column: &ColumnRef) -> Result<String, OrmError> {
 
 fn validate_identifier(identifier: &str) -> Result<(), OrmError> {
     if identifier.is_empty() {
-        return Err(OrmError::new("SQL Server identifier cannot be empty"));
+        return Err(OrmError::compile("SQL Server identifier cannot be empty"));
     }
 
     if identifier.contains('.') {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "SQL Server identifier cannot contain '.'; quote each part separately",
         ));
     }
 
     if identifier.chars().any(|ch| ch.is_control()) {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "SQL Server identifier cannot contain control characters",
         ));
     }
@@ -70,6 +70,7 @@ mod tests {
         quote_column_ref, quote_identifier, quote_qualified_identifier, quote_table_ref,
         quote_table_reference, quote_table_source,
     };
+    use sql_orm_core::OrmErrorKind;
     use sql_orm_query::{ColumnRef, TableRef};
 
     #[test]
@@ -89,6 +90,7 @@ mod tests {
     fn rejects_empty_identifier() {
         let error = quote_identifier("").unwrap_err();
 
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert_eq!(error.message(), "SQL Server identifier cannot be empty");
     }
 

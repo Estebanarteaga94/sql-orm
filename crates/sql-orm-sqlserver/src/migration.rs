@@ -146,7 +146,7 @@ fn compile_drop_column(operation: &DropColumn) -> Result<String, OrmError> {
 
 fn compile_alter_column(operation: &AlterColumn) -> Result<String, OrmError> {
     if operation.previous.name != operation.next.name {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "SQL Server alter column compilation does not support renaming columns",
         ));
     }
@@ -157,7 +157,7 @@ fn compile_alter_column(operation: &AlterColumn) -> Result<String, OrmError> {
         || operation.previous.primary_key != operation.next.primary_key
         || operation.previous.rowversion != operation.next.rowversion
     {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "SQL Server alter column compilation only supports type and nullability changes in this stage",
         ));
     }
@@ -171,7 +171,7 @@ fn compile_alter_column(operation: &AlterColumn) -> Result<String, OrmError> {
 
 fn compile_create_index(operation: &CreateIndex) -> Result<String, OrmError> {
     if operation.index.columns.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "SQL Server index migration compilation requires at least one indexed column",
         ));
     }
@@ -206,19 +206,19 @@ fn compile_drop_index(operation: &DropIndex) -> Result<String, OrmError> {
 
 fn compile_add_foreign_key(operation: &AddForeignKey) -> Result<String, OrmError> {
     if operation.foreign_key.columns.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "SQL Server foreign key migration compilation requires at least one local column",
         ));
     }
 
     if operation.foreign_key.referenced_columns.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "SQL Server foreign key migration compilation requires at least one referenced column",
         ));
     }
 
     if operation.foreign_key.columns.len() != operation.foreign_key.referenced_columns.len() {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "SQL Server foreign key migration compilation requires the same number of local and referenced columns",
         ));
     }
@@ -327,7 +327,7 @@ fn compile_alter_column_definition(column: &ColumnSnapshot) -> Result<String, Or
         || column.rowversion
         || column.sql_type == SqlServerType::RowVersion
     {
-        return Err(OrmError::new(
+        return Err(OrmError::migration(
             "SQL Server alter column compilation does not support computed or rowversion columns in this stage",
         ));
     }
@@ -370,7 +370,7 @@ fn render_sql_type(column: &ColumnSnapshot) -> String {
 #[cfg(test)]
 mod tests {
     use super::super::SqlServerCompiler;
-    use sql_orm_core::{IdentityMetadata, ReferentialAction, SqlServerType};
+    use sql_orm_core::{IdentityMetadata, OrmErrorKind, ReferentialAction, SqlServerType};
     use sql_orm_migrate::{
         AddColumn, AddForeignKey, AlterColumn, ColumnSnapshot, CreateIndex, CreateSchema,
         CreateTable, DropColumn, DropForeignKey, DropIndex, DropSchema, DropTable,
@@ -534,6 +534,7 @@ mod tests {
 
         let error = SqlServerCompiler::compile_migration_operations(&[operation]).unwrap_err();
 
+        assert_eq!(error.kind(), OrmErrorKind::Migration);
         assert_eq!(
             error.message(),
             "SQL Server alter column compilation only supports type and nullability changes in this stage"
