@@ -4,12 +4,90 @@ use chrono::{NaiveDate, NaiveDateTime};
 use core::fmt;
 use core::marker::PhantomData;
 use rust_decimal::Decimal;
+use std::sync::Arc;
 use uuid::Uuid;
 
-/// Common error type placeholder for the workspace foundations.
+type ErrorSource = Arc<dyn std::error::Error + Send + Sync + 'static>;
+
+/// Stable high-level classification for ORM errors.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum OrmErrorKind {
+    Message,
+    Connection,
+    Compile,
+    Migration,
+    Mapping,
+    Execution,
+    Transaction,
+    Concurrency,
+}
+
+#[derive(Clone)]
+pub struct OrmErrorContext {
+    message: String,
+    source: Option<ErrorSource>,
+}
+
+impl OrmErrorContext {
+    pub fn new(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            source: None,
+        }
+    }
+
+    pub fn with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            source: Some(Arc::new(source)),
+        }
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.source
+            .as_deref()
+            .map(|source| source as &(dyn std::error::Error + 'static))
+    }
+}
+
+impl fmt::Debug for OrmErrorContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.debug_struct("OrmErrorContext")
+            .field("message", &self.message)
+            .field(
+                "source",
+                &self.source.as_ref().map(|source| source.to_string()),
+            )
+            .finish()
+    }
+}
+
+impl PartialEq for OrmErrorContext {
+    fn eq(&self, other: &Self) -> bool {
+        self.message == other.message
+    }
+}
+
+impl Eq for OrmErrorContext {}
+
+/// Common error type for the workspace.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum OrmError {
     Message(String),
+    Connection(OrmErrorContext),
+    Compile(OrmErrorContext),
+    Migration(OrmErrorContext),
+    Mapping(OrmErrorContext),
+    Execution(OrmErrorContext),
+    Transaction(OrmErrorContext),
+    Concurrency(OrmErrorContext),
     ConcurrencyConflict,
 }
 
@@ -18,13 +96,110 @@ impl OrmError {
         Self::Message(message.into())
     }
 
+    pub fn connection(message: impl Into<String>) -> Self {
+        Self::Connection(OrmErrorContext::new(message))
+    }
+
+    pub fn connection_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Connection(OrmErrorContext::with_source(message, source))
+    }
+
+    pub fn compile(message: impl Into<String>) -> Self {
+        Self::Compile(OrmErrorContext::new(message))
+    }
+
+    pub fn compile_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Compile(OrmErrorContext::with_source(message, source))
+    }
+
+    pub fn migration(message: impl Into<String>) -> Self {
+        Self::Migration(OrmErrorContext::new(message))
+    }
+
+    pub fn migration_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Migration(OrmErrorContext::with_source(message, source))
+    }
+
+    pub fn mapping(message: impl Into<String>) -> Self {
+        Self::Mapping(OrmErrorContext::new(message))
+    }
+
+    pub fn mapping_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Mapping(OrmErrorContext::with_source(message, source))
+    }
+
+    pub fn execution(message: impl Into<String>) -> Self {
+        Self::Execution(OrmErrorContext::new(message))
+    }
+
+    pub fn execution_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Execution(OrmErrorContext::with_source(message, source))
+    }
+
+    pub fn transaction(message: impl Into<String>) -> Self {
+        Self::Transaction(OrmErrorContext::new(message))
+    }
+
+    pub fn transaction_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Transaction(OrmErrorContext::with_source(message, source))
+    }
+
+    pub fn concurrency(message: impl Into<String>) -> Self {
+        Self::Concurrency(OrmErrorContext::new(message))
+    }
+
+    pub fn concurrency_with_source(
+        message: impl Into<String>,
+        source: impl std::error::Error + Send + Sync + 'static,
+    ) -> Self {
+        Self::Concurrency(OrmErrorContext::with_source(message, source))
+    }
+
     pub const fn concurrency_conflict() -> Self {
         Self::ConcurrencyConflict
+    }
+
+    pub fn kind(&self) -> OrmErrorKind {
+        match self {
+            Self::Message(_) => OrmErrorKind::Message,
+            Self::Connection(_) => OrmErrorKind::Connection,
+            Self::Compile(_) => OrmErrorKind::Compile,
+            Self::Migration(_) => OrmErrorKind::Migration,
+            Self::Mapping(_) => OrmErrorKind::Mapping,
+            Self::Execution(_) => OrmErrorKind::Execution,
+            Self::Transaction(_) => OrmErrorKind::Transaction,
+            Self::Concurrency(_) | Self::ConcurrencyConflict => OrmErrorKind::Concurrency,
+        }
     }
 
     pub fn message(&self) -> &str {
         match self {
             Self::Message(message) => message,
+            Self::Connection(context)
+            | Self::Compile(context)
+            | Self::Migration(context)
+            | Self::Mapping(context)
+            | Self::Execution(context)
+            | Self::Transaction(context)
+            | Self::Concurrency(context) => context.message(),
             Self::ConcurrencyConflict => "concurrency conflict",
         }
     }
@@ -36,7 +211,20 @@ impl fmt::Display for OrmError {
     }
 }
 
-impl std::error::Error for OrmError {}
+impl std::error::Error for OrmError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Self::Connection(context)
+            | Self::Compile(context)
+            | Self::Migration(context)
+            | Self::Mapping(context)
+            | Self::Execution(context)
+            | Self::Transaction(context)
+            | Self::Concurrency(context) => context.source(),
+            Self::Message(_) | Self::ConcurrencyConflict => None,
+        }
+    }
+}
 
 /// Quotes a SQL Server Unicode string literal as `N'...'`.
 ///
@@ -726,12 +914,13 @@ mod tests {
         CRATE_IDENTITY, Changeset, ColumnMetadata, ColumnValue, Entity, EntityColumn,
         EntityMetadata, EntityPolicy, EntityPolicyMetadata, ForeignKeyMetadata, FromRow,
         IdentityMetadata, IndexColumnMetadata, IndexMetadata, Insertable, NavigationKind,
-        NavigationMetadata, OrmError, PrimaryKeyMetadata, ReferentialAction, Row, SqlServerType,
-        SqlTypeMapping, SqlValue, column_name_exists, quote_sql_string_literal,
+        NavigationMetadata, OrmError, OrmErrorKind, PrimaryKeyMetadata, ReferentialAction, Row,
+        SqlServerType, SqlTypeMapping, SqlValue, column_name_exists, quote_sql_string_literal,
     };
     use chrono::{NaiveDate, NaiveDateTime};
     use rust_decimal::Decimal;
     use std::collections::BTreeMap;
+    use std::error::Error;
     use uuid::Uuid;
 
     const USER_COLUMNS: [ColumnMetadata; 4] = [
@@ -969,8 +1158,55 @@ mod tests {
     fn exposes_concurrency_conflict_error() {
         let error = OrmError::concurrency_conflict();
         assert_eq!(error, OrmError::ConcurrencyConflict);
+        assert_eq!(error.kind(), OrmErrorKind::Concurrency);
         assert_eq!(error.message(), "concurrency conflict");
         assert_eq!(error.to_string(), "concurrency conflict");
+    }
+
+    #[test]
+    fn exposes_structured_error_kinds_and_messages() {
+        let cases = [
+            (
+                OrmError::connection("connection failed"),
+                OrmErrorKind::Connection,
+            ),
+            (OrmError::compile("compile failed"), OrmErrorKind::Compile),
+            (
+                OrmError::migration("migration failed"),
+                OrmErrorKind::Migration,
+            ),
+            (OrmError::mapping("mapping failed"), OrmErrorKind::Mapping),
+            (
+                OrmError::execution("execution failed"),
+                OrmErrorKind::Execution,
+            ),
+            (
+                OrmError::transaction("transaction failed"),
+                OrmErrorKind::Transaction,
+            ),
+            (
+                OrmError::concurrency("concurrency failed"),
+                OrmErrorKind::Concurrency,
+            ),
+        ];
+
+        for (error, kind) in cases {
+            assert_eq!(error.kind(), kind);
+            assert!(error.message().ends_with("failed"));
+            assert_eq!(error.to_string(), error.message());
+        }
+    }
+
+    #[test]
+    fn structured_errors_preserve_sources() {
+        let error = OrmError::execution_with_source(
+            "query failed",
+            std::io::Error::new(std::io::ErrorKind::TimedOut, "driver timeout"),
+        );
+
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
+        assert_eq!(error.message(), "query failed");
+        assert_eq!(error.source().unwrap().to_string(), "driver timeout");
     }
 
     #[test]

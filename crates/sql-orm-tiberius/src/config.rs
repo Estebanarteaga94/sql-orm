@@ -34,11 +34,11 @@ impl MssqlConnectionConfig {
         options: MssqlOperationalOptions,
     ) -> Result<Self, OrmError> {
         if connection_string.trim().is_empty() {
-            return Err(OrmError::new("invalid SQL Server connection string"));
+            return Err(OrmError::connection("invalid SQL Server connection string"));
         }
 
         let inner = Config::from_ado_string(connection_string)
-            .map_err(|_| OrmError::new("invalid SQL Server connection string"))?;
+            .map_err(|_| OrmError::connection("invalid SQL Server connection string"))?;
         validate_config(&inner)?;
 
         Ok(Self {
@@ -377,7 +377,7 @@ fn validate_config(config: &Config) -> Result<(), OrmError> {
     let addr = config.get_addr();
 
     if addr.is_empty() || addr.starts_with(':') {
-        return Err(OrmError::new("invalid SQL Server connection string"));
+        return Err(OrmError::connection("invalid SQL Server connection string"));
     }
 
     Ok(())
