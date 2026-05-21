@@ -395,7 +395,7 @@ impl SharedConnection {
         Fut: Future<Output = Result<T, OrmError>>,
     {
         if self.is_transaction_active() {
-            return Err(OrmError::new(
+            return Err(OrmError::transaction(
                 "nested db.transaction calls are not supported; use the transaction context passed to the active transaction",
             ));
         }
@@ -550,13 +550,10 @@ impl SharedConnection {
     }
 
     fn ensure_can_use_active_transaction_scope(&self) -> Result<(), OrmError> {
-        if transaction_scope_allows_lock(self.active_transaction_scope(), self.transaction_scope) {
-            Ok(())
-        } else {
-            Err(OrmError::new(
-                "a transaction is active on this shared connection; use the transaction context passed to db.transaction(...)",
-            ))
-        }
+        ensure_transaction_scope_allows_lock(
+            self.active_transaction_scope(),
+            self.transaction_scope,
+        )
     }
 
     fn enter_transaction_scope(&self, scope: usize) {
@@ -586,7 +583,7 @@ impl SharedConnection {
     ) -> Result<(), OrmError> {
         let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
         if pinned_connection.is_some() {
-            return Err(OrmError::new(
+            return Err(OrmError::transaction(
                 "a pooled transaction connection is already pinned",
             ));
         }
@@ -604,9 +601,9 @@ impl SharedConnection {
     #[cfg(feature = "pool-bb8")]
     async fn disable_pinned_pool_retry(&self) -> Result<MssqlRetryOptions, OrmError> {
         let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
-        let connection = pinned_connection
-            .as_mut()
-            .ok_or_else(|| OrmError::new("pinned pooled transaction connection is missing"))?;
+        let connection = pinned_connection.as_mut().ok_or_else(|| {
+            OrmError::transaction("pinned pooled transaction connection is missing")
+        })?;
 
         Ok(connection.replace_retry_options(MssqlRetryOptions::disabled()))
     }
@@ -617,9 +614,9 @@ impl SharedConnection {
         retry_options: MssqlRetryOptions,
     ) -> Result<(), OrmError> {
         let mut pinned_connection = self.runtime.pinned_pool_connection.lock().await;
-        let connection = pinned_connection
-            .as_mut()
-            .ok_or_else(|| OrmError::new("pinned pooled transaction connection is missing"))?;
+        let connection = pinned_connection.as_mut().ok_or_else(|| {
+            OrmError::transaction("pinned pooled transaction connection is missing")
+        })?;
 
         connection.replace_retry_options(retry_options);
         Ok(())
@@ -634,7 +631,7 @@ impl SharedConnection {
         let restore_result = if plan.restore_retry {
             match retry_options {
                 Some(retry_options) => self.restore_pinned_pool_retry(retry_options).await,
-                None => Err(OrmError::new(
+                None => Err(OrmError::transaction(
                     "missing retry options for pooled transaction cleanup",
                 )),
             }
@@ -680,6 +677,19 @@ impl SharedConnection {
 
 fn transaction_scope_allows_lock(active_scope: Option<usize>, handle_scope: Option<usize>) -> bool {
     active_scope.is_none() || active_scope == handle_scope
+}
+
+fn ensure_transaction_scope_allows_lock(
+    active_scope: Option<usize>,
+    handle_scope: Option<usize>,
+) -> Result<(), OrmError> {
+    if transaction_scope_allows_lock(active_scope, handle_scope) {
+        Ok(())
+    } else {
+        Err(OrmError::transaction(
+            "a transaction is active on this shared connection; use the transaction context passed to db.transaction(...)",
+        ))
+    }
 }
 
 fn ensure_transactions_supported(kind: SharedConnectionKind) -> Result<(), OrmError> {
@@ -3343,6 +3353,17 @@ mod tests {
         assert!(super::transaction_scope_allows_lock(Some(7), Some(7)));
         assert!(!super::transaction_scope_allows_lock(Some(7), None));
         assert!(!super::transaction_scope_allows_lock(Some(7), Some(8)));
+    }
+
+    #[test]
+    fn active_transaction_scope_rejection_is_transaction_error() {
+        let error = super::ensure_transaction_scope_allows_lock(Some(7), None).unwrap_err();
+
+        assert_eq!(error.kind(), sql_orm_core::OrmErrorKind::Transaction);
+        assert_eq!(
+            error.message(),
+            "a transaction is active on this shared connection; use the transaction context passed to db.transaction(...)"
+        );
     }
 
     #[test]
