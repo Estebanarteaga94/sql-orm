@@ -180,7 +180,7 @@ impl<E: Entity> DbSetQuery<E> {
     ) -> Result<DbSetQueryIncludeOne<E, J>, OrmError> {
         let metadata = E::metadata();
         let navigation_metadata = metadata.navigation(navigation).ok_or_else(|| {
-            OrmError::new(format!(
+            OrmError::compile(format!(
                 "entity `{}` does not declare navigation `{}`",
                 metadata.rust_name, navigation
             ))
@@ -190,7 +190,7 @@ impl<E: Entity> DbSetQuery<E> {
             navigation_metadata.kind,
             NavigationKind::BelongsTo | NavigationKind::HasOne
         ) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "include only supports belongs_to and has_one navigations; `{}` is {:?}",
                 navigation_metadata.rust_field, navigation_metadata.kind
             )));
@@ -226,14 +226,14 @@ impl<E: Entity> DbSetQuery<E> {
     ) -> Result<DbSetQueryIncludeMany<E, J>, OrmError> {
         let metadata = E::metadata();
         let navigation_metadata = metadata.navigation(navigation).ok_or_else(|| {
-            OrmError::new(format!(
+            OrmError::compile(format!(
                 "entity `{}` does not declare navigation `{}`",
                 metadata.rust_name, navigation
             ))
         })?;
 
         if !matches!(navigation_metadata.kind, NavigationKind::HasMany) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "include_many only supports has_many navigations; `{}` is {:?}",
                 navigation_metadata.rust_field, navigation_metadata.kind
             )));
@@ -298,7 +298,7 @@ impl<E: Entity> DbSetQuery<E> {
     {
         let group_by = group_by.into_group_by_expressions();
         if group_by.is_empty() {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "group_by requires at least one group key expression",
             ));
         }
@@ -406,7 +406,7 @@ impl<E: Entity> DbSetQuery<E> {
         let row = connection.fetch_one::<CountRow>(compiled).await?;
 
         row.map(|row| row.value)
-            .ok_or_else(|| OrmError::new("count query did not return a row"))
+            .ok_or_else(|| OrmError::mapping("count query did not return a row"))
     }
 
     /// Executes the query as an `EXISTS` predicate over the effective filters.
@@ -420,7 +420,7 @@ impl<E: Entity> DbSetQuery<E> {
         let row = connection.fetch_one::<ExistsRow>(compiled).await?;
 
         row.map(|row| row.value)
-            .ok_or_else(|| OrmError::new("exists query did not return a row"))
+            .ok_or_else(|| OrmError::mapping("exists query did not return a row"))
     }
 
     /// Alias for `exists()`.
@@ -482,7 +482,7 @@ impl<E: Entity> DbSetQuery<E> {
             .await?;
 
         row.map(|row| row.value)
-            .ok_or_else(|| OrmError::new("scalar aggregate query did not return a row"))
+            .ok_or_else(|| OrmError::mapping("scalar aggregate query did not return a row"))
     }
 
     fn exists_query(&self) -> Result<ExistsQuery, OrmError>
@@ -539,10 +539,9 @@ impl<E: Entity> DbSetQuery<E> {
     }
 
     fn require_connection(&self) -> Result<SharedConnection, OrmError> {
-        self.connection
-            .as_ref()
-            .cloned()
-            .ok_or_else(|| OrmError::new("DbSetQuery requires an initialized shared connection"))
+        self.connection.as_ref().cloned().ok_or_else(|| {
+            OrmError::execution("DbSetQuery requires an initialized shared connection")
+        })
     }
 
     fn try_join_navigation<J: Entity>(
@@ -565,7 +564,7 @@ impl<E: Entity> DbSetQuery<E> {
         let root_metadata = E::metadata();
         let target_metadata = J::metadata();
         let navigation = root_metadata.navigation(navigation).ok_or_else(|| {
-            OrmError::new(format!(
+            OrmError::compile(format!(
                 "entity `{}` does not declare navigation `{}`",
                 root_metadata.rust_name, navigation
             ))
@@ -574,7 +573,7 @@ impl<E: Entity> DbSetQuery<E> {
         if navigation.target_schema != target_metadata.schema
             || navigation.target_table != target_metadata.table
         {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "navigation `{}` on `{}` targets `{}.{}`, not entity `{}` (`{}.{}`)",
                 navigation.rust_field,
                 root_metadata.rust_name,
@@ -589,7 +588,7 @@ impl<E: Entity> DbSetQuery<E> {
         if navigation.local_columns.is_empty()
             || navigation.local_columns.len() != navigation.target_columns.len()
         {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "navigation `{}` on `{}` has invalid join column metadata",
                 navigation.rust_field, root_metadata.rust_name
             )));
@@ -841,7 +840,7 @@ impl<E: Entity> DbSetGroupedQuery<E> {
 
     fn require_connection(&self) -> Result<SharedConnection, OrmError> {
         self.connection.as_ref().cloned().ok_or_else(|| {
-            OrmError::new("DbSetGroupedQuery requires an initialized shared connection")
+            OrmError::execution("DbSetGroupedQuery requires an initialized shared connection")
         })
     }
 }
@@ -850,7 +849,7 @@ fn validate_aggregate_projection_aliases(
     projection: &[AggregateProjection],
 ) -> Result<(), OrmError> {
     if projection.is_empty() {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "select_aggregate requires at least one aggregate projection",
         ));
     }
@@ -858,10 +857,12 @@ fn validate_aggregate_projection_aliases(
     let mut aliases = BTreeSet::new();
     for projection in projection {
         if projection.alias.trim().is_empty() {
-            return Err(OrmError::new("aggregate projection alias cannot be empty"));
+            return Err(OrmError::compile(
+                "aggregate projection alias cannot be empty",
+            ));
         }
         if !aliases.insert(projection.alias) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "aggregate projection alias `{}` is duplicated",
                 projection.alias
             )));
@@ -1123,7 +1124,7 @@ impl<E: Entity, J: Entity> DbSetQueryIncludeMany<E, J> {
         J: Clone + FromRow + Send + SoftDeleteEntity + Sync + TenantScopedEntity + 'static,
     {
         if self.strategy == CollectionIncludeStrategy::SplitQuery {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "include_many split-query loading is not implemented yet; use join_strategy() with an explicit max_joined_rows(...) limit",
             ));
         }
@@ -1160,7 +1161,7 @@ impl<E: Entity, J: Entity> DbSetQueryIncludeMany<E, J> {
     {
         let query = self.query.effective_select_query()?;
         if query.pagination.is_some() {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "include_many does not support pagination in the join-based collection loading cut",
             ));
         }
@@ -1183,25 +1184,25 @@ fn tenant_predicate_for<E: TenantScopedEntity>(
     };
 
     if policy.columns.len() != 1 {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "tenant query filter requires exactly one tenant policy column",
         ));
     }
 
     let tenant_column = &policy.columns[0];
     let active_tenant = active_tenant.ok_or_else(|| {
-        OrmError::new("tenant-scoped query requires an active tenant in the DbContext")
+        OrmError::execution("tenant-scoped query requires an active tenant in the DbContext")
     })?;
 
     if active_tenant.column_name != tenant_column.column_name {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "active tenant column `{}` does not match entity tenant column `{}`",
             active_tenant.column_name, tenant_column.column_name
         )));
     }
 
     if !tenant_value_matches_column_type(&active_tenant.value, tenant_column) {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "active tenant value is not compatible with entity tenant column `{}`",
             tenant_column.column_name
         )));
@@ -1232,7 +1233,7 @@ fn soft_delete_visibility_predicate_for<E: SoftDeleteEntity>(
     };
 
     let indicator = policy.columns.first().ok_or_else(|| {
-        OrmError::new("soft_delete query visibility requires at least one policy column")
+        OrmError::compile("soft_delete query visibility requires at least one policy column")
     })?;
     let column = Expr::Column(ColumnRef::new(
         table,
@@ -1260,7 +1261,7 @@ fn soft_delete_visibility_predicate_for<E: SoftDeleteEntity>(
         }));
     }
 
-    Err(OrmError::new(
+    Err(OrmError::compile(
         "soft_delete query visibility requires the first policy column to be nullable or bit",
     ))
 }
@@ -1292,7 +1293,7 @@ fn apply_include_policy_filters<J: Entity + SoftDeleteEntity + TenantScopedEntit
         .iter_mut()
         .find(|join| join.table == target_table)
         .ok_or_else(|| {
-            OrmError::new(format!(
+            OrmError::compile(format!(
                 "include join for entity `{}` with alias `{}` was not found",
                 J::metadata().rust_name,
                 alias
@@ -1425,7 +1426,7 @@ fn prefixed_primary_key_value<J: Entity>(
 fn root_primary_key_values<E: Entity>(row: &impl Row) -> Result<Vec<SqlValue>, OrmError> {
     let metadata = E::metadata();
     if metadata.primary_key.columns.is_empty() {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "include_many requires entity `{}` to declare a primary key for row grouping",
             metadata.rust_name
         )));
@@ -1517,7 +1518,7 @@ fn enforce_include_many_join_row_limit(
     };
 
     if row_count > limit {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "include_many join produced {row_count} rows, exceeding the configured limit of {limit}; use max_joined_rows(...), unbounded_join(), or wait for split-query collection loading"
         )));
     }
@@ -1555,7 +1556,7 @@ fn metadata_column_expr(
     column_name: &str,
 ) -> Result<Expr, OrmError> {
     let column = metadata.column(column_name).ok_or_else(|| {
-        OrmError::new(format!(
+        OrmError::compile(format!(
             "entity `{}` metadata does not contain column `{}` required by navigation join",
             metadata.rust_name, column_name
         ))
@@ -1613,7 +1614,7 @@ impl FromRow for CountRow {
                 value: i64::from(value),
             }),
             SqlValue::I64(value) => Ok(Self { value }),
-            _ => Err(OrmError::new(
+            _ => Err(OrmError::mapping(
                 "expected SQL Server COUNT result as i32 or i64",
             )),
         }
@@ -1645,7 +1646,7 @@ where
     fn from_row<R: Row>(row: &R) -> Result<Self, OrmError> {
         let value = row
             .try_get("value")?
-            .ok_or_else(|| OrmError::new("scalar aggregate result column was not present"))?;
+            .ok_or_else(|| OrmError::mapping("scalar aggregate result column was not present"))?;
 
         if value.is_null() {
             return Ok(Self { value: None });
@@ -1674,8 +1675,8 @@ mod tests {
     use rust_decimal::Decimal;
     use sql_orm_core::{
         ColumnMetadata, Entity, EntityColumn, EntityMetadata, EntityPolicyMetadata, FromRow,
-        NavigationKind, NavigationMetadata, OrmError, PrimaryKeyMetadata, Row, SqlServerType,
-        SqlValue,
+        NavigationKind, NavigationMetadata, OrmError, OrmErrorKind, PrimaryKeyMetadata, Row,
+        SqlServerType, SqlValue,
     };
     use sql_orm_query::{
         AggregateExpr, AggregateOrderBy, AggregatePredicate, AggregateProjection, ColumnRef,
@@ -1891,7 +1892,7 @@ mod tests {
     fn required_i64<R: Row>(row: &R, column: &str) -> Result<i64, OrmError> {
         match row.get_required(column)? {
             SqlValue::I64(value) => Ok(value),
-            value => Err(OrmError::new(format!(
+            value => Err(OrmError::mapping(format!(
                 "expected `{column}` as i64, got {value:?}"
             ))),
         }
@@ -2362,6 +2363,7 @@ mod tests {
             error.message(),
             "DbSetQuery requires an initialized shared connection"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 
     #[tokio::test]
@@ -3290,6 +3292,7 @@ mod tests {
             error.message(),
             "expected SQL Server COUNT result as i32 or i64"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Mapping);
     }
 
     #[test]
@@ -3600,6 +3603,7 @@ mod tests {
             error.message(),
             "group_by requires at least one group key expression"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -3616,6 +3620,7 @@ mod tests {
             empty_error.message(),
             "aggregate projection alias cannot be empty"
         );
+        assert_eq!(empty_error.kind(), OrmErrorKind::Compile);
 
         let grouped = DbSet::<TestEntity>::disconnected()
             .query()
