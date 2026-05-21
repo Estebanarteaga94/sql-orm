@@ -1060,7 +1060,7 @@ impl<E: Entity> DbSet<E> {
                 .await?;
 
             if !deleted {
-                return Err(OrmError::new(
+                return Err(OrmError::concurrency(
                     "save_changes could not delete a tracked entity for the current primary key",
                 ));
             }
@@ -1112,7 +1112,7 @@ impl<E: Entity> DbSet<E> {
                 .update_entity_by_sql_value(key, &current, current.concurrency_token()?)
                 .await?
                 .ok_or_else(|| {
-                    OrmError::new(
+                    OrmError::concurrency(
                         "save_changes could not update a tracked entity for the current primary key",
                     )
                 })?;
@@ -1138,7 +1138,7 @@ impl<E: Entity> DbSet<E> {
         let mut connection = shared_connection.lock().await?;
         let inserted = connection.fetch_one(compiled).await?;
 
-        inserted.ok_or_else(|| OrmError::new("insert query did not return a row"))
+        inserted.ok_or_else(|| OrmError::mapping("insert query did not return a row"))
     }
 
     /// Updates one row by single-column primary key and materializes the
@@ -1258,7 +1258,7 @@ impl<E: Entity> DbSet<E> {
         let mut connection = shared_connection.lock().await?;
         let inserted = connection.fetch_one(compiled).await?;
 
-        inserted.ok_or_else(|| OrmError::new("insert query did not return a row"))
+        inserted.ok_or_else(|| OrmError::mapping("insert query did not return a row"))
     }
 
     pub(crate) async fn insert_entity(&self, entity: &E) -> Result<E, OrmError>
@@ -1400,7 +1400,7 @@ impl<E: Entity> DbSet<E> {
         self.connection
             .as_ref()
             .cloned()
-            .ok_or_else(|| OrmError::new("DbSet requires an initialized shared connection"))
+            .ok_or_else(|| OrmError::execution("DbSet requires an initialized shared connection"))
     }
 
     fn active_tenant(&self) -> Option<ActiveTenant> {
@@ -1419,7 +1419,7 @@ impl<E: Entity> DbSet<E> {
         J: Entity,
     {
         let navigation_metadata = E::metadata().navigation(navigation).ok_or_else(|| {
-            OrmError::new(format!(
+            OrmError::compile(format!(
                 "entity `{}` does not declare navigation `{}`",
                 E::metadata().rust_name,
                 navigation
@@ -1427,7 +1427,7 @@ impl<E: Entity> DbSet<E> {
         })?;
 
         if navigation_metadata.kind != NavigationKind::HasMany {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "explicit collection loading only supports has_many navigations; `{}` is {:?}",
                 navigation_metadata.rust_field, navigation_metadata.kind
             )));
@@ -1436,7 +1436,7 @@ impl<E: Entity> DbSet<E> {
         if navigation_metadata.local_columns.len() != 1
             || navigation_metadata.target_columns.len() != 1
         {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "explicit collection loading currently supports only single-column navigation joins",
             ));
         }
@@ -1445,7 +1445,7 @@ impl<E: Entity> DbSet<E> {
         if root_primary_key.len() != 1
             || root_primary_key[0] != navigation_metadata.local_columns[0]
         {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "explicit collection loading requires the has_many local column to be the root entity single-column primary key",
             ));
         }
@@ -1454,7 +1454,7 @@ impl<E: Entity> DbSet<E> {
         if navigation_metadata.target_schema != target_metadata.schema
             || navigation_metadata.target_table != target_metadata.table
         {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "navigation `{}` on `{}` targets `{}.{}`, not entity `{}` (`{}.{}`)",
                 navigation_metadata.rust_field,
                 E::metadata().rust_name,
@@ -1469,7 +1469,7 @@ impl<E: Entity> DbSet<E> {
         let target_column = target_metadata
             .column(navigation_metadata.target_columns[0])
             .ok_or_else(|| {
-                OrmError::new(format!(
+                OrmError::compile(format!(
                     "entity `{}` metadata does not contain column `{}` required by explicit collection loading",
                     target_metadata.rust_name, navigation_metadata.target_columns[0]
                 ))
@@ -1580,25 +1580,25 @@ impl<E: Entity> DbSet<E> {
         };
 
         if policy.columns.len() != 1 {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "tenant insert requires exactly one tenant policy column",
             ));
         }
 
         let tenant_column = &policy.columns[0];
         let active_tenant = active_tenant.ok_or_else(|| {
-            OrmError::new("tenant-scoped insert requires an active tenant in the DbContext")
+            OrmError::execution("tenant-scoped insert requires an active tenant in the DbContext")
         })?;
 
         if active_tenant.column_name != tenant_column.column_name {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "active tenant column `{}` does not match entity tenant column `{}`",
                 active_tenant.column_name, tenant_column.column_name
             )));
         }
 
         if !tenant_value_matches_column_type(&active_tenant.value, tenant_column) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "active tenant value is not compatible with entity tenant column `{}`",
                 tenant_column.column_name
             )));
@@ -1608,7 +1608,7 @@ impl<E: Entity> DbSet<E> {
         for (index, value) in values.iter().enumerate() {
             if value.column_name == tenant_column.column_name {
                 if tenant_value_position.is_some() {
-                    return Err(OrmError::new(format!(
+                    return Err(OrmError::compile(format!(
                         "tenant-scoped insert contains duplicate tenant column `{}`",
                         tenant_column.column_name
                     )));
@@ -1620,7 +1620,7 @@ impl<E: Entity> DbSet<E> {
 
         if let Some(index) = tenant_value_position {
             if values[index].value != active_tenant.value {
-                return Err(OrmError::new(format!(
+                return Err(OrmError::compile(format!(
                     "tenant-scoped insert value for column `{}` does not match the active tenant",
                     tenant_column.column_name
                 )));
@@ -1834,7 +1834,7 @@ impl<E: Entity> DbSet<E> {
             )?;
 
             if changes.is_empty() {
-                return Err(OrmError::new(
+                return Err(OrmError::compile(
                     "soft_delete delete requires at least one runtime change",
                 ));
             }
@@ -1866,25 +1866,25 @@ impl<E: Entity> DbSet<E> {
         };
 
         if policy.columns.len() != 1 {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "tenant write filter requires exactly one tenant policy column",
             ));
         }
 
         let tenant_column = &policy.columns[0];
         let active_tenant = active_tenant.ok_or_else(|| {
-            OrmError::new("tenant-scoped write requires an active tenant in the DbContext")
+            OrmError::execution("tenant-scoped write requires an active tenant in the DbContext")
         })?;
 
         if active_tenant.column_name != tenant_column.column_name {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "active tenant column `{}` does not match entity tenant column `{}`",
                 active_tenant.column_name, tenant_column.column_name
             )));
         }
 
         if !tenant_value_matches_column_type(&active_tenant.value, tenant_column) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "active tenant value is not compatible with entity tenant column `{}`",
                 tenant_column.column_name
             )));
@@ -1912,7 +1912,7 @@ impl<E: Entity> DbSet<E> {
         let primary_key = metadata.primary_key_columns();
 
         if primary_key.len() != 1 {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "DbSet currently supports this operation only for entities with a single primary key column",
             ));
         }
@@ -1934,7 +1934,7 @@ impl<E: Entity> DbSet<E> {
             return Ok(());
         }
 
-        Err(OrmError::new(
+        Err(OrmError::compile(
             "change tracking currently supports only entities with a single primary key column",
         ))
     }
@@ -1942,7 +1942,7 @@ impl<E: Entity> DbSet<E> {
     fn rowversion_predicate_value(&self, token: SqlValue) -> Result<Predicate, OrmError> {
         let metadata = E::metadata();
         let column = metadata.rowversion_column().ok_or_else(|| {
-            OrmError::new("DbSet concurrency checks require an entity rowversion column")
+            OrmError::compile("DbSet concurrency checks require an entity rowversion column")
         })?;
 
         Ok(Predicate::eq(
@@ -2024,7 +2024,7 @@ mod tests {
     use sql_orm_core::{
         ColumnMetadata, ColumnValue, Entity, EntityMetadata, EntityPolicyMetadata,
         ForeignKeyMetadata, FromRow, Insertable, NavigationKind, NavigationMetadata, OrmError,
-        PrimaryKeyMetadata, ReferentialAction, Row, SqlServerType, SqlValue,
+        OrmErrorKind, PrimaryKeyMetadata, ReferentialAction, Row, SqlServerType, SqlValue,
     };
     use sql_orm_migrate::{
         ColumnSnapshot, MigrationOperation, ModelSnapshot, SchemaSnapshot, TableSnapshot,
@@ -2845,7 +2845,7 @@ mod tests {
 
     impl EntityPrimaryKey for CompositeKeyEntity {
         fn primary_key_value(&self) -> Result<SqlValue, OrmError> {
-            Err(OrmError::new(
+            Err(OrmError::compile(
                 "change tracking currently supports only entities with a single primary key column",
             ))
         }
@@ -2853,7 +2853,7 @@ mod tests {
 
     impl EntityPersist for CompositeKeyEntity {
         fn persist_mode(&self) -> Result<EntityPersistMode, OrmError> {
-            Err(OrmError::new(
+            Err(OrmError::compile(
                 "change tracking currently supports only entities with a single primary key column",
             ))
         }
@@ -3081,7 +3081,7 @@ mod tests {
             values: Vec<ExplicitLoadChild>,
         ) -> Result<(), OrmError> {
             if navigation != "children" {
-                return Err(OrmError::new("unexpected navigation"));
+                return Err(OrmError::mapping("unexpected navigation"));
             }
 
             self.children_loaded = values.len();
@@ -3096,7 +3096,7 @@ mod tests {
             value: Option<SingleNavigationTarget>,
         ) -> Result<(), OrmError> {
             if navigation != "target" {
-                return Err(OrmError::new("unexpected navigation"));
+                return Err(OrmError::mapping("unexpected navigation"));
             }
 
             self.navigation_loaded = value.is_some();
@@ -3496,6 +3496,23 @@ mod tests {
             error.message(),
             "DbSet currently supports this operation only for entities with a single primary key column"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+    }
+
+    #[test]
+    fn dbset_require_connection_reports_execution_error() {
+        let dbset = DbSet::<TestEntity>::disconnected();
+
+        let error = match dbset.require_connection() {
+            Ok(_) => panic!("disconnected DbSet unexpectedly returned a connection"),
+            Err(error) => error,
+        };
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 
     #[test]
@@ -3655,6 +3672,7 @@ mod tests {
             error.message(),
             "change tracking currently supports only entities with a single primary key column"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -4375,6 +4393,7 @@ mod tests {
                 .message()
                 .contains("tenant-scoped insert requires an active tenant")
         );
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 
     #[test]
@@ -4509,6 +4528,7 @@ mod tests {
             error.message(),
             "DbSet currently supports this operation only for entities with a single primary key column"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -5049,9 +5069,10 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("soft_delete delete requires at least one runtime change")
+            error.message(),
+            "soft_delete delete requires at least one runtime change"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -5127,5 +5148,6 @@ mod tests {
             error.message(),
             "DbSet currently supports this operation only for entities with a single primary key column"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 }
