@@ -18,21 +18,19 @@ impl MssqlPool {
     }
 
     pub async fn acquire(&self) -> Result<MssqlPooledConnection<'_>, OrmError> {
-        let connection = self
-            .inner
-            .get()
-            .await
-            .map_err(|_| OrmError::new("failed to acquire SQL Server pooled connection"))?;
+        let connection =
+            self.inner.get().await.map_err(|_| {
+                OrmError::connection("failed to acquire SQL Server pooled connection")
+            })?;
 
         Ok(MssqlPooledConnection { inner: connection })
     }
 
     pub async fn acquire_owned(&self) -> Result<MssqlPooledConnection<'static>, OrmError> {
-        let connection = self
-            .inner
-            .get_owned()
-            .await
-            .map_err(|_| OrmError::new("failed to acquire SQL Server pooled connection"))?;
+        let connection =
+            self.inner.get_owned().await.map_err(|_| {
+                OrmError::connection("failed to acquire SQL Server pooled connection")
+            })?;
 
         Ok(MssqlPooledConnection { inner: connection })
     }
@@ -192,7 +190,7 @@ async fn build_pool(
     let inner = builder
         .build(manager)
         .await
-        .map_err(|_| OrmError::new("failed to create SQL Server connection pool"))?;
+        .map_err(|_| OrmError::connection("failed to create SQL Server connection pool"))?;
 
     Ok(MssqlPool {
         inner,

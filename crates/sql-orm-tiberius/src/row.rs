@@ -102,7 +102,7 @@ fn unsupported_column_type_error(column_type: ColumnType) -> Option<OrmError> {
         | ColumnType::DatetimeOffsetn
         | ColumnType::Xml
         | ColumnType::Udt
-        | ColumnType::SSVariant => Some(OrmError::new(
+        | ColumnType::SSVariant => Some(OrmError::mapping(
             "unsupported SQL Server column type in MssqlRow",
         )),
         _ => None,
@@ -179,7 +179,7 @@ fn read_intn(row: &Row, index: usize) -> Result<SqlValue, OrmError> {
 #[cfg(test)]
 mod tests {
     use super::{static_sql_value, unsupported_column_type_error};
-    use sql_orm_core::SqlValue;
+    use sql_orm_core::{OrmErrorKind, SqlValue};
     use tiberius::ColumnType;
 
     #[test]
@@ -196,6 +196,7 @@ mod tests {
                 error.message(),
                 "unsupported SQL Server column type in MssqlRow"
             );
+            assert_eq!(error.kind(), OrmErrorKind::Mapping);
         }
     }
 

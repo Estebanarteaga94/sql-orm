@@ -39,7 +39,7 @@ impl PreparedQuery {
         let expected = sql_parameter_plan(&self.sql)?;
 
         if expected != self.params.len() {
-            return Err(OrmError::new(
+            return Err(OrmError::compile(
                 "compiled query parameter count does not match SQL placeholders",
             ));
         }
@@ -179,11 +179,11 @@ fn sql_parameter_plan(sql: &str) -> Result<usize, OrmError> {
             }
 
             let parameter_index = sql[start..index].parse::<usize>().map_err(|_| {
-                OrmError::new("compiled query placeholder index is larger than supported")
+                OrmError::compile("compiled query placeholder index is larger than supported")
             })?;
 
             if parameter_index == 0 {
-                return Err(OrmError::new(
+                return Err(OrmError::compile(
                     "compiled query placeholders must start at @P1",
                 ));
             }
@@ -198,7 +198,7 @@ fn sql_parameter_plan(sql: &str) -> Result<usize, OrmError> {
     let max_index = placeholders.iter().next_back().copied().unwrap_or(0);
     for expected in 1..=max_index {
         if !placeholders.contains(&expected) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "compiled query placeholders must be continuous from @P1 to @P{}",
                 max_index
             )));
@@ -295,7 +295,7 @@ mod tests {
     use super::{BoundSqlValue, PreparedQuery};
     use chrono::NaiveDate;
     use rust_decimal::Decimal;
-    use sql_orm_core::{SqlServerType, SqlValue};
+    use sql_orm_core::{OrmErrorKind, SqlServerType, SqlValue};
     use sql_orm_query::CompiledQuery;
     use uuid::Uuid;
 
@@ -435,6 +435,23 @@ mod tests {
             error.message(),
             "compiled query parameter count does not match SQL placeholders"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+    }
+
+    #[test]
+    fn rejects_zero_based_placeholders_as_compile_errors() {
+        let prepared = PreparedQuery::from_compiled(CompiledQuery::new(
+            "SELECT @P0",
+            vec![SqlValue::Bool(true)],
+        ));
+
+        let error = prepared.validate_parameter_count().unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "compiled query placeholders must start at @P1"
+        );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]

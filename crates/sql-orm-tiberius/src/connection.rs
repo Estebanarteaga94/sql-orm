@@ -188,10 +188,10 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> MssqlConnection<S> {
 
         match row {
             Some(HealthCheckRow { value: 1 }) => Ok(()),
-            Some(_) => Err(OrmError::new(
+            Some(_) => Err(OrmError::connection(
                 "SQL Server health check returned an unexpected value",
             )),
-            None => Err(OrmError::new(
+            None => Err(OrmError::connection(
                 "SQL Server health check did not return a row",
             )),
         }
@@ -238,8 +238,16 @@ where
     match duration {
         Some(duration) => timeout(duration, future)
             .await
-            .map_err(|_| OrmError::new(timeout_message))?,
+            .map_err(|_| timeout_error(timeout_message))?,
         None => future.await,
+    }
+}
+
+fn timeout_error(message: &'static str) -> OrmError {
+    if message.contains("connection") || message.contains("health check") {
+        OrmError::connection(message)
+    } else {
+        OrmError::execution(message)
     }
 }
 
@@ -247,6 +255,7 @@ where
 mod tests {
     use super::{build_health_check_query, resolve_health_timeout, run_with_timeout};
     use crate::config::{MssqlHealthCheckOptions, MssqlHealthCheckQuery};
+    use sql_orm_core::OrmErrorKind;
     use std::time::Duration;
 
     #[test]
@@ -306,5 +315,23 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(error.message(), "SQL Server connection timed out");
+        assert_eq!(error.kind(), OrmErrorKind::Connection);
+    }
+
+    #[tokio::test]
+    async fn run_with_timeout_classifies_query_timeout_as_execution() {
+        let error = run_with_timeout(
+            Some(Duration::from_millis(5)),
+            "SQL Server query timed out",
+            async {
+                tokio::time::sleep(Duration::from_millis(25)).await;
+                Ok::<_, sql_orm_core::OrmError>(())
+            },
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(error.message(), "SQL Server query timed out");
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 }

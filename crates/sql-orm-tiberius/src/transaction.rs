@@ -132,7 +132,9 @@ where
 
     async fn finish(&mut self, sql: &'static str) -> Result<(), OrmError> {
         if self.completed {
-            return Err(OrmError::new("transaction has already been completed"));
+            return Err(OrmError::transaction(
+                "transaction has already been completed",
+            ));
         }
 
         run_transaction_command(
