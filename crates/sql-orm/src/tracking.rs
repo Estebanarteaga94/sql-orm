@@ -359,7 +359,7 @@ impl<T> Tracked<T> {
         async move {
             match self.inner.state {
                 EntityState::Unchanged => Ok(()),
-                EntityState::Deleted => Err(OrmError::new(
+                EntityState::Deleted => Err(OrmError::compile(
                     "tracked deleted entities cannot be saved; detach them or persist deletion",
                 )),
                 EntityState::Added | EntityState::Modified => {
@@ -489,7 +489,7 @@ impl TrackingRegistry {
             }
 
             let Some(snapshots) = entry.snapshots.downcast_ref::<TrackingSnapshots<E>>() else {
-                return Err(OrmError::new(format!(
+                return Err(OrmError::mapping(format!(
                     "tracked entity `{}` has incompatible registry snapshots",
                     E::metadata().rust_name,
                 )));
@@ -705,14 +705,14 @@ impl TrackingRegistry {
             .entries
             .iter()
             .position(|entry| entry.registration_id == registration_id)
-            .ok_or_else(|| OrmError::new("tracked entity registration was not found"))?;
+            .ok_or_else(|| OrmError::execution("tracked entity registration was not found"))?;
 
         if state
             .entries
             .iter()
             .any(|entry| entry.registration_id != registration_id && entry.identity == identity)
         {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "entity `{}` with primary key value `{:?}` is already tracked in this context",
                 E::metadata().rust_name,
                 key
@@ -822,7 +822,7 @@ fn topological_entity_order(entities: &[&'static EntityMetadata]) -> Result<Vec<
     }
 
     if order.len() != entities.len() {
-        return Err(OrmError::new(
+        return Err(OrmError::compile(
             "save_changes cannot determine a deterministic order for tracked operations because the context contains a foreign-key cycle",
         ));
     }
@@ -948,7 +948,7 @@ impl<E: EntityPersist + Clone + Send + Sync + 'static> RegisteredTracked<E> {
 }
 
 fn duplicate_live_identity_error<E: Entity>(key: &SqlValue) -> OrmError {
-    OrmError::new(format!(
+    OrmError::compile(format!(
         "entity `{}` with primary key value `{:?}` already has a live tracked handle in this context; detach or drop the existing handle before loading it again",
         E::metadata().rust_name,
         key
@@ -1025,8 +1025,8 @@ mod tests {
     };
     use crate::{EntityPersist, EntityPersistMode};
     use sql_orm_core::{
-        ColumnValue, Entity, EntityMetadata, ForeignKeyMetadata, OrmError, PrimaryKeyMetadata,
-        ReferentialAction, SqlValue,
+        ColumnValue, Entity, EntityMetadata, ForeignKeyMetadata, OrmError, OrmErrorKind,
+        PrimaryKeyMetadata, ReferentialAction, SqlValue,
     };
     use std::sync::Arc;
 
@@ -1818,6 +1818,7 @@ mod tests {
             error.message(),
             "tracked entity `DummyEntity` has incompatible registry snapshots"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Mapping);
         assert_eq!(registry.entry_count(), 1);
         assert_eq!(reattached.state(), EntityState::Unchanged);
         assert_eq!(reattached.current().name, "fresh database value");
@@ -2014,6 +2015,7 @@ mod tests {
             error.message(),
             "entity `DummyEntity` with primary key value `I64(7)` already has a live tracked handle in this context; detach or drop the existing handle before loading it again"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -2035,6 +2037,7 @@ mod tests {
                 error.message(),
                 "entity `DummyEntity` with primary key value `I64(7)` already has a live tracked handle in this context; detach or drop the existing handle before loading it again"
             );
+            assert_eq!(error.kind(), OrmErrorKind::Compile);
             assert_eq!(duplicate.state(), EntityState::Unchanged);
             assert_eq!(registry.entry_count(), 1);
         }
@@ -2090,6 +2093,7 @@ mod tests {
             .unwrap_err();
 
         assert!(error.message().contains("live tracked handle"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -2109,6 +2113,7 @@ mod tests {
             .unwrap_err();
 
         assert!(error.message().contains("already tracked"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert_eq!(registry.entry_count(), 2);
 
         let mut duplicate = Tracked::from_loaded(DummyEntity);
@@ -2160,6 +2165,7 @@ mod tests {
             error.message(),
             "entity `DummyEntity` with primary key value `I64(11)` is already tracked in this context"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert_eq!(registry.entry_count(), 2);
 
         let mut reattached_existing = Tracked::from_loaded(SnapshotEntity {
@@ -2194,6 +2200,7 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.message(), "tracked entity registration was not found");
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
     }
 
     #[test]
@@ -2209,6 +2216,7 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.message(), "tracked entity registration was not found");
+        assert_eq!(error.kind(), OrmErrorKind::Execution);
         assert_eq!(registry.entry_count(), 1);
         assert_eq!(registry.registrations()[0].entry_id, 0);
     }
@@ -2351,5 +2359,6 @@ mod tests {
             save_changes_operation_plan(&[&CYCLE_A_METADATA, &CYCLE_B_METADATA]).unwrap_err();
 
         assert!(error.message().contains("foreign-key cycle"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 }
