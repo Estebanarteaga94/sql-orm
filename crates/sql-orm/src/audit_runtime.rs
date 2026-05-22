@@ -187,13 +187,13 @@ fn validate_audit_column_value(
 ) -> Result<(), OrmError> {
     match operation {
         AuditOperation::Insert if !column.insertable => {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "audit insert column `{}` is not insertable",
                 column.column_name
             )));
         }
         AuditOperation::Update if !column.updatable => {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "audit update column `{}` is not updatable",
                 column.column_name
             )));
@@ -202,7 +202,7 @@ fn validate_audit_column_value(
     }
 
     if value.is_null() && !column.nullable {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "audit column `{}` is not nullable",
             column.column_name
         )));
@@ -216,7 +216,7 @@ fn validate_no_duplicate_columns(label: &str, values: &[ColumnValue]) -> Result<
 
     for value in values {
         if !seen.insert(value.column_name) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "duplicate column `{}` in {label}",
                 value.column_name
             )));
@@ -247,7 +247,7 @@ mod tests {
     use crate::AuditEntity;
     use sql_orm_core::{
         ColumnMetadata, ColumnValue, Entity, EntityMetadata, EntityPolicyMetadata, OrmError,
-        PrimaryKeyMetadata, SqlServerType, SqlValue,
+        OrmErrorKind, PrimaryKeyMetadata, SqlServerType, SqlValue,
     };
 
     struct TestAuditedEntity;
@@ -434,9 +434,10 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("duplicate column `created_by` in audit values")
+            error.message(),
+            "duplicate column `created_by` in audit values"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -455,9 +456,10 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("audit insert column `created_at` is not insertable")
+            error.message(),
+            "audit insert column `created_at` is not insertable"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -473,10 +475,8 @@ mod tests {
         )
         .unwrap_err();
 
-        assert_eq!(
-            error,
-            OrmError::new("audit column `created_by` is not nullable")
-        );
+        assert_eq!(error.message(), "audit column `created_by` is not nullable");
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -527,9 +527,10 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("audit update column `created_at` is not updatable")
+            error.message(),
+            "audit update column `created_at` is not updatable"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -606,9 +607,10 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("duplicate column `created_at` in audit values")
+            error.message(),
+            "duplicate column `created_at` in audit values"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -621,9 +623,10 @@ mod tests {
         let error = resolve_audit_values(vec![], context(Some(&request_values)), None).unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("duplicate column `created_by` in audit request values")
+            error.message(),
+            "duplicate column `created_by` in audit request values"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -643,8 +646,9 @@ mod tests {
             resolve_audit_values(vec![], context(None), Some(&DuplicateProvider)).unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("duplicate column `updated_at` in audit provider values")
+            error.message(),
+            "duplicate column `updated_at` in audit provider values"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 }
