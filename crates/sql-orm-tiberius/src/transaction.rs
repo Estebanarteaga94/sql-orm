@@ -2,7 +2,8 @@ use crate::config::{MssqlSlowQueryOptions, MssqlTracingOptions};
 use crate::connection::run_with_timeout;
 use crate::error::{TiberiusErrorContext, map_tiberius_error};
 use crate::executor::{
-    ExecuteResult, execute_compiled, fetch_all_compiled, fetch_one_compiled, query_raw_compiled,
+    ExecuteResult, QueryExecutionOptions, execute_compiled, fetch_all_compiled, fetch_one_compiled,
+    query_raw_compiled,
 };
 use crate::telemetry::trace_transaction_command;
 use futures_io::{AsyncRead, AsyncWrite};
@@ -100,11 +101,13 @@ where
             fetch_one_compiled(
                 self.client,
                 query,
-                self.tracing_options,
-                self.slow_query_options,
-                crate::config::MssqlRetryOptions::disabled(),
-                &self.server_addr,
-                self.query_timeout,
+                QueryExecutionOptions {
+                    tracing: self.tracing_options,
+                    slow_query: self.slow_query_options,
+                    retry: crate::config::MssqlRetryOptions::disabled(),
+                    server_addr: &self.server_addr,
+                    timeout: self.query_timeout,
+                },
             )
             .await
         })
@@ -119,11 +122,13 @@ where
             fetch_all_compiled(
                 self.client,
                 query,
-                self.tracing_options,
-                self.slow_query_options,
-                crate::config::MssqlRetryOptions::disabled(),
-                &self.server_addr,
-                self.query_timeout,
+                QueryExecutionOptions {
+                    tracing: self.tracing_options,
+                    slow_query: self.slow_query_options,
+                    retry: crate::config::MssqlRetryOptions::disabled(),
+                    server_addr: &self.server_addr,
+                    timeout: self.query_timeout,
+                },
             )
             .await
         })

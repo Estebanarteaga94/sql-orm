@@ -1,6 +1,6 @@
 use crate::config::MssqlConnectionConfig;
 use crate::error::{TiberiusErrorContext, map_tiberius_error};
-use crate::executor::fetch_one_compiled;
+use crate::executor::{QueryExecutionOptions, fetch_one_compiled};
 use crate::telemetry::trace_connection;
 use crate::transaction::{
     MssqlTransaction, begin_transaction_scope, commit_transaction_scope, rollback_transaction_scope,
@@ -176,11 +176,13 @@ impl<S: AsyncRead + AsyncWrite + Unpin + Send> MssqlConnection<S> {
             fetch_one_compiled::<_, HealthCheckRow>(
                 self.client_mut(),
                 query,
-                tracing_options,
-                slow_query_options,
-                retry_options,
-                &server_addr,
-                health_timeout,
+                QueryExecutionOptions {
+                    tracing: tracing_options,
+                    slow_query: slow_query_options,
+                    retry: retry_options,
+                    server_addr: &server_addr,
+                    timeout: health_timeout,
+                },
             )
             .await
         })

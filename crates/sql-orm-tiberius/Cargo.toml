@@ -25,7 +25,7 @@ sql-orm-core.workspace = true
 sql-orm-query.workspace = true
 sql-orm-sqlserver.workspace = true
 rust_decimal = "1"
-tiberius = { version = "0.12.3", default-features = false, features = ["chrono", "rust_decimal", "rustls", "tds73", "tokio", "tokio-util"] }
+tiberius = { version = "0.12.3", default-features = false, features = ["chrono", "native-tls", "rust_decimal", "tds73", "tokio", "tokio-util"] }
 tokio = { version = "1", features = ["net", "time"] }
 tokio-util = { version = "0.7", features = ["compat"] }
 tracing = "0.1"

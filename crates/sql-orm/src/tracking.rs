@@ -340,6 +340,7 @@ impl<T> Tracked<T> {
     /// tracker with a stale original snapshot. `Unchanged` wrappers are a
     /// no-op, `Added` and `Modified` wrappers use the same persistence path as
     /// Active Record, and `Deleted` wrappers return an error.
+    #[allow(clippy::manual_async_fn)]
     pub fn save<C>(
         &mut self,
         db: &C,
@@ -388,6 +389,7 @@ impl<T> Tracked<T> {
     /// local insert without touching the database. Persisted wrappers delegate
     /// to Active Record delete and detach after the row is affected, so a later
     /// `save_changes()` will not issue a second delete for the same wrapper.
+    #[allow(clippy::manual_async_fn)]
     pub fn delete<C>(
         &mut self,
         db: &C,

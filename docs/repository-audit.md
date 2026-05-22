@@ -144,6 +144,19 @@ It should avoid presenting planned-only behavior as shipped. Claims about direct
 
 The public README can safely link to this audit and to `docs/core-concepts.md` once created, but should not duplicate the full inventory.
 
+## Dependency Audit
+
+The CI workflow installs `cargo-audit` and runs `cargo audit` against the workspace `Cargo.lock` before the normal formatting, check, test and clippy gates.
+
+`sql-orm-tiberius` uses Tiberius with `native-tls` in this audit cut. The previous `rustls` feature path pulled vulnerable `rustls-webpki` versions through `tiberius 0.12.3`.
+
+Local verification for dependency advisories can be reproduced with:
+
+```sh
+cargo install cargo-audit --locked
+cargo audit
+```
+
 ## Related Documents
 
 - Core concepts: [core-concepts.md](core-concepts.md)
