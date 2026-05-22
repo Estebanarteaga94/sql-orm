@@ -944,7 +944,7 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
         primary_key_value_expr.expect("single primary key must produce key extraction")
     } else {
         quote! {
-            Err(::sql_orm::core::OrmError::new(
+            Err(::sql_orm::core::OrmError::compile(
                 "ActiveRecord currently supports delete only for entities with a single primary key column",
             ))
         }
@@ -953,7 +953,7 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
         persist_mode_expr.expect("single primary key must produce save strategy")
     } else {
         quote! {
-            Err(::sql_orm::core::OrmError::new(
+            Err(::sql_orm::core::OrmError::compile(
                 "ActiveRecord currently supports save only for entities with a single primary key column",
             ))
         }
@@ -2777,7 +2777,7 @@ fn include_navigation_impls(
                     ) -> ::core::result::Result<(), ::sql_orm::core::OrmError> {
                         match navigation {
                             #(#arms,)*
-                            _ => Err(::sql_orm::core::OrmError::new(
+                            _ => Err(::sql_orm::core::OrmError::mapping(
                                 ::std::format!(
                                     "entity `{}` does not support include navigation `{}` for `{}`",
                                     <Self as ::sql_orm::core::Entity>::metadata().rust_name,
@@ -2849,7 +2849,7 @@ fn include_collection_impls(
                     ) -> ::core::result::Result<(), ::sql_orm::core::OrmError> {
                         match navigation {
                             #(#arms,)*
-                            _ => Err(::sql_orm::core::OrmError::new(
+                            _ => Err(::sql_orm::core::OrmError::mapping(
                                 ::std::format!(
                                     "entity `{}` does not support include collection `{}` for `{}`",
                                     <Self as ::sql_orm::core::Entity>::metadata().rust_name,

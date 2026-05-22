@@ -52,6 +52,45 @@ struct RuntimeNavigationDb {
     pub posts: DbSet<RuntimePost>,
 }
 
+#[test]
+fn generated_include_setters_classify_unknown_navigation_as_mapping_error() {
+    let mut user = RuntimeUser {
+        id: 1,
+        name: "Ana".to_string(),
+        profile: Navigation::empty(),
+        posts: Collection::empty(),
+    };
+
+    let profile_error =
+        <RuntimeUser as IncludeNavigation<RuntimeProfile>>::set_included_navigation(
+            &mut user, "missing", None,
+        )
+        .unwrap_err();
+    assert!(
+        profile_error
+            .message()
+            .contains("does not support include navigation")
+    );
+    assert_eq!(profile_error.kind(), sql_orm::core::OrmErrorKind::Mapping);
+
+    let collection_error =
+        <RuntimeUser as IncludeCollection<RuntimePost>>::set_included_collection(
+            &mut user,
+            "missing",
+            Vec::new(),
+        )
+        .unwrap_err();
+    assert!(
+        collection_error
+            .message()
+            .contains("does not support include collection")
+    );
+    assert_eq!(
+        collection_error.kind(),
+        sql_orm::core::OrmErrorKind::Mapping
+    );
+}
+
 #[tokio::test]
 async fn navigation_runtime_loads_graph_shapes_against_real_sql_server() -> Result<(), OrmError> {
     let Some(connection_string) = test_connection_string() else {

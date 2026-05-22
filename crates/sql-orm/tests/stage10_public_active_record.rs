@@ -49,6 +49,46 @@ struct VersionedActiveRecordDb {
     pub users: DbSet<VersionedActiveRecordUser>,
 }
 
+#[derive(Entity, Debug, Clone, PartialEq)]
+#[orm(table = "sql_orm_active_record_composite", schema = "dbo")]
+struct CompositeActiveRecordUser {
+    #[orm(primary_key)]
+    tenant_id: i64,
+    #[orm(primary_key)]
+    id: i64,
+    #[orm(length = 120)]
+    name: String,
+}
+
+#[test]
+fn active_record_generated_composite_primary_key_errors_are_compile_errors() {
+    let user = CompositeActiveRecordUser {
+        tenant_id: 10,
+        id: 20,
+        name: "Composite".to_string(),
+    };
+
+    let key_error =
+        <CompositeActiveRecordUser as sql_orm::EntityPrimaryKey>::primary_key_value(&user)
+            .unwrap_err();
+    assert_eq!(
+        key_error.message(),
+        "ActiveRecord currently supports delete only for entities with a single primary key column"
+    );
+    assert_eq!(key_error.kind(), sql_orm::core::OrmErrorKind::Compile);
+
+    let persist_error =
+        match <CompositeActiveRecordUser as sql_orm::EntityPersist>::persist_mode(&user) {
+            Ok(_) => panic!("composite primary key persist mode must fail"),
+            Err(error) => error,
+        };
+    assert_eq!(
+        persist_error.message(),
+        "ActiveRecord currently supports save only for entities with a single primary key column"
+    );
+    assert_eq!(persist_error.kind(), sql_orm::core::OrmErrorKind::Compile);
+}
+
 #[tokio::test]
 async fn public_active_record_query_roundtrips_against_real_sql_server() -> Result<(), OrmError> {
     let Some(connection_string) = test_connection_string() else {
