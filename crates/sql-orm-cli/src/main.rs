@@ -724,7 +724,9 @@ mod tests {
         CliCommand, DatabaseDowngradeOptions, DatabaseUpdateOptions, MigrationAddOptions,
         build_migration_plan, first_destructive_migration_operation, parse_command, run,
     };
-    use sql_orm_core::{FromRow, OrmError, Row, SqlServerType, quote_sql_string_literal};
+    use sql_orm_core::{
+        FromRow, OrmError, OrmErrorKind, Row, SqlServerType, quote_sql_string_literal,
+    };
     use sql_orm_migrate::{
         AlterColumn, ColumnSnapshot, DropColumn, DropTable, MigrationOperation, ModelSnapshot,
         SchemaSnapshot, TableSnapshot, read_model_snapshot,
@@ -772,6 +774,18 @@ mod tests {
             .unwrap()
             .as_nanos()
             .to_string()
+    }
+
+    fn cli_migration_error(error: impl Into<String>) -> OrmError {
+        OrmError::migration(error)
+    }
+
+    fn async_runtime_error(error: impl std::fmt::Display) -> OrmError {
+        OrmError::execution(format!("failed to create async runtime: {error}"))
+    }
+
+    fn missing_count_row_error() -> OrmError {
+        OrmError::mapping("count query did not return a row")
     }
 
     #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1776,11 +1790,10 @@ mod tests {
                 table,
                 &[&first_migration, &second_migration],
             )?;
-            return Err(OrmError::new(error));
+            return Err(cli_migration_error(error));
         }
 
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|error| OrmError::new(format!("failed to create async runtime: {error}")))?;
+        let runtime = tokio::runtime::Runtime::new().map_err(async_runtime_error)?;
         runtime.block_on(async {
             assert_eq!(
                 column_count(&connection_string, &schema, table, "description").await?,
@@ -1814,7 +1827,7 @@ mod tests {
                 table,
                 &[&first_migration, &second_migration],
             )?;
-            return Err(OrmError::new(error));
+            return Err(cli_migration_error(error));
         }
 
         let validation = runtime.block_on(async {
@@ -1850,8 +1863,7 @@ mod tests {
         table: &str,
         migration_ids: &[&str],
     ) -> Result<(), OrmError> {
-        let runtime = tokio::runtime::Runtime::new()
-            .map_err(|error| OrmError::new(format!("failed to create async runtime: {error}")))?;
+        let runtime = tokio::runtime::Runtime::new().map_err(async_runtime_error)?;
         runtime.block_on(async {
             let mut connection = MssqlConnection::connect(connection_string).await?;
             let table_object = quote_sql_string_literal(&format!("[{schema}].[{table}]"));
@@ -1955,7 +1967,25 @@ mod tests {
         let row = connection
             .fetch_one::<CountRow>(CompiledQuery::new(sql, vec![]))
             .await?
-            .ok_or_else(|| OrmError::new("count query did not return a row"))?;
+            .ok_or_else(missing_count_row_error)?;
         Ok(row.count)
+    }
+
+    #[test]
+    fn cli_test_error_wrappers_use_structured_kinds() {
+        let migration = cli_migration_error("database update failed");
+        assert_eq!(migration.kind(), OrmErrorKind::Migration);
+        assert_eq!(migration.message(), "database update failed");
+
+        let execution = async_runtime_error("runtime unavailable");
+        assert_eq!(execution.kind(), OrmErrorKind::Execution);
+        assert_eq!(
+            execution.message(),
+            "failed to create async runtime: runtime unavailable"
+        );
+
+        let mapping = missing_count_row_error();
+        assert_eq!(mapping.kind(), OrmErrorKind::Mapping);
+        assert_eq!(mapping.message(), "count query did not return a row");
     }
 }
