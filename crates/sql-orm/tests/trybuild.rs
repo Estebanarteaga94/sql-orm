@@ -3,6 +3,7 @@ fn entity_derive_ui() {
     let tests = trybuild::TestCases::new();
 
     tests.pass("tests/ui/entity_valid.rs");
+    tests.pass("tests/ui/entity_chrono_time_types_valid.rs");
     tests.pass("tests/ui/entity_unsafe_sql_fragments_valid.rs");
     tests.pass("tests/ui/entity_renamed_from_valid.rs");
     tests.pass("tests/ui/entity_table_renamed_from_valid.rs");

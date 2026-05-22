@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime};
 use core::sync::atomic::{AtomicU64, Ordering};
 use rust_decimal::Decimal;
 use sql_orm_core::{FromRow, OrmError, Row, SqlValue};
@@ -43,8 +43,10 @@ struct SupportedSqlTypes {
     numeric_value: SqlValue,
     uniqueidentifier_value: SqlValue,
     date_value: SqlValue,
+    time_value: SqlValue,
     datetime_value: SqlValue,
     datetime2_value: SqlValue,
+    datetimeoffset_value: SqlValue,
     smalldatetime_value: SqlValue,
     money_value: SqlValue,
     smallmoney_value: SqlValue,
@@ -74,8 +76,10 @@ impl FromRow for SupportedSqlTypes {
             numeric_value: row.get_required("numeric_value")?,
             uniqueidentifier_value: row.get_required("uniqueidentifier_value")?,
             date_value: row.get_required("date_value")?,
+            time_value: row.get_required("time_value")?,
             datetime_value: row.get_required("datetime_value")?,
             datetime2_value: row.get_required("datetime2_value")?,
+            datetimeoffset_value: row.get_required("datetimeoffset_value")?,
             smalldatetime_value: row.get_required("smalldatetime_value")?,
             money_value: row.get_required("money_value")?,
             smallmoney_value: row.get_required("smallmoney_value")?,
@@ -207,8 +211,10 @@ async fn sqlserver_adapter_maps_common_sql_server_column_types() -> Result<(), O
                 CAST(789.01 AS numeric(10, 2)) AS numeric_value,\
                 CAST('6F9619FF-8B86-D011-B42D-00C04FC964FF' AS uniqueidentifier) AS uniqueidentifier_value,\
                 CAST('2026-04-28' AS date) AS date_value,\
+                CAST('12:34:56.1234567' AS time) AS time_value,\
                 CAST('2026-04-28T12:34:56' AS datetime) AS datetime_value,\
                 CAST('2026-04-28T12:34:56.1234567' AS datetime2) AS datetime2_value,\
+                CAST('2026-04-28T12:34:56.1234567-05:00' AS datetimeoffset) AS datetimeoffset_value,\
                 CAST('2026-04-28T12:34:00' AS smalldatetime) AS smalldatetime_value,\
                 CAST(12.34 AS money) AS money_value,\
                 CAST(5.67 AS smallmoney) AS smallmoney_value,\
@@ -249,6 +255,10 @@ async fn sqlserver_adapter_maps_common_sql_server_column_types() -> Result<(), O
         SqlValue::Date(NaiveDate::from_ymd_opt(2026, 4, 28).unwrap())
     );
     assert_eq!(
+        row.time_value,
+        SqlValue::Time(NaiveTime::from_hms_nano_opt(12, 34, 56, 123_456_700).unwrap())
+    );
+    assert_eq!(
         row.datetime_value,
         SqlValue::DateTime(fixed_datetime(2026, 4, 28, 12, 34, 56))
     );
@@ -259,6 +269,12 @@ async fn sqlserver_adapter_maps_common_sql_server_column_types() -> Result<(), O
                 .unwrap()
                 .and_hms_nano_opt(12, 34, 56, 123_456_700)
                 .unwrap()
+        )
+    );
+    assert_eq!(
+        row.datetimeoffset_value,
+        SqlValue::DateTimeOffset(
+            DateTime::parse_from_rfc3339("2026-04-28T12:34:56.1234567-05:00").unwrap()
         )
     );
     assert_eq!(
@@ -279,40 +295,6 @@ async fn sqlserver_adapter_maps_common_sql_server_column_types() -> Result<(), O
     assert_eq!(row.null_money_value, SqlValue::Null);
 
     Ok(())
-}
-
-#[tokio::test]
-async fn sqlserver_adapter_rejects_unsupported_sql_server_column_types() -> Result<(), OrmError> {
-    let Some(connection_string) = test_connection_string() else {
-        eprintln!("skipping SQL Server integration test because {TEST_CONNECTION_ENV} is not set");
-        return Ok(());
-    };
-
-    let mut connection = MssqlConnection::connect(&connection_string).await?;
-    let error = connection
-        .fetch_one::<UnsupportedTimeValue>(CompiledQuery::new(
-            "SELECT CAST('12:34:56' AS time) AS time_value",
-            vec![],
-        ))
-        .await
-        .expect_err("time should remain unsupported until MssqlRow maps it explicitly");
-
-    assert_eq!(
-        error.message(),
-        "unsupported SQL Server column type in MssqlRow"
-    );
-
-    Ok(())
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct UnsupportedTimeValue;
-
-impl FromRow for UnsupportedTimeValue {
-    fn from_row<R: Row>(row: &R) -> Result<Self, OrmError> {
-        let _ = row.get_required("time_value")?;
-        Ok(Self)
-    }
 }
 
 #[tokio::test]

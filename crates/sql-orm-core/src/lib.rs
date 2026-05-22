@@ -1,6 +1,6 @@
 //! Core contracts and shared types for the ORM.
 
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use core::fmt;
 use core::marker::PhantomData;
 use rust_decimal::Decimal;
@@ -331,7 +331,9 @@ pub enum SqlValue {
     Uuid(Uuid),
     Decimal(Decimal),
     Date(NaiveDate),
+    Time(NaiveTime),
     DateTime(NaiveDateTime),
+    DateTimeOffset(DateTime<FixedOffset>),
 }
 
 impl SqlValue {
@@ -436,7 +438,9 @@ pub enum SqlServerType {
     Bit,
     UniqueIdentifier,
     Date,
+    Time,
     DateTime2,
+    DateTimeOffset,
     Decimal,
     Float,
     Money,
@@ -584,6 +588,21 @@ impl SqlTypeMapping for NaiveDate {
     }
 }
 
+impl SqlTypeMapping for NaiveTime {
+    const SQL_SERVER_TYPE: SqlServerType = SqlServerType::Time;
+
+    fn to_sql_value(self) -> SqlValue {
+        SqlValue::Time(self)
+    }
+
+    fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
+        match value {
+            SqlValue::Time(value) => Ok(value),
+            _ => Err(OrmError::mapping("expected time value")),
+        }
+    }
+}
+
 impl SqlTypeMapping for NaiveDateTime {
     const SQL_SERVER_TYPE: SqlServerType = SqlServerType::DateTime2;
 
@@ -595,6 +614,21 @@ impl SqlTypeMapping for NaiveDateTime {
         match value {
             SqlValue::DateTime(value) => Ok(value),
             _ => Err(OrmError::mapping("expected datetime value")),
+        }
+    }
+}
+
+impl SqlTypeMapping for DateTime<FixedOffset> {
+    const SQL_SERVER_TYPE: SqlServerType = SqlServerType::DateTimeOffset;
+
+    fn to_sql_value(self) -> SqlValue {
+        SqlValue::DateTimeOffset(self)
+    }
+
+    fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
+        match value {
+            SqlValue::DateTimeOffset(value) => Ok(value),
+            _ => Err(OrmError::mapping("expected datetimeoffset value")),
         }
     }
 }
@@ -917,7 +951,7 @@ mod tests {
         NavigationMetadata, OrmError, OrmErrorKind, PrimaryKeyMetadata, ReferentialAction, Row,
         SqlServerType, SqlTypeMapping, SqlValue, column_name_exists, quote_sql_string_literal,
     };
-    use chrono::{NaiveDate, NaiveDateTime};
+    use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
     use rust_decimal::Decimal;
     use std::collections::BTreeMap;
     use std::error::Error;
@@ -1476,7 +1510,12 @@ mod tests {
         assert_eq!(i32::SQL_SERVER_TYPE, SqlServerType::Int);
         assert_eq!(i64::SQL_SERVER_TYPE, SqlServerType::BigInt);
         assert_eq!(Uuid::SQL_SERVER_TYPE, SqlServerType::UniqueIdentifier);
+        assert_eq!(NaiveTime::SQL_SERVER_TYPE, SqlServerType::Time);
         assert_eq!(NaiveDateTime::SQL_SERVER_TYPE, SqlServerType::DateTime2);
+        assert_eq!(
+            DateTime::<FixedOffset>::SQL_SERVER_TYPE,
+            SqlServerType::DateTimeOffset
+        );
         assert_eq!(Decimal::SQL_SERVER_TYPE, SqlServerType::Decimal);
         assert_eq!(Decimal::DEFAULT_PRECISION, Some(18));
         assert_eq!(Decimal::DEFAULT_SCALE, Some(2));
@@ -1489,7 +1528,10 @@ mod tests {
     fn sql_type_mapping_roundtrips_supported_values() {
         let uuid = Uuid::nil();
         let date = NaiveDate::from_ymd_opt(2026, 4, 21).expect("valid date");
+        let time = NaiveTime::from_hms_nano_opt(14, 30, 5, 123_456_700).expect("valid time");
         let datetime = date.and_hms_opt(14, 30, 0).expect("valid datetime");
+        let datetimeoffset = DateTime::parse_from_rfc3339("2026-04-21T14:30:05.1234567-05:00")
+            .expect("valid datetimeoffset");
         let decimal = Decimal::new(12345, 2);
 
         assert_eq!(bool::from_sql_value(true.to_sql_value()), Ok(true));
@@ -1507,9 +1549,14 @@ mod tests {
         assert_eq!(Uuid::from_sql_value(uuid.to_sql_value()), Ok(uuid));
         assert_eq!(Decimal::from_sql_value(decimal.to_sql_value()), Ok(decimal));
         assert_eq!(NaiveDate::from_sql_value(date.to_sql_value()), Ok(date));
+        assert_eq!(NaiveTime::from_sql_value(time.to_sql_value()), Ok(time));
         assert_eq!(
             NaiveDateTime::from_sql_value(datetime.to_sql_value()),
             Ok(datetime)
+        );
+        assert_eq!(
+            DateTime::<FixedOffset>::from_sql_value(datetimeoffset.to_sql_value()),
+            Ok(datetimeoffset)
         );
         assert_eq!(
             Option::<i64>::None.to_sql_value(),

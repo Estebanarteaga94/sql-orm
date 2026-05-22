@@ -13,9 +13,9 @@ help: the trait `SqlTypeMapping` is not implemented for `Unsupported`
             Option<T>
             Vec<u8>
             bool
+            chrono::datetime::DateTime<chrono::offset::fixed::FixedOffset>
             chrono::naive::date::NaiveDate
             chrono::naive::datetime::NaiveDateTime
+            chrono::naive::time::NaiveTime
             f64
-            i32
-            i64
           and $N others

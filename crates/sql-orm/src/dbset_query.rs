@@ -1582,7 +1582,9 @@ pub(crate) fn tenant_value_matches_column_type(value: &SqlValue, column: &Column
         SqlServerType::Bit => matches!(value, SqlValue::Bool(_)),
         SqlServerType::UniqueIdentifier => matches!(value, SqlValue::Uuid(_)),
         SqlServerType::Date => matches!(value, SqlValue::Date(_)),
+        SqlServerType::Time => matches!(value, SqlValue::Time(_)),
         SqlServerType::DateTime2 => matches!(value, SqlValue::DateTime(_)),
+        SqlServerType::DateTimeOffset => matches!(value, SqlValue::DateTimeOffset(_)),
         SqlServerType::Decimal | SqlServerType::Money => matches!(value, SqlValue::Decimal(_)),
         SqlServerType::Float => matches!(value, SqlValue::F64(_)),
         SqlServerType::NVarChar | SqlServerType::Custom(_) => {

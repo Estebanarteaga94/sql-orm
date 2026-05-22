@@ -112,6 +112,15 @@ assert_eq!(metadata.table, "users");
 assert_eq!(email_column.column_name(), "email");
 ```
 
+Default Rust-to-SQL Server type conventions include `bool` -> `bit`, integer
+types -> SQL Server integer types, `String` -> `nvarchar(255)`, `Vec<u8>` ->
+`varbinary(max)`, `uuid::Uuid` -> `uniqueidentifier`,
+`rust_decimal::Decimal` -> `decimal(18, 2)`, `chrono::NaiveDate` -> `date`,
+`chrono::NaiveTime` -> `time`, `chrono::NaiveDateTime` -> `datetime2`, and
+`chrono::DateTime<chrono::FixedOffset>` -> `datetimeoffset`. `MssqlRow`
+materializes those SQL Server types back into the corresponding `SqlValue`
+variants before `FromRow` / `SqlTypeMapping` converts them into user structs.
+
 Navigation fields declared with `Navigation<T>`, `Collection<T>`,
 `LazyNavigation<T>` or `LazyCollection<T>` are not persisted columns.
 `#[derive(Entity)]` accepts `belongs_to`, `has_one` and `has_many` attributes,

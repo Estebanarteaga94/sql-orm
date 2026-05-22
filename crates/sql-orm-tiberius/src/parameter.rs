@@ -18,7 +18,9 @@ pub(crate) enum BoundSqlValue {
     Uuid(uuid::Uuid),
     Decimal(rust_decimal::Decimal),
     Date(chrono::NaiveDate),
+    Time(chrono::NaiveTime),
     DateTime(chrono::NaiveDateTime),
+    DateTimeOffset(chrono::DateTime<chrono::FixedOffset>),
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -115,7 +117,9 @@ impl From<SqlValue> for BoundSqlValue {
             SqlValue::Uuid(value) => Self::Uuid(value),
             SqlValue::Decimal(value) => Self::Decimal(value),
             SqlValue::Date(value) => Self::Date(value),
+            SqlValue::Time(value) => Self::Time(value),
             SqlValue::DateTime(value) => Self::DateTime(value),
+            SqlValue::DateTimeOffset(value) => Self::DateTimeOffset(value),
         }
     }
 }
@@ -136,7 +140,9 @@ fn bind_sql_value<'a>(query: &mut Query<'a>, value: &'a BoundSqlValue) {
             value.scale() as u8,
         )),
         BoundSqlValue::Date(value) => query.bind(*value),
+        BoundSqlValue::Time(value) => query.bind(*value),
         BoundSqlValue::DateTime(value) => query.bind(*value),
+        BoundSqlValue::DateTimeOffset(value) => query.bind(*value),
     }
 }
 
@@ -149,7 +155,11 @@ fn bind_typed_null<'a>(query: &mut Query<'a>, sql_type: SqlServerType) {
         SqlServerType::Bit => query.bind(Option::<bool>::None),
         SqlServerType::UniqueIdentifier => query.bind(Option::<uuid::Uuid>::None),
         SqlServerType::Date => query.bind(Option::<chrono::NaiveDate>::None),
+        SqlServerType::Time => query.bind(Option::<chrono::NaiveTime>::None),
         SqlServerType::DateTime2 => query.bind(Option::<chrono::NaiveDateTime>::None),
+        SqlServerType::DateTimeOffset => {
+            query.bind(Option::<chrono::DateTime<chrono::FixedOffset>>::None)
+        }
         SqlServerType::Decimal => query.bind(Option::<Numeric>::None),
         SqlServerType::Float => query.bind(Option::<f64>::None),
         SqlServerType::Money => query.bind(Option::<f64>::None),
@@ -293,7 +303,7 @@ fn skip_block_comment(bytes: &[u8], mut index: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::{BoundSqlValue, PreparedQuery};
-    use chrono::NaiveDate;
+    use chrono::{DateTime, NaiveDate, NaiveTime};
     use rust_decimal::Decimal;
     use sql_orm_core::{OrmErrorKind, SqlServerType, SqlValue};
     use sql_orm_query::CompiledQuery;
@@ -302,7 +312,7 @@ mod tests {
     #[test]
     fn prepares_query_preserving_sql_and_parameter_order() {
         let compiled = CompiledQuery::new(
-            "SELECT @P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10",
+            "SELECT @P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, @P11, @P12",
             vec![
                 SqlValue::Null,
                 SqlValue::Bool(true),
@@ -313,11 +323,15 @@ mod tests {
                 SqlValue::Bytes(vec![1, 2, 3]),
                 SqlValue::Uuid(Uuid::nil()),
                 SqlValue::Decimal(Decimal::new(1234, 2)),
+                SqlValue::Time(NaiveTime::from_hms_opt(12, 34, 56).unwrap()),
                 SqlValue::DateTime(
                     NaiveDate::from_ymd_opt(2026, 4, 23)
                         .unwrap()
                         .and_hms_opt(10, 20, 30)
                         .unwrap(),
+                ),
+                SqlValue::DateTimeOffset(
+                    DateTime::parse_from_rfc3339("2026-04-23T10:20:30-05:00").unwrap(),
                 ),
             ],
         );
@@ -326,7 +340,7 @@ mod tests {
 
         assert_eq!(
             prepared.sql,
-            "SELECT @P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10"
+            "SELECT @P1, @P2, @P3, @P4, @P5, @P6, @P7, @P8, @P9, @P10, @P11, @P12"
         );
         assert_eq!(
             prepared.params,
@@ -340,11 +354,15 @@ mod tests {
                 BoundSqlValue::Bytes(vec![1, 2, 3]),
                 BoundSqlValue::Uuid(Uuid::nil()),
                 BoundSqlValue::Decimal(Decimal::new(1234, 2)),
+                BoundSqlValue::Time(NaiveTime::from_hms_opt(12, 34, 56).unwrap()),
                 BoundSqlValue::DateTime(
                     NaiveDate::from_ymd_opt(2026, 4, 23)
                         .unwrap()
                         .and_hms_opt(10, 20, 30)
                         .unwrap(),
+                ),
+                BoundSqlValue::DateTimeOffset(
+                    DateTime::parse_from_rfc3339("2026-04-23T10:20:30-05:00").unwrap(),
                 ),
             ]
         );

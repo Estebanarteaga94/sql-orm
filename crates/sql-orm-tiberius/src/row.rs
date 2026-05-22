@@ -1,5 +1,5 @@
 use crate::error::{TiberiusErrorContext, map_tiberius_error};
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use rust_decimal::Decimal;
 use sql_orm_core::{OrmError, Row as OrmRow, SqlValue};
 use tiberius::{ColumnType, Row};
@@ -65,12 +65,16 @@ fn read_sql_value(row: &Row, index: usize, column_type: ColumnType) -> Result<Sq
             read_typed(row, index, |value: Decimal| SqlValue::Decimal(value))
         }
         ColumnType::Daten => read_typed(row, index, |value: NaiveDate| SqlValue::Date(value)),
+        ColumnType::Timen => read_typed(row, index, |value: NaiveTime| SqlValue::Time(value)),
         ColumnType::Datetime
         | ColumnType::Datetime4
         | ColumnType::Datetimen
         | ColumnType::Datetime2 => {
             read_typed(row, index, |value: NaiveDateTime| SqlValue::DateTime(value))
         }
+        ColumnType::DatetimeOffsetn => read_typed(row, index, |value: DateTime<FixedOffset>| {
+            SqlValue::DateTimeOffset(value)
+        }),
         ColumnType::BigVarChar
         | ColumnType::BigChar
         | ColumnType::NVarchar
@@ -78,12 +82,7 @@ fn read_sql_value(row: &Row, index: usize, column_type: ColumnType) -> Result<Sq
         | ColumnType::Text
         | ColumnType::NText => read_string(row, index),
         ColumnType::BigVarBin | ColumnType::BigBinary | ColumnType::Image => read_bytes(row, index),
-        ColumnType::Null
-        | ColumnType::Timen
-        | ColumnType::DatetimeOffsetn
-        | ColumnType::Xml
-        | ColumnType::Udt
-        | ColumnType::SSVariant => {
+        ColumnType::Null | ColumnType::Xml | ColumnType::Udt | ColumnType::SSVariant => {
             unreachable!("special-case column type should have returned early")
         }
     }
@@ -98,11 +97,7 @@ fn static_sql_value(column_type: ColumnType) -> Option<SqlValue> {
 
 fn unsupported_column_type_error(column_type: ColumnType) -> Option<OrmError> {
     match column_type {
-        ColumnType::Timen
-        | ColumnType::DatetimeOffsetn
-        | ColumnType::Xml
-        | ColumnType::Udt
-        | ColumnType::SSVariant => Some(OrmError::mapping(
+        ColumnType::Xml | ColumnType::Udt | ColumnType::SSVariant => Some(OrmError::mapping(
             "unsupported SQL Server column type in MssqlRow",
         )),
         _ => None,
@@ -184,13 +179,7 @@ mod tests {
 
     #[test]
     fn reports_unsupported_sql_server_column_types() {
-        for column_type in [
-            ColumnType::Timen,
-            ColumnType::DatetimeOffsetn,
-            ColumnType::Xml,
-            ColumnType::Udt,
-            ColumnType::SSVariant,
-        ] {
+        for column_type in [ColumnType::Xml, ColumnType::Udt, ColumnType::SSVariant] {
             let error = unsupported_column_type_error(column_type).unwrap();
             assert_eq!(
                 error.message(),

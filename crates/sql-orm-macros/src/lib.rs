@@ -2990,6 +2990,10 @@ fn infer_sql_type(type_info: &TypeInfo, rowversion: bool, ty: &Type) -> Result<T
         TypeKind::Uuid => quote! { ::sql_orm::core::SqlServerType::UniqueIdentifier },
         TypeKind::NaiveDateTime => quote! { ::sql_orm::core::SqlServerType::DateTime2 },
         TypeKind::NaiveDate => quote! { ::sql_orm::core::SqlServerType::Date },
+        TypeKind::NaiveTime => quote! { ::sql_orm::core::SqlServerType::Time },
+        TypeKind::DateTimeFixedOffset => {
+            quote! { ::sql_orm::core::SqlServerType::DateTimeOffset }
+        }
         TypeKind::Decimal => quote! { ::sql_orm::core::SqlServerType::Decimal },
         TypeKind::Float => quote! { ::sql_orm::core::SqlServerType::Float },
         TypeKind::Unknown => {
@@ -3027,10 +3031,14 @@ fn sql_type_from_string_with_custom(value: &LitStr, allow_custom: bool) -> Resul
         quote! { ::sql_orm::core::SqlServerType::Bit }
     } else if normalized.starts_with("uniqueidentifier") {
         quote! { ::sql_orm::core::SqlServerType::UniqueIdentifier }
-    } else if normalized.starts_with("date") && !normalized.starts_with("datetime2") {
-        quote! { ::sql_orm::core::SqlServerType::Date }
+    } else if normalized.starts_with("datetimeoffset") {
+        quote! { ::sql_orm::core::SqlServerType::DateTimeOffset }
     } else if normalized.starts_with("datetime2") {
         quote! { ::sql_orm::core::SqlServerType::DateTime2 }
+    } else if normalized.starts_with("date") {
+        quote! { ::sql_orm::core::SqlServerType::Date }
+    } else if normalized.starts_with("time") {
+        quote! { ::sql_orm::core::SqlServerType::Time }
     } else if normalized.starts_with("decimal") {
         quote! { ::sql_orm::core::SqlServerType::Decimal }
     } else if normalized.starts_with("float") {
@@ -3094,6 +3102,10 @@ fn classify_type(ty: &Type) -> Result<TypeKind> {
                 "Uuid" => TypeKind::Uuid,
                 "NaiveDateTime" => TypeKind::NaiveDateTime,
                 "NaiveDate" => TypeKind::NaiveDate,
+                "NaiveTime" => TypeKind::NaiveTime,
+                "DateTime" if type_path_is_datetime_fixed_offset(&type_path.path) => {
+                    TypeKind::DateTimeFixedOffset
+                }
                 "Decimal" => TypeKind::Decimal,
                 "f32" | "f64" => TypeKind::Float,
                 "Vec" if type_path_is_vec_u8(&type_path.path) => TypeKind::VecU8,
@@ -3166,6 +3178,30 @@ fn type_path_is_vec_u8(path: &Path) -> bool {
     };
 
     inner_path.path.is_ident("u8")
+}
+
+fn type_path_is_datetime_fixed_offset(path: &Path) -> bool {
+    let Some(segment) = path.segments.last() else {
+        return false;
+    };
+
+    if segment.ident != "DateTime" {
+        return false;
+    }
+
+    let syn::PathArguments::AngleBracketed(arguments) = &segment.arguments else {
+        return false;
+    };
+
+    let Some(syn::GenericArgument::Type(Type::Path(inner_path))) = arguments.args.first() else {
+        return false;
+    };
+
+    inner_path
+        .path
+        .segments
+        .last()
+        .is_some_and(|segment| segment.ident == "FixedOffset")
 }
 
 fn default_table_name(ident: &Ident) -> String {
@@ -3465,6 +3501,8 @@ enum TypeKind {
     Uuid,
     NaiveDateTime,
     NaiveDate,
+    NaiveTime,
+    DateTimeFixedOffset,
     Decimal,
     Float,
     Unknown,

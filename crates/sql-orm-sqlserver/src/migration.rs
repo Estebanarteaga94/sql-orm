@@ -349,7 +349,9 @@ fn render_sql_type(column: &ColumnSnapshot) -> String {
         SqlServerType::Bit => "bit".to_string(),
         SqlServerType::UniqueIdentifier => "uniqueidentifier".to_string(),
         SqlServerType::Date => "date".to_string(),
+        SqlServerType::Time => "time".to_string(),
         SqlServerType::DateTime2 => "datetime2".to_string(),
+        SqlServerType::DateTimeOffset => "datetimeoffset".to_string(),
         SqlServerType::Decimal => format!(
             "decimal({}, {})",
             column.precision.unwrap_or(18),

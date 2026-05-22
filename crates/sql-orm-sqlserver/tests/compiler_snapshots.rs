@@ -507,6 +507,8 @@ fn render_sql_value(value: &SqlValue) -> String {
         SqlValue::Uuid(value) => format!("Uuid({value})"),
         SqlValue::Decimal(value) => format!("Decimal({value})"),
         SqlValue::Date(value) => format!("Date({value})"),
+        SqlValue::Time(value) => format!("Time({value})"),
         SqlValue::DateTime(value) => format!("DateTime({value})"),
+        SqlValue::DateTimeOffset(value) => format!("DateTimeOffset({value})"),
     }
 }
