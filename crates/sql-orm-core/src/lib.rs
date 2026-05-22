@@ -359,7 +359,7 @@ pub trait Row {
 
     fn get_required(&self, column: &str) -> Result<SqlValue, OrmError> {
         self.try_get(column)?
-            .ok_or_else(|| OrmError::new("required column value was not present"))
+            .ok_or_else(|| OrmError::mapping("required column value was not present"))
     }
 
     fn try_get_typed<T: SqlTypeMapping>(&self, column: &str) -> Result<Option<T>, OrmError> {
@@ -456,7 +456,7 @@ impl SqlTypeMapping for bool {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::Bool(value) => Ok(value),
-            _ => Err(OrmError::new("expected bool value")),
+            _ => Err(OrmError::mapping("expected bool value")),
         }
     }
 }
@@ -471,7 +471,7 @@ impl SqlTypeMapping for i32 {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::I32(value) => Ok(value),
-            _ => Err(OrmError::new("expected i32 value")),
+            _ => Err(OrmError::mapping("expected i32 value")),
         }
     }
 }
@@ -486,7 +486,7 @@ impl SqlTypeMapping for i64 {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::I64(value) => Ok(value),
-            _ => Err(OrmError::new("expected i64 value")),
+            _ => Err(OrmError::mapping("expected i64 value")),
         }
     }
 }
@@ -501,7 +501,7 @@ impl SqlTypeMapping for f64 {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::F64(value) => Ok(value),
-            _ => Err(OrmError::new("expected f64 value")),
+            _ => Err(OrmError::mapping("expected f64 value")),
         }
     }
 }
@@ -517,7 +517,7 @@ impl SqlTypeMapping for String {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::String(value) => Ok(value),
-            _ => Err(OrmError::new("expected string value")),
+            _ => Err(OrmError::mapping("expected string value")),
         }
     }
 }
@@ -532,7 +532,7 @@ impl SqlTypeMapping for Vec<u8> {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::Bytes(value) => Ok(value),
-            _ => Err(OrmError::new("expected bytes value")),
+            _ => Err(OrmError::mapping("expected bytes value")),
         }
     }
 }
@@ -547,7 +547,7 @@ impl SqlTypeMapping for Uuid {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::Uuid(value) => Ok(value),
-            _ => Err(OrmError::new("expected uuid value")),
+            _ => Err(OrmError::mapping("expected uuid value")),
         }
     }
 }
@@ -564,7 +564,7 @@ impl SqlTypeMapping for Decimal {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::Decimal(value) => Ok(value),
-            _ => Err(OrmError::new("expected decimal value")),
+            _ => Err(OrmError::mapping("expected decimal value")),
         }
     }
 }
@@ -579,7 +579,7 @@ impl SqlTypeMapping for NaiveDate {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::Date(value) => Ok(value),
-            _ => Err(OrmError::new("expected date value")),
+            _ => Err(OrmError::mapping("expected date value")),
         }
     }
 }
@@ -594,7 +594,7 @@ impl SqlTypeMapping for NaiveDateTime {
     fn from_sql_value(value: SqlValue) -> Result<Self, OrmError> {
         match value {
             SqlValue::DateTime(value) => Ok(value),
-            _ => Err(OrmError::new("expected datetime value")),
+            _ => Err(OrmError::mapping("expected datetime value")),
         }
     }
 }
@@ -1420,6 +1420,26 @@ mod tests {
                 email: "ana@example.com".to_string(),
             }
         );
+    }
+
+    #[test]
+    fn row_contract_classifies_missing_required_column_as_mapping_error() {
+        let row = TestRow {
+            values: BTreeMap::new(),
+        };
+
+        let error = row.get_required("id").unwrap_err();
+
+        assert_eq!(error.message(), "required column value was not present");
+        assert_eq!(error.kind(), OrmErrorKind::Mapping);
+    }
+
+    #[test]
+    fn sql_type_mapping_classifies_type_mismatch_as_mapping_error() {
+        let error = i64::from_sql_value(SqlValue::String("not an i64".to_string())).unwrap_err();
+
+        assert_eq!(error.message(), "expected i64 value");
+        assert_eq!(error.kind(), OrmErrorKind::Mapping);
     }
 
     #[test]
