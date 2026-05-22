@@ -11,8 +11,8 @@ present at the repository root. The active plan file is
 
 ## Audit Result
 
-The only public surface still explicitly marked as experimental is change
-tracking:
+The public surfaces that were previously marked as experimental were promoted
+into the `0.2.0-rc.1` pre-release after Etapa 21 validation:
 
 - `Tracked<T>`
 - `EntityState`
@@ -21,13 +21,12 @@ tracking:
 - `DbSet::remove_tracked(...)`
 - `DbContext::save_changes()`
 
-These APIs are implemented, tested as an experimental cut, and exported from
-the public crate, but they are not yet stable. The current implementation keeps
-pending `Added`, `Modified` and `Deleted` work in registry-owned snapshots
-after a wrapper is dropped or consumed, marks `Modified` on mutable access
-before later structural no-op detection, supports persistence through the
-existing simple-PK CRUD routes, and does not track navigation graphs or
-relationship changes.
+These APIs are implemented, tested, and exported from the public crate for
+explicit single-primary-key tracking. The current implementation keeps pending
+`Added`, `Modified` and `Deleted` work in registry-owned snapshots after a
+wrapper is dropped or consumed, marks `Modified` on mutable access before later
+structural no-op detection, supports persistence through the existing simple-PK
+CRUD routes, and does not track navigation graphs or relationship changes.
 
 ## Deferred Or Blocked Surfaces
 
@@ -38,8 +37,8 @@ These surfaces are documented as unavailable or blocked, not experimental:
 | `include_many(...).split_query()` | Public builder method exists, but execution returns a clear not-implemented error. Join-based collection include is the available path. | Future navigation follow-up |
 | Direct many-to-many navigation | Rejected; use an explicit join entity with ordinary foreign keys and supported navigation edges. | Future relationship-update design |
 | Automatic lazy loading | Not available; lazy wrappers are state containers and never issue SQL by themselves. | Future explicit async loader design |
-| Navigation graph tracking and relationship persistence | Not stable; includes and explicit loads do not register related entities automatically, and `save_changes()` does not persist relationship mutations. | Etapa 21 |
-| High-level typed aggregations and `group_by` | Not implemented as public query builder APIs. | Etapa 24 |
+| Navigation graph tracking and relationship persistence | Not implemented; includes and explicit loads do not register related entities automatically, and `save_changes()` does not persist relationship mutations. | Future relationship-update design |
+| Split-query execution for `include_many(...)` | `include_many(...)` is available through join-based loading; `split_query()` remains a documented non-executing builder path. | Future navigation follow-up |
 | `database downgrade` | Implemented in Etapa 23 as explicit-target script generation plus opt-in `--execute`; requires local `up.sql` checksum validation and executable `down.sql`. | Available with limits |
 | `migration.rs` | Deferred from the migration MVP; current artifacts are `up.sql`, `down.sql`, and `model_snapshot.json`. | Future migrations stage |
 | Composite primary key persistence | Metadata supports composite PKs, but public CRUD, Active Record, and tracking persistence remain centered on simple primary keys. | Future persistence hardening |
@@ -57,8 +56,8 @@ same flow before claiming fresh validation.
 
 Public rustdoc already marks the same stability boundaries:
 
-- `crates/sql-orm/src/tracking.rs` names the tracking module as
-  experimental and lists its runtime limits.
+- `crates/sql-orm/src/tracking.rs` documents the explicit tracking contract
+  and its runtime limits.
 - `DbContext::transaction(...)` supports direct connections and, with
   `pool-bb8`, contexts created from `from_pool(...)` by pinning one physical
   pooled connection for the closure.
@@ -74,16 +73,14 @@ The audited documents are consistent with the current implementation:
 
 - `README.md` lists the current limits and records the latest real SQL Server
   validation date for `todo-app`.
-- `CHANGELOG.md` separates `0.1.0` available features from `0.2.0` planned
-  stabilization, transactions-from-pool, downgrade, and aggregations work.
-- `docs/api.md` and `docs/core-concepts.md` mark tracking as experimental and
-  document deferred surfaces as current limits.
-- `docs/context.md` records that Etapa 21 must stabilize tracking before
-  removing the experimental label.
+- `CHANGELOG.md` separates the historical `0.1.0` release from the
+  `0.2.0-rc.1` pre-release surface and the post-RC hardening backlog.
+- `docs/api.md` and `docs/core-concepts.md` document deferred surfaces as
+  current limits without treating typed aggregations or explicit simple-PK
+  tracking as unavailable.
+- `docs/context.md` records that Etapa 21 stabilized explicit tracking for the
+  `0.2.0-rc.1` scope while leaving graph persistence and composite primary key
+  tracking in the roadmap.
 
-This audit does not graduate any API to stable status. The next executable
-task is to define explicit stability criteria for `Tracked<T>` and
-`save_changes()` before changing behavior.
-
-The stability criteria for that next step are now recorded in
-[Tracking stability criteria](tracking-stability.md).
+The remaining deferred items above should stay documented as limits until a
+future release explicitly designs, implements, and validates them.

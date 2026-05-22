@@ -105,14 +105,14 @@ Use the public root crate from crates.io:
 
 ```toml
 [dependencies]
-sql-orm = "0.1.0"
+sql-orm = "0.2.0-rc.1"
 ```
 
 With optional `bb8` pooling support:
 
 ```toml
 [dependencies]
-sql-orm = { version = "0.1.0", features = ["pool-bb8"] }
+sql-orm = { version = "0.2.0-rc.1", features = ["pool-bb8"] }
 ```
 
 Import the prelude:
