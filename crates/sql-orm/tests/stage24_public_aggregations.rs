@@ -170,7 +170,7 @@ fn read_count<R: Row>(row: &R, column: &str) -> Result<i64, OrmError> {
     match row.get_required(column)? {
         SqlValue::I32(value) => Ok(i64::from(value)),
         SqlValue::I64(value) => Ok(value),
-        value => Err(OrmError::new(format!(
+        value => Err(OrmError::mapping(format!(
             "expected `{column}` as SQL Server COUNT integer, got {value:?}"
         ))),
     }

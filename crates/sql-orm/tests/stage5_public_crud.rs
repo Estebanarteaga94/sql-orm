@@ -281,7 +281,7 @@ async fn public_dbcontext_transaction_rolls_back_on_err() -> Result<(), OrmError
                     })
                     .await?;
 
-                Err::<(), OrmError>(OrmError::new(
+                Err::<(), OrmError>(OrmError::transaction(
                     "forcing transaction rollback for integration test",
                 ))
             })
@@ -412,7 +412,7 @@ async fn public_dbcontext_pool_transaction_commits_and_rolls_back() -> Result<()
                     })
                     .await?;
 
-                Err::<(), OrmError>(OrmError::new(
+                Err::<(), OrmError>(OrmError::transaction(
                     "forcing pooled transaction rollback for integration test",
                 ))
             })

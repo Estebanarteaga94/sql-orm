@@ -416,7 +416,9 @@ async fn raw_deleted_at(
         ))
         .await?
         .map(|row| row.deleted_at)
-        .ok_or_else(|| OrmError::new("expected soft-deleted row to remain physically present"))
+        .ok_or_else(|| {
+            OrmError::execution("expected soft-deleted row to remain physically present")
+        })
 }
 
 async fn cleanup_test_table(connection_string: &str, keep_tables: bool) -> Result<(), OrmError> {
