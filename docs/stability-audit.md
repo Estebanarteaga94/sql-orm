@@ -1,7 +1,7 @@
 # Stability Audit
 
 This audit records the public surfaces that remain deferred, blocked, or
-explicitly unavailable as of the `0.2.0-rc.1` pre-release on 2026-05-17.
+explicitly unavailable as of the `0.2.0-rc.2` pre-release on 2026-05-22.
 It is based on `README.md`, `CHANGELOG.md`, `docs/context.md`,
 `docs/core-concepts.md`, `docs/api.md`, and public rustdoc in the root crate.
 
@@ -12,7 +12,7 @@ present at the repository root. The active plan file is
 ## Audit Result
 
 The public surfaces that were previously marked as experimental were promoted
-into the `0.2.0-rc.1` pre-release after Etapa 21 validation:
+into the `0.2.0-rc.2` pre-release after Etapa 21 validation:
 
 - `Tracked<T>`
 - `EntityState`
@@ -74,12 +74,12 @@ The audited documents are consistent with the current implementation:
 - `README.md` lists the current limits and records the latest real SQL Server
   validation date for `todo-app`.
 - `CHANGELOG.md` separates the historical `0.1.0` release from the
-  `0.2.0-rc.1` pre-release surface and the post-RC hardening backlog.
+  `0.2.0-rc.2` pre-release surface and the post-RC hardening backlog.
 - `docs/api.md` and `docs/core-concepts.md` document deferred surfaces as
   current limits without treating typed aggregations or explicit simple-PK
   tracking as unavailable.
 - `docs/context.md` records that Etapa 21 stabilized explicit tracking for the
-  `0.2.0-rc.1` scope while leaving graph persistence and composite primary key
+  `0.2.0-rc.2` scope while leaving graph persistence and composite primary key
   tracking in the roadmap.
 
 The remaining deferred items above should stay documented as limits until a

@@ -6,14 +6,14 @@ You can consume `sql-orm` from another Rust project through crates.io. You do no
 
 ```toml
 [dependencies]
-sql-orm = "0.2.0-rc.1"
+sql-orm = "0.2.0-rc.2"
 ```
 
 With optional pooling:
 
 ```toml
 [dependencies]
-sql-orm = { version = "0.2.0-rc.1", features = ["pool-bb8"] }
+sql-orm = { version = "0.2.0-rc.2", features = ["pool-bb8"] }
 ```
 
 Published package: <https://crates.io/crates/sql-orm>

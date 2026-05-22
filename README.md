@@ -93,9 +93,9 @@ Use `sql-orm` if you want:
 > SQL Server is currently the only supported backend.
 
 > [!WARNING]
-> This project is currently published as the `0.2.0-rc.1` pre-release. The
-> release candidate has full workspace validation for the documented surface,
-> but keeps explicit limits listed in [Current Limits](#current-limits).
+> This project is currently published as the `0.2.0-rc.2` pre-release. The
+> release candidate includes the documented hardening work and keeps explicit
+> limits listed in [Current Limits](#current-limits).
 
 ---
 
@@ -105,14 +105,14 @@ Use the public root crate from crates.io:
 
 ```toml
 [dependencies]
-sql-orm = "0.2.0-rc.1"
+sql-orm = "0.2.0-rc.2"
 ```
 
 With optional `bb8` pooling support:
 
 ```toml
 [dependencies]
-sql-orm = { version = "0.2.0-rc.1", features = ["pool-bb8"] }
+sql-orm = { version = "0.2.0-rc.2", features = ["pool-bb8"] }
 ```
 
 Import the prelude:

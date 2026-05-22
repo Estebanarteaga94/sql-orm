@@ -3,60 +3,67 @@
 All relevant `sql-orm` changes are documented in this file.
 
 The project follows an incremental release strategy. This changelog records the
-initial `0.1.0` experimental release and the `0.2.0-rc.1` pre-release surface.
+initial `0.1.0` experimental release and the `0.2.0-rc.1` / `0.2.0-rc.2`
+pre-release surfaces.
 
 ## [Next] - Planned
 
-Next release focused on stabilization and hardening after the `0.2.0-rc.1`
-pre-release. The operational backlog for this version is tracked in
-`docs/tasks.md` as Etapas 25 to 29.
+Future release work is tracked in `docs/tasks.md`, currently focused on
+relationship graph persistence, composite primary key tracking, and related
+unit-of-work design.
+
+## [0.2.0-rc.2] - 2026-05-22
+
+Pre-release focused on stabilization and hardening after the `0.2.0-rc.1`
+candidate. This cut closes Etapas 25 to 29.
 
 ### Etapa 25: Generated SQL And Public AST Hardening
 
-- Harden dynamic SQL function expressions by replacing
+- Hardened dynamic SQL function expressions by replacing
   `Expr::function(name, args)` with allowlisted functions or strict identifier
   validation, keeping any raw-function escape hatch explicitly unsafe.
-- Prevent accidental all-row `UPDATE` and `DELETE` compilation by requiring a
+- Prevented accidental all-row `UPDATE` and `DELETE` compilation by requiring a
   predicate by default or an explicit `allow_all_rows()` opt-in.
-- Validate custom `Insertable` and `Changeset` payloads against
+- Validated custom `Insertable` and `Changeset` payloads against
   `EntityMetadata` before compiling writes, including non-insertable and
   non-updatable columns.
-- Add literal `LIKE` pattern escaping for `%`, `_` and `[ ]`.
-- Remove dynamic include alias leaks by moving away from leaked `&'static str`
+- Added literal `LIKE` pattern escaping for `%`, `_` and `[ ]`.
+- Removed dynamic include alias leaks by moving away from leaked `&'static str`
   aliases.
 
 ### Etapa 26: Raw SQL, Parameters And Retry Hardening
 
-- Replace raw placeholder byte scanning with tokenizer-aware validation that
+- Replaced raw placeholder byte scanning with tokenizer-aware validation that
   ignores literals, quoted identifiers and comments.
-- Classify raw SQL retry behavior through explicit execution kinds instead of
+- Classified raw SQL retry behavior through explicit execution kinds instead of
   inferring safety from a leading `SELECT`.
-- Add regression coverage for placeholder-looking text that is not an actual
+- Added regression coverage for placeholder-looking text that is not an actual
   parameter.
 
 ### Etapa 27: Transaction And Connection Hardening
 
-- Prevent accidental interleaving through cloned direct `SharedConnection`
+- Prevented accidental interleaving through cloned direct `SharedConnection`
   handles while a direct transaction is active.
-- Redact secrets from connection configuration debug output and narrow exposure
+- Redacted secrets from connection configuration debug output and narrowed exposure
   of full connection strings.
 
 ### Etapa 28: Migration And Script Hardening
 
-- Centralize SQL string literal escaping for migration script generation.
-- Mark raw migration fragments such as custom SQL types, defaults and computed
+- Centralized SQL string literal escaping for migration script generation.
+- Marked raw migration fragments such as custom SQL types, defaults and computed
   SQL as unsafe fragments or migrate them to explicit fragment types.
-- Replace or formally constrain semicolon-based SQL script splitting.
+- Replaced semicolon-based SQL script splitting with tokenizer-aware script
+  splitting that respects literals, comments and `GO` batches.
 
 ### Etapa 29: Errors, SQL Server Types And Release Hygiene
 
-- Introduce richer structured `OrmError` variants while preserving useful
+- Introduced richer structured `OrmError` variants while preserving useful
   display messages.
-- Extend SQL Server row type support documentation and implementation for
+- Extended SQL Server row type support documentation and implementation for
   common missing types such as `time` and `datetimeoffset`.
-- Add dependency audit checks to CI.
-- Align workspace versions, README install snippets and release text before
-  publishing the next candidate.
+- Added dependency audit checks to CI.
+- Aligned workspace versions, README install snippets, lockfiles and release
+  text for `0.2.0-rc.2`.
 
 The future Etapa 21+ tracking roadmap remains lower priority than this
 stabilization release.

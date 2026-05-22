@@ -1155,7 +1155,7 @@ dependencies = [
 
 [[package]]
 name = "sql-orm"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "chrono",
  "insta",
@@ -1173,7 +1173,7 @@ dependencies = [
 
 [[package]]
 name = "sql-orm-cli"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "sql-orm-core",
  "sql-orm-migrate",
@@ -1185,7 +1185,7 @@ dependencies = [
 
 [[package]]
 name = "sql-orm-core"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "chrono",
  "rust_decimal",
@@ -1194,7 +1194,7 @@ dependencies = [
 
 [[package]]
 name = "sql-orm-macros"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1203,7 +1203,7 @@ dependencies = [
 
 [[package]]
 name = "sql-orm-migrate"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -1212,14 +1212,14 @@ dependencies = [
 
 [[package]]
 name = "sql-orm-query"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "sql-orm-core",
 ]
 
 [[package]]
 name = "sql-orm-sqlserver"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "insta",
  "sql-orm-core",
@@ -1229,7 +1229,7 @@ dependencies = [
 
 [[package]]
 name = "sql-orm-tiberius"
-version = "0.2.0-rc.1"
+version = "0.2.0-rc.2"
 dependencies = [
  "async-trait",
  "bb8",

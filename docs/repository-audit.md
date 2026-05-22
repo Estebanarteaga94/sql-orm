@@ -1,6 +1,6 @@
 # Repository Audit
 
-This audit records the repository state for the `0.2.0-rc.1` pre-release. It is based on the workspace manifests, public crate exports, implementation modules, tests, examples and existing docs reviewed on 2026-05-17.
+This audit records the repository state for the `0.2.0-rc.2` pre-release. It is based on the workspace manifests, public crate exports, implementation modules, tests, examples and existing docs reviewed through 2026-05-22.
 
 The master plan requested as `plan_orm_sqlserver_tiberius_code_first.md` is not present at the repository root. The active plan file is `docs/plan_orm_sqlserver_tiberius_code_first.md`.
 
