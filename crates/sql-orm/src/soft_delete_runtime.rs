@@ -128,7 +128,7 @@ pub(crate) fn apply_soft_delete_values<E: SoftDeleteEntity>(
             .iter()
             .any(|value| value.column_name == column.column_name)
         {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "soft_delete requires a runtime value for non-nullable column `{}`",
                 column.column_name
             )));
@@ -169,7 +169,7 @@ fn validate_no_duplicate_columns(values: &[ColumnValue]) -> Result<(), OrmError>
 
     for value in values {
         if !seen.insert(value.column_name) {
-            return Err(OrmError::new(format!(
+            return Err(OrmError::compile(format!(
                 "duplicate column `{}` in soft_delete values",
                 value.column_name
             )));
@@ -185,14 +185,14 @@ fn validate_soft_delete_column_value(
     value: &SqlValue,
 ) -> Result<(), OrmError> {
     if !column.updatable {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "soft_delete column `{}` is not updatable",
             column.column_name
         )));
     }
 
     if value.is_null() && !column.nullable {
-        return Err(OrmError::new(format!(
+        return Err(OrmError::compile(format!(
             "soft_delete column `{}` is not nullable",
             column.column_name
         )));
@@ -210,7 +210,7 @@ mod tests {
     use crate::SoftDeleteEntity;
     use sql_orm_core::{
         ColumnMetadata, ColumnValue, Entity, EntityMetadata, EntityPolicyMetadata, OrmError,
-        PrimaryKeyMetadata, SqlServerType, SqlValue,
+        OrmErrorKind, PrimaryKeyMetadata, SqlServerType, SqlValue,
     };
 
     struct TestSoftDeleteEntity;
@@ -419,9 +419,10 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new("duplicate column `deleted_at` in soft_delete values")
+            error.message(),
+            "duplicate column `deleted_at` in soft_delete values"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
@@ -435,10 +436,9 @@ mod tests {
         .unwrap_err();
 
         assert_eq!(
-            error,
-            OrmError::new(
-                "soft_delete requires a runtime value for non-nullable column `deleted_at`"
-            )
+            error.message(),
+            "soft_delete requires a runtime value for non-nullable column `deleted_at`"
         );
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 }
