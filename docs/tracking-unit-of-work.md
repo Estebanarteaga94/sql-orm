@@ -125,8 +125,17 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   `push_related(...)`, `remove_related_at(...)` plus relationship-change
   readers/drainers. ORM materialization APIs such as `set(...)`,
   `set_loaded(...)`, `from_option(...)` and `from_vec(...)` intentionally do
-  not capture commands. These captured values are not yet reconciled with
-  `TrackingRegistry` or persisted by `save_changes()`.
+  not capture commands. These captured values are not yet consumed
+  automatically by `save_changes()`.
+- the internal tracker now has a first relationship-command reconciliation
+  slice: `RelationshipCommand` values can be checked against tracked
+  registration state before SQL execution, producing a
+  `RelationshipReconciliationPlan` of insert/update relationship values.
+  The reconciler accepts `Added` dependents as insert operations, turns
+  `Unchanged` dependents into `Modified` updates for moves/removals, rejects
+  deleted principals/dependents and required removals unless the dependent is
+  already `Deleted`, and detects conflicting FK values for one tracked entity.
+  This plan is not yet wired into `save_changes()` execution.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current

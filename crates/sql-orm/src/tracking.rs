@@ -67,7 +67,7 @@
 
 use crate::EntityPersist;
 use core::ops::{Deref, DerefMut};
-use sql_orm_core::{Entity, EntityMetadata, OrmError, SqlValue};
+use sql_orm_core::{ColumnValue, Entity, EntityMetadata, OrmError, SqlValue};
 use std::any::{Any, TypeId};
 use std::fmt;
 use std::marker::PhantomData;
@@ -133,6 +133,168 @@ pub struct SaveChangesOperationPlan {
     deleted_order: Vec<usize>,
 }
 
+#[doc(hidden)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelationshipCommand {
+    kind: RelationshipCommandKind,
+    relationship_values: Vec<ColumnValue>,
+}
+
+#[doc(hidden)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationshipCommandKind {
+    AttachNew {
+        principal_registration_id: usize,
+        dependent_registration_id: usize,
+    },
+    Move {
+        from_principal_registration_id: Option<usize>,
+        to_principal_registration_id: usize,
+        dependent_registration_id: usize,
+    },
+    Remove {
+        principal_registration_id: usize,
+        dependent_registration_id: usize,
+        required: bool,
+    },
+}
+
+#[doc(hidden)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct RelationshipReconciliationPlan {
+    operations: Vec<ReconciledRelationshipOperation>,
+}
+
+#[doc(hidden)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct ReconciledRelationshipOperation {
+    registration_id: usize,
+    kind: ReconciledRelationshipOperationKind,
+    relationship_values: Vec<ColumnValue>,
+}
+
+#[doc(hidden)]
+#[allow(dead_code)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReconciledRelationshipOperationKind {
+    Insert,
+    Update,
+}
+
+#[allow(dead_code)]
+impl RelationshipCommand {
+    pub(crate) fn attach_new_dependent(
+        principal_registration_id: usize,
+        dependent_registration_id: usize,
+        relationship_values: Vec<ColumnValue>,
+    ) -> Self {
+        Self {
+            kind: RelationshipCommandKind::AttachNew {
+                principal_registration_id,
+                dependent_registration_id,
+            },
+            relationship_values,
+        }
+    }
+
+    pub(crate) fn move_dependent(
+        from_principal_registration_id: Option<usize>,
+        to_principal_registration_id: usize,
+        dependent_registration_id: usize,
+        relationship_values: Vec<ColumnValue>,
+    ) -> Self {
+        Self {
+            kind: RelationshipCommandKind::Move {
+                from_principal_registration_id,
+                to_principal_registration_id,
+                dependent_registration_id,
+            },
+            relationship_values,
+        }
+    }
+
+    pub(crate) fn remove_dependent(
+        principal_registration_id: usize,
+        dependent_registration_id: usize,
+        required: bool,
+        relationship_values: Vec<ColumnValue>,
+    ) -> Self {
+        Self {
+            kind: RelationshipCommandKind::Remove {
+                principal_registration_id,
+                dependent_registration_id,
+                required,
+            },
+            relationship_values,
+        }
+    }
+}
+
+#[allow(dead_code)]
+impl RelationshipReconciliationPlan {
+    pub(crate) fn operations(&self) -> &[ReconciledRelationshipOperation] {
+        &self.operations
+    }
+
+    fn push_or_merge(
+        &mut self,
+        operation: ReconciledRelationshipOperation,
+    ) -> Result<(), OrmError> {
+        let Some(existing) = self
+            .operations
+            .iter_mut()
+            .find(|existing| existing.registration_id == operation.registration_id)
+        else {
+            self.operations.push(operation);
+            return Ok(());
+        };
+
+        if existing.kind != operation.kind {
+            return Err(relationship_conflict_error(
+                "relationship commands produced conflicting entity operations for one tracked entity",
+            ));
+        }
+
+        for value in operation.relationship_values {
+            if let Some(existing_value) = existing
+                .relationship_values
+                .iter()
+                .find(|existing| existing.column_name == value.column_name)
+            {
+                if existing_value.value != value.value {
+                    return Err(relationship_conflict_error(format!(
+                        "relationship commands assign different values to column `{}` for one tracked entity",
+                        value.column_name
+                    )));
+                }
+                continue;
+            }
+            existing.relationship_values.push(value);
+        }
+
+        Ok(())
+    }
+}
+
+#[allow(dead_code)]
+impl ReconciledRelationshipOperation {
+    pub(crate) fn registration_id(&self) -> usize {
+        self.registration_id
+    }
+
+    pub(crate) fn kind(&self) -> ReconciledRelationshipOperationKind {
+        self.kind
+    }
+
+    pub(crate) fn relationship_values(&self) -> &[ColumnValue] {
+        &self.relationship_values
+    }
+}
+
 struct TrackedInner<T> {
     original: T,
     current: T,
@@ -156,6 +318,7 @@ struct TrackingRegistration {
     state: EntityState,
     snapshots: Box<dyn Any + Send + Sync>,
     sync_current_from_wrapper: unsafe fn(&mut Box<dyn Any + Send + Sync>, usize),
+    set_wrapper_state: unsafe fn(usize, EntityState),
 }
 
 impl fmt::Debug for TrackingRegistration {
@@ -527,12 +690,8 @@ impl TrackingRegistry {
 
     pub(crate) fn set_state(&self, registration_id: usize, tracked_state: EntityState) {
         let mut state = self.state.lock().expect("tracking registry mutex poisoned");
-        if let Some(entry) = state
-            .entries
-            .iter_mut()
-            .find(|entry| entry.registration_id == registration_id)
-        {
-            entry.state = tracked_state;
+        if let Some(entry_index) = state.entry_index(registration_id) {
+            state.set_entry_state(entry_index, tracked_state);
         }
     }
 
@@ -746,6 +905,149 @@ impl TrackingRegistry {
             })
             .collect()
     }
+
+    #[allow(dead_code)]
+    pub(crate) fn reconcile_relationship_commands(
+        &self,
+        commands: &[RelationshipCommand],
+    ) -> Result<RelationshipReconciliationPlan, OrmError> {
+        let mut state = self.state.lock().expect("tracking registry mutex poisoned");
+        let mut plan = RelationshipReconciliationPlan::default();
+
+        for command in commands {
+            match &command.kind {
+                RelationshipCommandKind::AttachNew {
+                    principal_registration_id,
+                    dependent_registration_id,
+                } => {
+                    let principal_state = state.entry_state(*principal_registration_id)?;
+                    if principal_state == EntityState::Deleted {
+                        return Err(relationship_conflict_error(
+                            "cannot attach a new dependent to a principal marked Deleted",
+                        ));
+                    }
+
+                    let dependent_state = state.entry_state(*dependent_registration_id)?;
+                    match dependent_state {
+                        EntityState::Added => {
+                            plan.push_or_merge(ReconciledRelationshipOperation {
+                                registration_id: *dependent_registration_id,
+                                kind: ReconciledRelationshipOperationKind::Insert,
+                                relationship_values: command.relationship_values.clone(),
+                            })?;
+                        }
+                        EntityState::Deleted => {
+                            return Err(relationship_conflict_error(
+                                "cannot attach a dependent marked Deleted",
+                            ));
+                        }
+                        EntityState::Unchanged | EntityState::Modified => {
+                            return Err(relationship_conflict_error(
+                                "attaching a new dependent requires an Added tracked entity",
+                            ));
+                        }
+                    }
+                }
+                RelationshipCommandKind::Move {
+                    from_principal_registration_id,
+                    to_principal_registration_id,
+                    dependent_registration_id,
+                } => {
+                    if let Some(from_principal_registration_id) = from_principal_registration_id {
+                        state.entry_state(*from_principal_registration_id)?;
+                    }
+
+                    let to_principal_state = state.entry_state(*to_principal_registration_id)?;
+                    if to_principal_state == EntityState::Deleted {
+                        return Err(relationship_conflict_error(
+                            "cannot move a dependent to a principal marked Deleted",
+                        ));
+                    }
+
+                    let dependent_index = state.entry_index_or_error(*dependent_registration_id)?;
+                    let dependent_state = state.entries[dependent_index].state;
+                    match dependent_state {
+                        EntityState::Added => {
+                            plan.push_or_merge(ReconciledRelationshipOperation {
+                                registration_id: *dependent_registration_id,
+                                kind: ReconciledRelationshipOperationKind::Insert,
+                                relationship_values: command.relationship_values.clone(),
+                            })?;
+                        }
+                        EntityState::Unchanged => {
+                            state.set_entry_state(dependent_index, EntityState::Modified);
+                            plan.push_or_merge(ReconciledRelationshipOperation {
+                                registration_id: *dependent_registration_id,
+                                kind: ReconciledRelationshipOperationKind::Update,
+                                relationship_values: command.relationship_values.clone(),
+                            })?;
+                        }
+                        EntityState::Modified => {
+                            plan.push_or_merge(ReconciledRelationshipOperation {
+                                registration_id: *dependent_registration_id,
+                                kind: ReconciledRelationshipOperationKind::Update,
+                                relationship_values: command.relationship_values.clone(),
+                            })?;
+                        }
+                        EntityState::Deleted => {
+                            return Err(relationship_conflict_error(
+                                "cannot move a dependent marked Deleted",
+                            ));
+                        }
+                    }
+                }
+                RelationshipCommandKind::Remove {
+                    principal_registration_id,
+                    dependent_registration_id,
+                    required,
+                } => {
+                    state.entry_state(*principal_registration_id)?;
+                    let dependent_index = state.entry_index_or_error(*dependent_registration_id)?;
+                    let dependent_state = state.entries[dependent_index].state;
+
+                    if dependent_state == EntityState::Deleted {
+                        continue;
+                    }
+
+                    if *required {
+                        return Err(relationship_conflict_error(
+                            "cannot remove a dependent from a required relationship unless the dependent is explicitly marked Deleted",
+                        ));
+                    }
+
+                    match dependent_state {
+                        EntityState::Added => {
+                            plan.push_or_merge(ReconciledRelationshipOperation {
+                                registration_id: *dependent_registration_id,
+                                kind: ReconciledRelationshipOperationKind::Insert,
+                                relationship_values: command.relationship_values.clone(),
+                            })?;
+                        }
+                        EntityState::Unchanged => {
+                            state.set_entry_state(dependent_index, EntityState::Modified);
+                            plan.push_or_merge(ReconciledRelationshipOperation {
+                                registration_id: *dependent_registration_id,
+                                kind: ReconciledRelationshipOperationKind::Update,
+                                relationship_values: command.relationship_values.clone(),
+                            })?;
+                        }
+                        EntityState::Modified => {
+                            plan.push_or_merge(ReconciledRelationshipOperation {
+                                registration_id: *dependent_registration_id,
+                                kind: ReconciledRelationshipOperationKind::Update,
+                                relationship_values: command.relationship_values.clone(),
+                            })?;
+                        }
+                        EntityState::Deleted => {
+                            unreachable!("Deleted dependents are skipped above")
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(plan)
+    }
 }
 
 #[doc(hidden)]
@@ -833,6 +1135,37 @@ fn topological_entity_order(entities: &[&'static EntityMetadata]) -> Result<Vec<
 }
 
 impl TrackingRegistryState {
+    fn entry_index(&self, registration_id: usize) -> Option<usize> {
+        self.entries
+            .iter()
+            .position(|entry| entry.registration_id == registration_id)
+    }
+
+    #[allow(dead_code)]
+    fn entry_index_or_error(&self, registration_id: usize) -> Result<usize, OrmError> {
+        self.entry_index(registration_id).ok_or_else(|| {
+            relationship_conflict_error(format!(
+                "relationship command references unknown tracked registration `{registration_id}`"
+            ))
+        })
+    }
+
+    #[allow(dead_code)]
+    fn entry_state(&self, registration_id: usize) -> Result<EntityState, OrmError> {
+        let entry_index = self.entry_index_or_error(registration_id)?;
+        Ok(self.entries[entry_index].state)
+    }
+
+    fn set_entry_state(&mut self, entry_index: usize, state: EntityState) {
+        let entry = &mut self.entries[entry_index];
+        entry.state = state;
+        if entry.wrapper_attached {
+            unsafe {
+                (entry.set_wrapper_state)(entry.inner_address, state);
+            }
+        }
+    }
+
     fn push_registration<E: Entity + Clone>(
         &mut self,
         tracked: &Tracked<E>,
@@ -853,6 +1186,7 @@ impl TrackingRegistryState {
                 current: tracked.inner.current.clone(),
             }),
             sync_current_from_wrapper: sync_current_snapshot_from_wrapper::<E>,
+            set_wrapper_state: set_wrapper_state::<E>,
         });
         registration_id
     }
@@ -957,6 +1291,11 @@ fn duplicate_live_identity_error<E: Entity>(key: &SqlValue) -> OrmError {
     ))
 }
 
+#[allow(dead_code)]
+fn relationship_conflict_error(message: impl Into<String>) -> OrmError {
+    OrmError::compile(message)
+}
+
 unsafe fn sync_current_snapshot_from_wrapper<E: Clone + Send + Sync + 'static>(
     snapshots: &mut Box<dyn Any + Send + Sync>,
     inner_address: usize,
@@ -966,6 +1305,11 @@ unsafe fn sync_current_snapshot_from_wrapper<E: Clone + Send + Sync + 'static>(
     };
     let inner = unsafe { &*(inner_address as *const TrackedInner<E>) };
     snapshots.current = inner.current.clone();
+}
+
+unsafe fn set_wrapper_state<E>(inner_address: usize, state: EntityState) {
+    let inner = unsafe { &mut *(inner_address as *mut TrackedInner<E>) };
+    inner.state = state;
 }
 
 impl<T: Clone> Clone for Tracked<T> {
@@ -1022,8 +1366,8 @@ impl<T> Drop for Tracked<T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        EntityState, Tracked, TrackedEntityRegistration, TrackingRegistry,
-        save_changes_operation_plan,
+        EntityState, ReconciledRelationshipOperationKind, RelationshipCommand, Tracked,
+        TrackedEntityRegistration, TrackingRegistry, save_changes_operation_plan,
     };
     use crate::{EntityPersist, EntityPersistMode};
     use sql_orm_core::{
@@ -1199,6 +1543,27 @@ mod tests {
     impl Entity for SnapshotEntityAlias {
         fn metadata() -> &'static EntityMetadata {
             &DUMMY_ENTITY_METADATA
+        }
+    }
+
+    fn tracked_loaded_dummy(registry: &Arc<TrackingRegistry>, key: i64) -> Tracked<DummyEntity> {
+        let mut tracked = Tracked::from_loaded(DummyEntity);
+        tracked
+            .attach_registry_loaded(Arc::clone(registry), SqlValue::I64(key))
+            .unwrap();
+        tracked
+    }
+
+    fn tracked_added_dummy(registry: &Arc<TrackingRegistry>) -> Tracked<DummyEntity> {
+        let mut tracked = Tracked::from_added(DummyEntity);
+        tracked.attach_registry_added(Arc::clone(registry));
+        tracked
+    }
+
+    fn relation_value(value: SqlValue) -> ColumnValue {
+        ColumnValue {
+            column_name: "parent_id",
+            value,
         }
     }
 
@@ -2299,6 +2664,177 @@ mod tests {
         }
 
         assert_eq!(registry.entry_count(), 0);
+    }
+
+    #[test]
+    fn relationship_reconciliation_attaches_added_dependent_as_insert_operation() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let principal = tracked_loaded_dummy(&registry, 1);
+        let dependent = tracked_added_dummy(&registry);
+
+        let plan = registry
+            .reconcile_relationship_commands(&[RelationshipCommand::attach_new_dependent(
+                principal.registration_id.expect("principal registered"),
+                dependent.registration_id.expect("dependent registered"),
+                vec![relation_value(SqlValue::I64(1))],
+            )])
+            .unwrap();
+
+        assert_eq!(dependent.state(), EntityState::Added);
+        assert_eq!(plan.operations().len(), 1);
+        let operation = &plan.operations()[0];
+        assert_eq!(
+            operation.registration_id(),
+            dependent.registration_id.expect("dependent registered")
+        );
+        assert_eq!(
+            operation.kind(),
+            ReconciledRelationshipOperationKind::Insert
+        );
+        assert_eq!(
+            operation.relationship_values(),
+            &[relation_value(SqlValue::I64(1))]
+        );
+    }
+
+    #[test]
+    fn relationship_reconciliation_moves_unchanged_dependent_to_modified_update() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let old_principal = tracked_loaded_dummy(&registry, 1);
+        let new_principal = tracked_loaded_dummy(&registry, 2);
+        let dependent = tracked_loaded_dummy(&registry, 10);
+
+        let plan = registry
+            .reconcile_relationship_commands(&[RelationshipCommand::move_dependent(
+                old_principal.registration_id,
+                new_principal
+                    .registration_id
+                    .expect("new principal registered"),
+                dependent.registration_id.expect("dependent registered"),
+                vec![relation_value(SqlValue::I64(2))],
+            )])
+            .unwrap();
+
+        assert_eq!(dependent.state(), EntityState::Modified);
+        assert_eq!(registry.registrations()[2].state, EntityState::Modified);
+        assert_eq!(plan.operations().len(), 1);
+        assert_eq!(
+            plan.operations()[0].kind(),
+            ReconciledRelationshipOperationKind::Update
+        );
+        assert_eq!(
+            plan.operations()[0].relationship_values(),
+            &[relation_value(SqlValue::I64(2))]
+        );
+    }
+
+    #[test]
+    fn relationship_reconciliation_rejects_required_removal_unless_dependent_deleted() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let principal = tracked_loaded_dummy(&registry, 1);
+        let mut dependent = tracked_loaded_dummy(&registry, 10);
+
+        let error = registry
+            .reconcile_relationship_commands(&[RelationshipCommand::remove_dependent(
+                principal.registration_id.expect("principal registered"),
+                dependent.registration_id.expect("dependent registered"),
+                true,
+                vec![relation_value(SqlValue::Null)],
+            )])
+            .unwrap_err();
+
+        assert!(error.message().contains("required relationship"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+        assert_eq!(dependent.state(), EntityState::Unchanged);
+
+        dependent.mark_deleted();
+        let plan = registry
+            .reconcile_relationship_commands(&[RelationshipCommand::remove_dependent(
+                principal.registration_id.expect("principal registered"),
+                dependent.registration_id.expect("dependent registered"),
+                true,
+                vec![relation_value(SqlValue::Null)],
+            )])
+            .unwrap();
+
+        assert!(plan.operations().is_empty());
+        assert_eq!(dependent.state(), EntityState::Deleted);
+    }
+
+    #[test]
+    fn relationship_reconciliation_rejects_commands_targeting_deleted_principal_or_dependent() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let mut principal = tracked_loaded_dummy(&registry, 1);
+        let dependent = tracked_added_dummy(&registry);
+        principal.mark_deleted();
+
+        let principal_error = registry
+            .reconcile_relationship_commands(&[RelationshipCommand::attach_new_dependent(
+                principal.registration_id.expect("principal registered"),
+                dependent.registration_id.expect("dependent registered"),
+                vec![relation_value(SqlValue::I64(1))],
+            )])
+            .unwrap_err();
+
+        assert!(
+            principal_error
+                .message()
+                .contains("principal marked Deleted")
+        );
+        assert_eq!(principal_error.kind(), OrmErrorKind::Compile);
+
+        principal.mark_unchanged();
+        let mut deleted_dependent = tracked_loaded_dummy(&registry, 11);
+        deleted_dependent.mark_deleted();
+        let dependent_error = registry
+            .reconcile_relationship_commands(&[RelationshipCommand::move_dependent(
+                None,
+                principal.registration_id.expect("principal registered"),
+                deleted_dependent
+                    .registration_id
+                    .expect("dependent registered"),
+                vec![relation_value(SqlValue::I64(1))],
+            )])
+            .unwrap_err();
+
+        assert!(
+            dependent_error
+                .message()
+                .contains("dependent marked Deleted")
+        );
+        assert_eq!(dependent_error.kind(), OrmErrorKind::Compile);
+    }
+
+    #[test]
+    fn relationship_reconciliation_rejects_conflicting_fk_values_for_one_dependent() {
+        let registry = Arc::new(TrackingRegistry::default());
+        let old_principal = tracked_loaded_dummy(&registry, 1);
+        let new_principal = tracked_loaded_dummy(&registry, 2);
+        let dependent = tracked_loaded_dummy(&registry, 10);
+
+        let error = registry
+            .reconcile_relationship_commands(&[
+                RelationshipCommand::move_dependent(
+                    old_principal.registration_id,
+                    new_principal
+                        .registration_id
+                        .expect("new principal registered"),
+                    dependent.registration_id.expect("dependent registered"),
+                    vec![relation_value(SqlValue::I64(2))],
+                ),
+                RelationshipCommand::move_dependent(
+                    old_principal.registration_id,
+                    new_principal
+                        .registration_id
+                        .expect("new principal registered"),
+                    dependent.registration_id.expect("dependent registered"),
+                    vec![relation_value(SqlValue::I64(3))],
+                ),
+            ])
+            .unwrap_err();
+
+        assert!(error.message().contains("different values"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
