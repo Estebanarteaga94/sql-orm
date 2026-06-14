@@ -276,6 +276,72 @@ The future implementation must still route persistence through the existing
 rowversion and SQL Server execution boundaries remain centralized. It must not
 move SQL generation into `sql-orm-query` or execution into tracking.
 
+### Relationship Change Semantics
+
+The first acceptable relationship-persistence design is command-oriented.
+Navigation wrappers may expose graph state to the user, but `save_changes()`
+must persist only relationship changes that can be reduced to ordinary entity
+operations with deterministic ownership:
+
+- Adding a new dependent value to a loaded `Collection<T>` may become a
+  dependent `Added` operation only when the dependent has no persisted identity
+  yet and the relationship maps to a single supported foreign key.
+- The generated operation must set the dependent foreign-key value from the
+  principal primary key before calling the dependent `DbSet::insert(...)`
+  route. The principal must already have a persisted key, or be inserted earlier
+  in the same unit of work and have its generated key propagated before the
+  dependent insert.
+- Adding an already persisted dependent to a different principal is not an
+  insert. It is a foreign-key move and must be represented as a dependent
+  `Modified` operation that updates only the foreign-key columns needed for the
+  relationship.
+- Removing a dependent from a loaded collection must not imply a physical
+  delete by default. For optional relationships, removal means setting the
+  dependent foreign-key columns to `NULL`. For required relationships, removal
+  must fail before SQL execution unless the user explicitly marks the dependent
+  `Deleted` or updates/deletes the dependent through ordinary tracked entity
+  APIs.
+- SQL Server `ON DELETE SET NULL` describes database behavior when the
+  principal row is deleted. It does not by itself make collection removal a
+  delete, nor does it bypass the optional-relationship rule above.
+- Deleting a principal through `save_changes()` does not implicitly delete
+  loaded dependents from navigation collections. Cascades remain database
+  constraints or explicit dependent `Deleted` operations until graph cascade
+  semantics are designed separately.
+- Moving a dependent between principals must update the dependent foreign key
+  once, through the dependent entity pipeline. The move must be rejected if the
+  old or new relationship is ambiguous, the dependent primary key is composite,
+  or the required foreign-key columns cannot be mapped from metadata.
+- Direct many-to-many remains excluded. Relationship changes across many-to-many
+  links must be modeled as ordinary inserts/deletes of the explicit join entity.
+
+These rules keep navigation persistence aligned with the current architecture:
+relationship mutations are translated to `Added`, `Modified` or `Deleted`
+entity work, then executed by the existing public persistence paths. They do
+not authorize SQL generation inside tracking, implicit hidden joins, or direct
+mutation of SQL Server through navigation wrappers.
+
+### Relationship Validation Requirements
+
+Before implementing the rules above, the runtime must be able to validate every
+relationship command from metadata:
+
+- the navigation exists on the principal or dependent entity and resolves to one
+  `ForeignKeyMetadata`;
+- all participating entities are part of the current `DbContext`;
+- principal and dependent keys are simple primary keys for the first cut;
+- required relationships are detected from dependent column nullability;
+- optional removal can set every local foreign-key column to `NULL`;
+- tenant, audit, soft-delete and rowversion policies remain owned by the
+  dependent `DbSet` operation;
+- operation ordering inserts principals before dependents, applies foreign-key
+  moves after required principal inserts, and deletes dependents before
+  principals only when the user explicitly marked those dependents `Deleted`.
+
+If any validation cannot be performed from existing metadata, the future
+implementation must return a structured `OrmError` before SQL execution rather
+than relying on SQL Server constraint failures.
+
 ## Goal
 
 `save_changes()` must persist changes owned by the `DbContext`, not by the
