@@ -342,6 +342,65 @@ If any validation cannot be performed from existing metadata, the future
 implementation must return a structured `OrmError` before SQL execution rather
 than relying on SQL Server constraint failures.
 
+### Relationship Commands And Tracked Entity State
+
+Relationship persistence must not create a second state machine beside
+`EntityState`. The future tracker may record relationship commands internally,
+but before execution every command must be reconciled with the ordinary tracked
+entry for the affected entity:
+
+- Explicit entity state wins over inferred relationship state. If the user has
+  marked a dependent `Deleted`, adding that dependent to a collection or moving
+  it to another principal is a conflict unless the user first restores it to a
+  non-deleted state.
+- A dependent already tracked as `Added` may receive a relationship command
+  that sets its foreign key from the principal. The entry remains `Added`; the
+  relationship command only contributes foreign-key values before the insert
+  path runs.
+- A dependent tracked as `Modified` may receive a foreign-key move only when
+  the dependent update payload does not already set the same foreign-key
+  columns to a different value. Compatible moves are merged into the single
+  `Modified` update payload.
+- A dependent tracked as `Unchanged` becomes `Modified` when a relationship
+  command changes its foreign key or sets an optional foreign key to `NULL`.
+- A dependent tracked as `Deleted` cannot be moved, inserted through a
+  collection, or nullified by collection removal. The delete remains the only
+  pending operation unless the user explicitly changes the entity state.
+- A principal tracked as `Added` can own new dependent inserts only after the
+  principal insert has produced a persisted key in the same transaction.
+  Dependents that need that key must wait in the same unit-of-work plan instead
+  of reading a default identity value from the Rust struct.
+- A principal tracked as `Deleted` cannot accept new dependents or incoming
+  moves. Relationship commands targeting that principal must fail before SQL
+  execution.
+- Removing a dependent from a collection and separately marking the same
+  dependent `Deleted` is not a conflict; the explicit delete wins and no
+  foreign-key nullification update is emitted.
+- Removing a dependent from one principal collection and adding it to another
+  in the same unit of work is one foreign-key move, not a nullification followed
+  by a second update.
+
+The conflict model is intentionally fail-fast. The planner must reject
+ambiguous combinations before opening SQL execution, including:
+
+- two different principals assigning different values to the same foreign-key
+  columns for one dependent;
+- a relationship command that sets a foreign key already changed manually to a
+  different value in the dependent `Modified` payload;
+- an inferred insert for an entity that is already tracked by persisted
+  identity;
+- a relationship command involving an entity type that is not represented by a
+  `DbSet` in the current context;
+- a command that requires composite primary-key or composite foreign-key
+  handling before those shapes are explicitly supported.
+
+After reconciliation, `save_changes()` should see a single operation per
+tracked entity per phase. Relationship commands may alter the values used by
+that operation, but they must not cause the same row to be inserted, updated or
+deleted twice in one call. The operation count returned by `save_changes()`
+should continue to count executed entity operations, not raw relationship
+commands that were merged into another entity operation.
+
 ## Goal
 
 `save_changes()` must persist changes owned by the `DbContext`, not by the
