@@ -401,6 +401,86 @@ deleted twice in one call. The operation count returned by `save_changes()`
 should continue to count executed entity operations, not raw relationship
 commands that were merged into another entity operation.
 
+### Internal Relationship Command Planner
+
+The future graph-persistence implementation should be split into three private
+steps inside the public crate:
+
+1. Capture relationship commands from explicit navigation-wrapper mutation APIs.
+2. Reconcile those commands with the context-owned `TrackingRegistry`.
+3. Execute the reconciled entity operations through existing `DbSet` routes.
+
+The private command model should describe intent, not SQL:
+
+```rust
+enum RelationshipCommand {
+    AttachNewDependent {
+        navigation: RelationshipNavigationRef,
+        principal: TrackedIdentity,
+        dependent: PendingEntityRef,
+    },
+    MoveDependent {
+        navigation: RelationshipNavigationRef,
+        from_principal: Option<TrackedIdentity>,
+        to_principal: TrackedIdentity,
+        dependent: TrackedIdentity,
+    },
+    RemoveDependent {
+        navigation: RelationshipNavigationRef,
+        principal: TrackedIdentity,
+        dependent: TrackedIdentity,
+    },
+}
+```
+
+This shape is intentionally internal and illustrative. The stable requirement
+is that commands reference metadata identities and tracked entries, never table
+names or SQL fragments assembled by tracking. `RelationshipNavigationRef`
+should resolve to `NavigationMetadata` plus the backing `ForeignKeyMetadata`;
+`TrackedIdentity` must use the same identity rules as the tracker; and
+`PendingEntityRef` must refer to a registry entry or an explicit pending value
+owned by the context.
+
+The planner output should be an entity-operation plan, not a relationship plan:
+
+```rust
+struct SaveChangesPlan {
+    added: Vec<EntityOperation>,
+    modified: Vec<EntityOperation>,
+    deleted: Vec<EntityOperation>,
+}
+
+enum EntityOperation {
+    Insert { entry_id: u64 },
+    Update {
+        entry_id: u64,
+        relationship_values: Vec<ColumnValue>,
+    },
+    Delete { entry_id: u64 },
+}
+```
+
+Again, this is a design contract rather than a public API. The important
+boundary is that relationship commands are consumed before execution. After
+planning, the save pipeline still sees inserts, updates and deletes over
+tracked entities and can continue to apply tenant, audit, soft-delete,
+rowversion and transaction rules in the existing `DbSet` paths.
+
+Planner phases should remain deterministic:
+
+- resolve all command metadata and reject unsupported navigation shapes;
+- normalize opposite commands, such as remove-from-old-principal plus
+  add-to-new-principal, into one move;
+- reconcile commands with explicit `EntityState` and reject conflicts;
+- derive relationship column values for insert/update operations;
+- topologically order inserts, moves/updates and deletes using the existing
+  context entity ordering rules;
+- return a plan that contains at most one operation per tracked entity.
+
+The planner must not mutate the database and should be unit-testable without a
+SQL Server connection. Runtime SQL Server coverage belongs to the later task
+that executes the reconciled plan through `DbSet`.
+
 ## Goal
 
 `save_changes()` must persist changes owned by the `DbContext`, not by the
