@@ -118,6 +118,15 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   use the same registry lookup for related entities that are already tracked in
   the context, without turning navigation materialization into implicit graph
   tracking.
+- explicit navigation-wrapper mutation APIs now capture wrapper-local
+  relationship commands without executing them: `Navigation<T>` and
+  `LazyNavigation<T>` expose `set_related(...)` plus relationship-change
+  readers/drainers, while `Collection<T>` and `LazyCollection<T>` expose
+  `push_related(...)`, `remove_related_at(...)` plus relationship-change
+  readers/drainers. ORM materialization APIs such as `set(...)`,
+  `set_loaded(...)`, `from_option(...)` and `from_vec(...)` intentionally do
+  not capture commands. These captured values are not yet reconciled with
+  `TrackingRegistry` or persisted by `save_changes()`.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current

@@ -271,6 +271,15 @@ ordinary entity values and do not register included graphs automatically.
 `load_collection_tracked(...)` mutates only the tracked root wrapper without
 tracking related entities. Relationship changes inside navigation wrappers are
 not persisted by `save_changes()` in the stable explicit-tracking cut.
+Wrappers do expose explicit mutation helpers for the future graph planner:
+`Navigation<T>` / `LazyNavigation<T>` can record `set_related(...)`, and
+`Collection<T>` / `LazyCollection<T>` can record `push_related(...)` and
+`remove_related_at(...)`. Those helpers only capture wrapper-local
+`RelationshipNavigationChange<T>` / `RelationshipCollectionChange<T>` values
+for later reconciliation; they do not execute SQL, register related entities or
+change `save_changes()` behavior yet. Loading/materialization helpers such as
+`set(...)`, `set_loaded(...)`, `from_option(...)` and `from_vec(...)` do not
+capture relationship changes.
 
 Many-to-many link changes follow the same rule: insert, update or delete the
 explicit join entity rows directly. There is no direct collection navigation

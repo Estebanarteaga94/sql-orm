@@ -156,30 +156,69 @@ pub trait IncludeCollection<T>: core::Entity {
     ) -> Result<(), core::OrmError>;
 }
 
+/// Captured mutation for a single navigation wrapper.
+///
+/// These values are an internal stepping stone for future graph persistence.
+/// Loading APIs do not produce them; only explicit relationship mutation APIs
+/// on navigation wrappers do.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationshipNavigationChange<T> {
+    /// The single navigation value was explicitly replaced.
+    Set {
+        /// Value held before the explicit mutation.
+        previous: Option<T>,
+        /// Value held after the explicit mutation.
+        current: Option<T>,
+    },
+}
+
+/// Captured mutation for a collection navigation wrapper.
+///
+/// These values describe user intent at wrapper level. They are not SQL and are
+/// not executed by `save_changes()` until a later relationship planner task
+/// reconciles them with tracked entity state.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationshipCollectionChange<T> {
+    /// A dependent value was explicitly appended to the collection.
+    Added(T),
+    /// A dependent value was explicitly removed from the collection.
+    Removed(T),
+}
+
 /// Marker value for a single related entity navigation.
 ///
 /// Navigation fields are not persisted as columns. They exist so
 /// `#[derive(Entity)]` can attach navigation metadata to the entity while
 /// future loading APIs decide explicitly when related rows are fetched.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Navigation<T> {
     value: Option<T>,
+    relationship_changes: Vec<RelationshipNavigationChange<T>>,
 }
 
 impl<T> Navigation<T> {
     /// Creates an empty navigation value.
     pub const fn empty() -> Self {
-        Self { value: None }
+        Self {
+            value: None,
+            relationship_changes: Vec::new(),
+        }
     }
 
     /// Creates a navigation value containing a loaded related entity.
     pub fn loaded(value: T) -> Self {
-        Self { value: Some(value) }
+        Self {
+            value: Some(value),
+            relationship_changes: Vec::new(),
+        }
     }
 
     /// Creates a navigation value from an optional related entity.
     pub fn from_option(value: Option<T>) -> Self {
-        Self { value }
+        Self {
+            value,
+            relationship_changes: Vec::new(),
+        }
     }
 
     /// Returns the loaded related entity when one has been attached.
@@ -191,6 +230,35 @@ impl<T> Navigation<T> {
     pub fn set(&mut self, value: Option<T>) {
         self.value = value;
     }
+
+    /// Explicitly replaces the related entity and records a relationship
+    /// mutation for future graph persistence planning.
+    ///
+    /// Use `set(...)` for ORM materialization paths such as include loading;
+    /// those paths populate memory state and must not be treated as user
+    /// relationship changes.
+    pub fn set_related(&mut self, value: Option<T>)
+    where
+        T: Clone,
+    {
+        let previous = self.value.clone();
+        self.value = value.clone();
+        self.relationship_changes
+            .push(RelationshipNavigationChange::Set {
+                previous,
+                current: value,
+            });
+    }
+
+    /// Returns relationship mutations captured by explicit mutation APIs.
+    pub fn relationship_changes(&self) -> &[RelationshipNavigationChange<T>] {
+        &self.relationship_changes
+    }
+
+    /// Drains captured relationship mutations from this wrapper.
+    pub fn take_relationship_changes(&mut self) -> Vec<RelationshipNavigationChange<T>> {
+        std::mem::take(&mut self.relationship_changes)
+    }
 }
 
 impl<T> Default for Navigation<T> {
@@ -199,15 +267,32 @@ impl<T> Default for Navigation<T> {
     }
 }
 
+impl<T: std::fmt::Debug> std::fmt::Debug for Navigation<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Navigation")
+            .field("value", &self.value)
+            .finish()
+    }
+}
+
+impl<T: PartialEq> PartialEq for Navigation<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value
+    }
+}
+
+impl<T: Eq> Eq for Navigation<T> {}
+
 /// Opt-in lazy single navigation wrapper.
 ///
 /// This type never performs I/O by itself. It only records whether a related
 /// value has been explicitly loaded by an ORM operation such as `include(...)`
 /// or a future explicit lazy-loading API that receives a context-bearing value.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct LazyNavigation<T> {
     value: Option<T>,
     loaded: bool,
+    relationship_changes: Vec<RelationshipNavigationChange<T>>,
 }
 
 impl<T> LazyNavigation<T> {
@@ -216,6 +301,7 @@ impl<T> LazyNavigation<T> {
         Self {
             value: None,
             loaded: false,
+            relationship_changes: Vec::new(),
         }
     }
 
@@ -224,6 +310,7 @@ impl<T> LazyNavigation<T> {
         Self {
             value: Some(value),
             loaded: true,
+            relationship_changes: Vec::new(),
         }
     }
 
@@ -232,6 +319,7 @@ impl<T> LazyNavigation<T> {
         Self {
             value,
             loaded: true,
+            relationship_changes: Vec::new(),
         }
     }
 
@@ -253,10 +341,36 @@ impl<T> LazyNavigation<T> {
         self.loaded = true;
     }
 
+    /// Explicitly replaces the related entity, marks the wrapper loaded, and
+    /// records a relationship mutation for future graph persistence planning.
+    pub fn set_related(&mut self, value: Option<T>)
+    where
+        T: Clone,
+    {
+        let previous = self.value.clone();
+        self.value = value.clone();
+        self.loaded = true;
+        self.relationship_changes
+            .push(RelationshipNavigationChange::Set {
+                previous,
+                current: value,
+            });
+    }
+
     /// Clears the cached value and marks this wrapper as unloaded.
     pub fn clear(&mut self) {
         self.value = None;
         self.loaded = false;
+    }
+
+    /// Returns relationship mutations captured by explicit mutation APIs.
+    pub fn relationship_changes(&self) -> &[RelationshipNavigationChange<T>] {
+        &self.relationship_changes
+    }
+
+    /// Drains captured relationship mutations from this wrapper.
+    pub fn take_relationship_changes(&mut self) -> Vec<RelationshipNavigationChange<T>> {
+        std::mem::take(&mut self.relationship_changes)
     }
 }
 
@@ -266,47 +380,124 @@ impl<T> Default for LazyNavigation<T> {
     }
 }
 
+impl<T: std::fmt::Debug> std::fmt::Debug for LazyNavigation<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazyNavigation")
+            .field("value", &self.value)
+            .field("loaded", &self.loaded)
+            .finish()
+    }
+}
+
+impl<T: PartialEq> PartialEq for LazyNavigation<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.value == other.value && self.loaded == other.loaded
+    }
+}
+
+impl<T: Eq> Eq for LazyNavigation<T> {}
+
 /// Marker value for a collection navigation.
 ///
 /// Collection navigation fields are ignored by column metadata and start empty
 /// when an entity is materialized without an explicit include/load operation.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct Collection<T> {
     values: Vec<T>,
+    relationship_changes: Vec<RelationshipCollectionChange<T>>,
 }
 
 impl<T> Collection<T> {
     /// Creates an empty collection navigation.
     pub const fn empty() -> Self {
-        Self { values: Vec::new() }
+        Self {
+            values: Vec::new(),
+            relationship_changes: Vec::new(),
+        }
     }
 
     /// Creates a loaded collection navigation from existing values.
     pub fn from_vec(values: Vec<T>) -> Self {
-        Self { values }
+        Self {
+            values,
+            relationship_changes: Vec::new(),
+        }
     }
 
     /// Returns the loaded related entities.
     pub fn as_slice(&self) -> &[T] {
         &self.values
     }
+
+    /// Explicitly appends a related value and records a relationship mutation
+    /// for future graph persistence planning.
+    pub fn push_related(&mut self, value: T)
+    where
+        T: Clone,
+    {
+        self.values.push(value.clone());
+        self.relationship_changes
+            .push(RelationshipCollectionChange::Added(value));
+    }
+
+    /// Explicitly removes a related value by index and records a relationship
+    /// mutation for future graph persistence planning.
+    pub fn remove_related_at(&mut self, index: usize) -> Option<T>
+    where
+        T: Clone,
+    {
+        if index >= self.values.len() {
+            return None;
+        }
+        let value = self.values.remove(index);
+        self.relationship_changes
+            .push(RelationshipCollectionChange::Removed(value.clone()));
+        Some(value)
+    }
+
+    /// Returns relationship mutations captured by explicit mutation APIs.
+    pub fn relationship_changes(&self) -> &[RelationshipCollectionChange<T>] {
+        &self.relationship_changes
+    }
+
+    /// Drains captured relationship mutations from this wrapper.
+    pub fn take_relationship_changes(&mut self) -> Vec<RelationshipCollectionChange<T>> {
+        std::mem::take(&mut self.relationship_changes)
+    }
 }
 
 impl<T> Default for Collection<T> {
     fn default() -> Self {
-        Self { values: Vec::new() }
+        Self::empty()
     }
 }
+
+impl<T: std::fmt::Debug> std::fmt::Debug for Collection<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Collection")
+            .field("values", &self.values)
+            .finish()
+    }
+}
+
+impl<T: PartialEq> PartialEq for Collection<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.values == other.values
+    }
+}
+
+impl<T: Eq> Eq for Collection<T> {}
 
 /// Opt-in lazy collection navigation wrapper.
 ///
 /// This type stores loaded values and load state, but it never owns a database
 /// context and never performs I/O from accessors, formatting, cloning or
 /// comparison. Loading must happen through an explicit ORM method.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Clone)]
 pub struct LazyCollection<T> {
     values: Vec<T>,
     loaded: bool,
+    relationship_changes: Vec<RelationshipCollectionChange<T>>,
 }
 
 impl<T> LazyCollection<T> {
@@ -315,6 +506,7 @@ impl<T> LazyCollection<T> {
         Self {
             values: Vec::new(),
             loaded: false,
+            relationship_changes: Vec::new(),
         }
     }
 
@@ -323,6 +515,7 @@ impl<T> LazyCollection<T> {
         Self {
             values,
             loaded: true,
+            relationship_changes: Vec::new(),
         }
     }
 
@@ -344,10 +537,49 @@ impl<T> LazyCollection<T> {
         self.loaded = true;
     }
 
+    /// Explicitly appends a related value, marks this wrapper loaded, and
+    /// records a relationship mutation for future graph persistence planning.
+    pub fn push_related(&mut self, value: T)
+    where
+        T: Clone,
+    {
+        self.values.push(value.clone());
+        self.loaded = true;
+        self.relationship_changes
+            .push(RelationshipCollectionChange::Added(value));
+    }
+
+    /// Explicitly removes a related value by index, marks this wrapper loaded,
+    /// and records a relationship mutation for future graph persistence
+    /// planning.
+    pub fn remove_related_at(&mut self, index: usize) -> Option<T>
+    where
+        T: Clone,
+    {
+        if index >= self.values.len() {
+            return None;
+        }
+        let value = self.values.remove(index);
+        self.loaded = true;
+        self.relationship_changes
+            .push(RelationshipCollectionChange::Removed(value.clone()));
+        Some(value)
+    }
+
     /// Clears the cached values and marks this wrapper as unloaded.
     pub fn clear(&mut self) {
         self.values.clear();
         self.loaded = false;
+    }
+
+    /// Returns relationship mutations captured by explicit mutation APIs.
+    pub fn relationship_changes(&self) -> &[RelationshipCollectionChange<T>] {
+        &self.relationship_changes
+    }
+
+    /// Drains captured relationship mutations from this wrapper.
+    pub fn take_relationship_changes(&mut self) -> Vec<RelationshipCollectionChange<T>> {
+        std::mem::take(&mut self.relationship_changes)
     }
 }
 
@@ -356,6 +588,23 @@ impl<T> Default for LazyCollection<T> {
         Self::unloaded()
     }
 }
+
+impl<T: std::fmt::Debug> std::fmt::Debug for LazyCollection<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LazyCollection")
+            .field("values", &self.values)
+            .field("loaded", &self.loaded)
+            .finish()
+    }
+}
+
+impl<T: PartialEq> PartialEq for LazyCollection<T> {
+    fn eq(&self, other: &Self) -> bool {
+        self.values == other.values && self.loaded == other.loaded
+    }
+}
+
+impl<T: Eq> Eq for LazyCollection<T> {}
 
 /// Builds a model snapshot from a context type that exposes entity metadata.
 ///
@@ -387,10 +636,11 @@ pub mod prelude {
         MssqlOperationalOptions, MssqlParameterLogMode, MssqlPoolBackend, MssqlPoolOptions,
         MssqlRetryOptions, MssqlSlowQueryOptions, MssqlTimeoutOptions, MssqlTracingOptions,
         Navigation, PageRequest, PredicateCompositionExt, QueryHint, RawCommand, RawParam,
-        RawParams, RawQuery, RawSqlExecution, SelectProjections, SharedConnection,
-        SoftDeleteContext, SoftDeleteEntity, SoftDeleteOperation, SoftDeleteProvider,
-        SoftDeleteRequestValues, SoftDeleteValues, TenantContext, TenantScopedEntity, Tracked,
-        model_snapshot_from_source, model_snapshot_json_from_source,
+        RawParams, RawQuery, RawSqlExecution, RelationshipCollectionChange,
+        RelationshipNavigationChange, SelectProjections, SharedConnection, SoftDeleteContext,
+        SoftDeleteEntity, SoftDeleteOperation, SoftDeleteProvider, SoftDeleteRequestValues,
+        SoftDeleteValues, TenantContext, TenantScopedEntity, Tracked, model_snapshot_from_source,
+        model_snapshot_json_from_source,
     };
     pub use crate::{
         AuditContext, AuditOperation, AuditProvider, AuditRequestValues, AuditValues,
@@ -425,9 +675,10 @@ mod tests {
         MssqlOperationalOptions, MssqlPoolBackend, MssqlPoolOptions, MssqlRetryOptions,
         MssqlTimeoutOptions, NavigationKind, NavigationMetadata, OrmError, PageRequest,
         PredicateCompositionExt, PrimaryKeyMetadata, QueryExecution, QueryHint, RawCommand,
-        RawParam, RawParams, RawQuery, RawSqlExecution, SelectProjection, SelectProjections,
-        SharedConnection, SoftDeleteEntity, SoftDeleteFields, SqlServerType, SqlTypeMapping,
-        SqlValue, TenantContext, TenantScopedEntity, Tracked,
+        RawParam, RawParams, RawQuery, RawSqlExecution, RelationshipCollectionChange,
+        RelationshipNavigationChange, SelectProjection, SelectProjections, SharedConnection,
+        SoftDeleteEntity, SoftDeleteFields, SqlServerType, SqlTypeMapping, SqlValue, TenantContext,
+        TenantScopedEntity, Tracked,
     };
     use sql_orm_query::{Expr, OrderBy, Predicate, SortDirection, TableRef};
     use std::time::Duration;
@@ -599,6 +850,101 @@ mod tests {
         children.clear();
         assert!(!children.is_loaded());
         assert!(children.as_slice().is_empty());
+    }
+
+    #[test]
+    fn navigation_wrappers_capture_only_explicit_relationship_mutations() {
+        let mut owner = super::Navigation::loaded(1_i64);
+        assert!(owner.relationship_changes().is_empty());
+
+        owner.set(Some(2_i64));
+        assert_eq!(owner.as_ref(), Some(&2_i64));
+        assert!(
+            owner.relationship_changes().is_empty(),
+            "include/materialization setter must not capture relationship commands"
+        );
+
+        owner.set_related(Some(3_i64));
+        assert_eq!(owner.as_ref(), Some(&3_i64));
+        assert_eq!(
+            owner.relationship_changes(),
+            &[RelationshipNavigationChange::Set {
+                previous: Some(2_i64),
+                current: Some(3_i64),
+            }]
+        );
+        assert_eq!(
+            owner.take_relationship_changes(),
+            vec![RelationshipNavigationChange::Set {
+                previous: Some(2_i64),
+                current: Some(3_i64),
+            }]
+        );
+        assert!(owner.relationship_changes().is_empty());
+
+        let mut lazy_owner = LazyNavigation::unloaded();
+        lazy_owner.set_loaded(Some(10_i64));
+        assert!(lazy_owner.relationship_changes().is_empty());
+
+        lazy_owner.set_related(None);
+        assert!(lazy_owner.is_loaded());
+        assert_eq!(
+            lazy_owner.relationship_changes(),
+            &[RelationshipNavigationChange::Set {
+                previous: Some(10_i64),
+                current: None,
+            }]
+        );
+        assert_eq!(
+            format!("{:?}", lazy_owner),
+            "LazyNavigation { value: None, loaded: true }"
+        );
+    }
+
+    #[test]
+    fn collection_wrappers_capture_only_explicit_relationship_mutations() {
+        let mut children = super::Collection::from_vec(vec![1_i64, 2_i64]);
+        assert!(children.relationship_changes().is_empty());
+
+        children.push_related(3_i64);
+        assert_eq!(children.as_slice(), &[1_i64, 2_i64, 3_i64]);
+        assert_eq!(
+            children.relationship_changes(),
+            &[RelationshipCollectionChange::Added(3_i64)]
+        );
+
+        assert_eq!(children.remove_related_at(0), Some(1_i64));
+        assert_eq!(children.as_slice(), &[2_i64, 3_i64]);
+        assert_eq!(
+            children.take_relationship_changes(),
+            vec![
+                RelationshipCollectionChange::Added(3_i64),
+                RelationshipCollectionChange::Removed(1_i64),
+            ]
+        );
+        assert!(children.relationship_changes().is_empty());
+        assert_eq!(children.remove_related_at(10), None);
+        assert!(children.relationship_changes().is_empty());
+
+        let mut lazy_children = LazyCollection::unloaded();
+        lazy_children.set_loaded(vec![7_i64]);
+        assert!(lazy_children.is_loaded());
+        assert!(lazy_children.relationship_changes().is_empty());
+
+        lazy_children.push_related(8_i64);
+        assert_eq!(lazy_children.remove_related_at(0), Some(7_i64));
+        assert_eq!(lazy_children.as_slice(), &[8_i64]);
+        assert_eq!(
+            lazy_children.relationship_changes(),
+            &[
+                RelationshipCollectionChange::Added(8_i64),
+                RelationshipCollectionChange::Removed(7_i64),
+            ]
+        );
+        assert_eq!(
+            format!("{:?}", lazy_children),
+            "LazyCollection { values: [8], loaded: true }"
+        );
     }
 
     #[test]
