@@ -129,6 +129,16 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   automatically by `save_changes()`; generated `save_changes()` now rejects
   tracked entities that still contain pending wrapper-local relationship
   mutations with a `Compile` error before opening an internal transaction.
+- wrapper-local relationship mutations can now carry internal tracked identity
+  for the future planner. Hidden tracked-specific APIs
+  `set_tracked_related(...)` and `push_tracked_related(...)` accept attached
+  `Tracked<T>` handles, copy the visible current value into the wrapper and
+  record a `RelationshipTrackedIdentity` based on the tracker registration id,
+  including temporary identities for `Added` entities. Passing a detached or
+  otherwise unregistered `Tracked<T>` returns a `Compile` error before the
+  wrapper state changes. Ordinary value-based APIs still record identity
+  `None`, and hidden `take_relationship_change_batch()` drains public value
+  changes plus internal identity changes atomically for the future collector.
 - the internal tracker now has a first relationship-command reconciliation
   slice: `RelationshipCommand` values can be checked against tracked
   registration state before SQL execution, producing a
@@ -151,8 +161,10 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   navigation wrappers. Generated `save_changes()` calls a `DbSet` guard for
   every context entity type before starting an internal transaction, so graph
   mutations are no longer silently ignored when they are present on tracked
-  entities. The guard is intentionally fail-fast until wrapper mutations carry
-  enough tracked identity to build unambiguous `RelationshipCommand` values.
+  entities. The guard remains intentionally fail-fast until generated
+  `save_changes()` collects batched wrapper identity logs, builds unambiguous
+  `RelationshipCommand` values, reconciles them once per context and dispatches
+  the resulting entity operations through the internal `DbSet` executor.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current

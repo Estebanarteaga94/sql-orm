@@ -481,6 +481,11 @@ impl<T> Tracked<T> {
         self.detach_registry();
     }
 
+    #[doc(hidden)]
+    pub fn relationship_registration_id(&self) -> Option<usize> {
+        self.registration_id
+    }
+
     /// Returns mutable access to the current value and marks the entity as
     /// modified when it was previously loaded as unchanged.
     pub fn current_mut(&mut self) -> &mut T {

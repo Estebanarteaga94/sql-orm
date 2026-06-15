@@ -192,6 +192,45 @@ pub enum RelationshipCollectionChange<T> {
     Removed(T),
 }
 
+#[doc(hidden)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelationshipTrackedIdentity {
+    registration_id: usize,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationshipNavigationIdentityChange {
+    Set {
+        previous: Option<RelationshipTrackedIdentity>,
+        current: Option<RelationshipTrackedIdentity>,
+    },
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationshipCollectionIdentityChange {
+    Added(Option<RelationshipTrackedIdentity>),
+    Removed(Option<RelationshipTrackedIdentity>),
+}
+
+#[doc(hidden)]
+impl RelationshipTrackedIdentity {
+    pub fn from_tracked<T>(tracked: &Tracked<T>) -> Result<Self, core::OrmError> {
+        let registration_id = tracked.relationship_registration_id().ok_or_else(|| {
+            core::OrmError::compile(
+                "relationship wrapper tracked mutation requires an entity attached to a DbContext",
+            )
+        })?;
+
+        Ok(Self { registration_id })
+    }
+
+    pub const fn registration_id(&self) -> usize {
+        self.registration_id
+    }
+}
+
 /// Marker value for a single related entity navigation.
 ///
 /// Navigation fields are not persisted as columns. They exist so
@@ -200,7 +239,9 @@ pub enum RelationshipCollectionChange<T> {
 #[derive(Clone)]
 pub struct Navigation<T> {
     value: Option<T>,
+    value_identity: Option<RelationshipTrackedIdentity>,
     relationship_changes: Vec<RelationshipNavigationChange<T>>,
+    relationship_identity_changes: Vec<RelationshipNavigationIdentityChange>,
 }
 
 impl<T> Navigation<T> {
@@ -208,7 +249,9 @@ impl<T> Navigation<T> {
     pub const fn empty() -> Self {
         Self {
             value: None,
+            value_identity: None,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -216,7 +259,9 @@ impl<T> Navigation<T> {
     pub fn loaded(value: T) -> Self {
         Self {
             value: Some(value),
+            value_identity: None,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -224,7 +269,9 @@ impl<T> Navigation<T> {
     pub fn from_option(value: Option<T>) -> Self {
         Self {
             value,
+            value_identity: None,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -236,6 +283,7 @@ impl<T> Navigation<T> {
     /// Replaces the loaded related entity.
     pub fn set(&mut self, value: Option<T>) {
         self.value = value;
+        self.value_identity = None;
     }
 
     /// Explicitly replaces the related entity and records a relationship
@@ -249,12 +297,44 @@ impl<T> Navigation<T> {
         T: Clone,
     {
         let previous = self.value.clone();
+        let previous_identity = self.value_identity;
         self.value = value.clone();
+        self.value_identity = None;
         self.relationship_changes
             .push(RelationshipNavigationChange::Set {
                 previous,
                 current: value,
             });
+        self.relationship_identity_changes
+            .push(RelationshipNavigationIdentityChange::Set {
+                previous: previous_identity,
+                current: None,
+            });
+    }
+
+    #[doc(hidden)]
+    pub fn set_tracked_related(&mut self, value: Option<&Tracked<T>>) -> Result<(), core::OrmError>
+    where
+        T: Clone,
+    {
+        let previous = self.value.clone();
+        let previous_identity = self.value_identity;
+        let current_identity = value
+            .map(RelationshipTrackedIdentity::from_tracked)
+            .transpose()?;
+        let current = value.map(|tracked| tracked.current().clone());
+
+        self.value = current.clone();
+        self.value_identity = current_identity;
+        self.relationship_changes
+            .push(RelationshipNavigationChange::Set { previous, current });
+        self.relationship_identity_changes
+            .push(RelationshipNavigationIdentityChange::Set {
+                previous: previous_identity,
+                current: current_identity,
+            });
+
+        Ok(())
     }
 
     /// Returns relationship mutations captured by explicit mutation APIs.
@@ -262,9 +342,27 @@ impl<T> Navigation<T> {
         &self.relationship_changes
     }
 
+    #[doc(hidden)]
+    pub fn relationship_identity_changes(&self) -> &[RelationshipNavigationIdentityChange] {
+        &self.relationship_identity_changes
+    }
+
+    #[doc(hidden)]
+    pub fn take_relationship_change_batch(
+        &mut self,
+    ) -> (
+        Vec<RelationshipNavigationChange<T>>,
+        Vec<RelationshipNavigationIdentityChange>,
+    ) {
+        (
+            std::mem::take(&mut self.relationship_changes),
+            std::mem::take(&mut self.relationship_identity_changes),
+        )
+    }
+
     /// Drains captured relationship mutations from this wrapper.
     pub fn take_relationship_changes(&mut self) -> Vec<RelationshipNavigationChange<T>> {
-        std::mem::take(&mut self.relationship_changes)
+        self.take_relationship_change_batch().0
     }
 }
 
@@ -298,8 +396,10 @@ impl<T: Eq> Eq for Navigation<T> {}
 #[derive(Clone)]
 pub struct LazyNavigation<T> {
     value: Option<T>,
+    value_identity: Option<RelationshipTrackedIdentity>,
     loaded: bool,
     relationship_changes: Vec<RelationshipNavigationChange<T>>,
+    relationship_identity_changes: Vec<RelationshipNavigationIdentityChange>,
 }
 
 impl<T> LazyNavigation<T> {
@@ -307,8 +407,10 @@ impl<T> LazyNavigation<T> {
     pub const fn unloaded() -> Self {
         Self {
             value: None,
+            value_identity: None,
             loaded: false,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -316,8 +418,10 @@ impl<T> LazyNavigation<T> {
     pub fn loaded(value: T) -> Self {
         Self {
             value: Some(value),
+            value_identity: None,
             loaded: true,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -325,8 +429,10 @@ impl<T> LazyNavigation<T> {
     pub fn from_option(value: Option<T>) -> Self {
         Self {
             value,
+            value_identity: None,
             loaded: true,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -345,6 +451,7 @@ impl<T> LazyNavigation<T> {
     /// Replaces the loaded value and marks this wrapper as loaded.
     pub fn set_loaded(&mut self, value: Option<T>) {
         self.value = value;
+        self.value_identity = None;
         self.loaded = true;
     }
 
@@ -355,18 +462,52 @@ impl<T> LazyNavigation<T> {
         T: Clone,
     {
         let previous = self.value.clone();
+        let previous_identity = self.value_identity;
         self.value = value.clone();
+        self.value_identity = None;
         self.loaded = true;
         self.relationship_changes
             .push(RelationshipNavigationChange::Set {
                 previous,
                 current: value,
             });
+        self.relationship_identity_changes
+            .push(RelationshipNavigationIdentityChange::Set {
+                previous: previous_identity,
+                current: None,
+            });
+    }
+
+    #[doc(hidden)]
+    pub fn set_tracked_related(&mut self, value: Option<&Tracked<T>>) -> Result<(), core::OrmError>
+    where
+        T: Clone,
+    {
+        let previous = self.value.clone();
+        let previous_identity = self.value_identity;
+        let current_identity = value
+            .map(RelationshipTrackedIdentity::from_tracked)
+            .transpose()?;
+        let current = value.map(|tracked| tracked.current().clone());
+
+        self.value = current.clone();
+        self.value_identity = current_identity;
+        self.loaded = true;
+        self.relationship_changes
+            .push(RelationshipNavigationChange::Set { previous, current });
+        self.relationship_identity_changes
+            .push(RelationshipNavigationIdentityChange::Set {
+                previous: previous_identity,
+                current: current_identity,
+            });
+
+        Ok(())
     }
 
     /// Clears the cached value and marks this wrapper as unloaded.
     pub fn clear(&mut self) {
         self.value = None;
+        self.value_identity = None;
         self.loaded = false;
     }
 
@@ -375,9 +516,27 @@ impl<T> LazyNavigation<T> {
         &self.relationship_changes
     }
 
+    #[doc(hidden)]
+    pub fn relationship_identity_changes(&self) -> &[RelationshipNavigationIdentityChange] {
+        &self.relationship_identity_changes
+    }
+
+    #[doc(hidden)]
+    pub fn take_relationship_change_batch(
+        &mut self,
+    ) -> (
+        Vec<RelationshipNavigationChange<T>>,
+        Vec<RelationshipNavigationIdentityChange>,
+    ) {
+        (
+            std::mem::take(&mut self.relationship_changes),
+            std::mem::take(&mut self.relationship_identity_changes),
+        )
+    }
+
     /// Drains captured relationship mutations from this wrapper.
     pub fn take_relationship_changes(&mut self) -> Vec<RelationshipNavigationChange<T>> {
-        std::mem::take(&mut self.relationship_changes)
+        self.take_relationship_change_batch().0
     }
 }
 
@@ -411,7 +570,9 @@ impl<T: Eq> Eq for LazyNavigation<T> {}
 #[derive(Clone)]
 pub struct Collection<T> {
     values: Vec<T>,
+    value_identities: Vec<Option<RelationshipTrackedIdentity>>,
     relationship_changes: Vec<RelationshipCollectionChange<T>>,
+    relationship_identity_changes: Vec<RelationshipCollectionIdentityChange>,
 }
 
 impl<T> Collection<T> {
@@ -419,15 +580,20 @@ impl<T> Collection<T> {
     pub const fn empty() -> Self {
         Self {
             values: Vec::new(),
+            value_identities: Vec::new(),
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
     /// Creates a loaded collection navigation from existing values.
     pub fn from_vec(values: Vec<T>) -> Self {
+        let value_identities = vec![None; values.len()];
         Self {
             values,
+            value_identities,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -443,8 +609,29 @@ impl<T> Collection<T> {
         T: Clone,
     {
         self.values.push(value.clone());
+        self.value_identities.push(None);
         self.relationship_changes
             .push(RelationshipCollectionChange::Added(value));
+        self.relationship_identity_changes
+            .push(RelationshipCollectionIdentityChange::Added(None));
+    }
+
+    #[doc(hidden)]
+    pub fn push_tracked_related(&mut self, value: &Tracked<T>) -> Result<(), core::OrmError>
+    where
+        T: Clone,
+    {
+        let identity = RelationshipTrackedIdentity::from_tracked(value)?;
+        let current = value.current().clone();
+
+        self.values.push(current.clone());
+        self.value_identities.push(Some(identity));
+        self.relationship_changes
+            .push(RelationshipCollectionChange::Added(current));
+        self.relationship_identity_changes
+            .push(RelationshipCollectionIdentityChange::Added(Some(identity)));
+
+        Ok(())
     }
 
     /// Explicitly removes a related value by index and records a relationship
@@ -457,8 +644,11 @@ impl<T> Collection<T> {
             return None;
         }
         let value = self.values.remove(index);
+        let identity = self.value_identities.remove(index);
         self.relationship_changes
             .push(RelationshipCollectionChange::Removed(value.clone()));
+        self.relationship_identity_changes
+            .push(RelationshipCollectionIdentityChange::Removed(identity));
         Some(value)
     }
 
@@ -467,9 +657,27 @@ impl<T> Collection<T> {
         &self.relationship_changes
     }
 
+    #[doc(hidden)]
+    pub fn relationship_identity_changes(&self) -> &[RelationshipCollectionIdentityChange] {
+        &self.relationship_identity_changes
+    }
+
+    #[doc(hidden)]
+    pub fn take_relationship_change_batch(
+        &mut self,
+    ) -> (
+        Vec<RelationshipCollectionChange<T>>,
+        Vec<RelationshipCollectionIdentityChange>,
+    ) {
+        (
+            std::mem::take(&mut self.relationship_changes),
+            std::mem::take(&mut self.relationship_identity_changes),
+        )
+    }
+
     /// Drains captured relationship mutations from this wrapper.
     pub fn take_relationship_changes(&mut self) -> Vec<RelationshipCollectionChange<T>> {
-        std::mem::take(&mut self.relationship_changes)
+        self.take_relationship_change_batch().0
     }
 }
 
@@ -503,8 +711,10 @@ impl<T: Eq> Eq for Collection<T> {}
 #[derive(Clone)]
 pub struct LazyCollection<T> {
     values: Vec<T>,
+    value_identities: Vec<Option<RelationshipTrackedIdentity>>,
     loaded: bool,
     relationship_changes: Vec<RelationshipCollectionChange<T>>,
+    relationship_identity_changes: Vec<RelationshipCollectionIdentityChange>,
 }
 
 impl<T> LazyCollection<T> {
@@ -512,17 +722,22 @@ impl<T> LazyCollection<T> {
     pub const fn unloaded() -> Self {
         Self {
             values: Vec::new(),
+            value_identities: Vec::new(),
             loaded: false,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
     /// Creates a loaded lazy collection from existing values.
     pub fn from_vec(values: Vec<T>) -> Self {
+        let value_identities = vec![None; values.len()];
         Self {
             values,
+            value_identities,
             loaded: true,
             relationship_changes: Vec::new(),
+            relationship_identity_changes: Vec::new(),
         }
     }
 
@@ -540,6 +755,7 @@ impl<T> LazyCollection<T> {
 
     /// Replaces the loaded values and marks this wrapper as loaded.
     pub fn set_loaded(&mut self, values: Vec<T>) {
+        self.value_identities = vec![None; values.len()];
         self.values = values;
         self.loaded = true;
     }
@@ -551,9 +767,31 @@ impl<T> LazyCollection<T> {
         T: Clone,
     {
         self.values.push(value.clone());
+        self.value_identities.push(None);
         self.loaded = true;
         self.relationship_changes
             .push(RelationshipCollectionChange::Added(value));
+        self.relationship_identity_changes
+            .push(RelationshipCollectionIdentityChange::Added(None));
+    }
+
+    #[doc(hidden)]
+    pub fn push_tracked_related(&mut self, value: &Tracked<T>) -> Result<(), core::OrmError>
+    where
+        T: Clone,
+    {
+        let identity = RelationshipTrackedIdentity::from_tracked(value)?;
+        let current = value.current().clone();
+
+        self.values.push(current.clone());
+        self.value_identities.push(Some(identity));
+        self.loaded = true;
+        self.relationship_changes
+            .push(RelationshipCollectionChange::Added(current));
+        self.relationship_identity_changes
+            .push(RelationshipCollectionIdentityChange::Added(Some(identity)));
+
+        Ok(())
     }
 
     /// Explicitly removes a related value by index, marks this wrapper loaded,
@@ -567,15 +805,19 @@ impl<T> LazyCollection<T> {
             return None;
         }
         let value = self.values.remove(index);
+        let identity = self.value_identities.remove(index);
         self.loaded = true;
         self.relationship_changes
             .push(RelationshipCollectionChange::Removed(value.clone()));
+        self.relationship_identity_changes
+            .push(RelationshipCollectionIdentityChange::Removed(identity));
         Some(value)
     }
 
     /// Clears the cached values and marks this wrapper as unloaded.
     pub fn clear(&mut self) {
         self.values.clear();
+        self.value_identities.clear();
         self.loaded = false;
     }
 
@@ -584,9 +826,27 @@ impl<T> LazyCollection<T> {
         &self.relationship_changes
     }
 
+    #[doc(hidden)]
+    pub fn relationship_identity_changes(&self) -> &[RelationshipCollectionIdentityChange] {
+        &self.relationship_identity_changes
+    }
+
+    #[doc(hidden)]
+    pub fn take_relationship_change_batch(
+        &mut self,
+    ) -> (
+        Vec<RelationshipCollectionChange<T>>,
+        Vec<RelationshipCollectionIdentityChange>,
+    ) {
+        (
+            std::mem::take(&mut self.relationship_changes),
+            std::mem::take(&mut self.relationship_identity_changes),
+        )
+    }
+
     /// Drains captured relationship mutations from this wrapper.
     pub fn take_relationship_changes(&mut self) -> Vec<RelationshipCollectionChange<T>> {
-        std::mem::take(&mut self.relationship_changes)
+        self.take_relationship_change_batch().0
     }
 }
 
@@ -688,9 +948,15 @@ mod tests {
         TenantScopedEntity, Tracked,
     };
     use sql_orm_query::{Expr, OrderBy, Predicate, SortDirection, TableRef};
-    use std::time::Duration;
+    use std::{sync::Arc, time::Duration};
 
+    #[derive(Clone, Debug, PartialEq, Eq)]
     struct PublicEntity;
+
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    struct RelationshipTestEntity {
+        id: i64,
+    }
 
     static PUBLIC_ENTITY_METADATA: EntityMetadata = EntityMetadata {
         rust_name: "PublicEntity",
@@ -707,9 +973,92 @@ mod tests {
         navigations: &[],
     };
 
+    static RELATIONSHIP_TEST_ENTITY_METADATA: EntityMetadata = EntityMetadata {
+        rust_name: "RelationshipTestEntity",
+        schema: "dbo",
+        table: "relationship_test_entities",
+        renamed_from: None,
+        columns: &[],
+        primary_key: PrimaryKeyMetadata {
+            name: None,
+            columns: &[],
+        },
+        indexes: &[],
+        foreign_keys: &[],
+        navigations: &[],
+    };
+
     impl Entity for PublicEntity {
         fn metadata() -> &'static EntityMetadata {
             &PUBLIC_ENTITY_METADATA
+        }
+    }
+
+    impl Entity for RelationshipTestEntity {
+        fn metadata() -> &'static EntityMetadata {
+            &RELATIONSHIP_TEST_ENTITY_METADATA
+        }
+    }
+
+    fn relationship_entity(id: i64) -> RelationshipTestEntity {
+        RelationshipTestEntity { id }
+    }
+
+    fn tracked_relationship_entity(
+        registry: &Arc<super::TrackingRegistry>,
+        id: i64,
+    ) -> Tracked<RelationshipTestEntity> {
+        let mut tracked = Tracked::from_added(relationship_entity(id));
+        tracked.attach_registry(Arc::clone(registry));
+        tracked
+    }
+
+    fn assert_navigation_identity_change(
+        change: &super::RelationshipNavigationIdentityChange,
+        expected_previous: Option<usize>,
+        expected_current: Option<usize>,
+    ) {
+        match change {
+            super::RelationshipNavigationIdentityChange::Set { previous, current } => {
+                assert_eq!(
+                    previous.as_ref().map(|identity| identity.registration_id()),
+                    expected_previous
+                );
+                assert_eq!(
+                    current.as_ref().map(|identity| identity.registration_id()),
+                    expected_current
+                );
+            }
+        }
+    }
+
+    fn assert_collection_identity_added(
+        change: &super::RelationshipCollectionIdentityChange,
+        expected: Option<usize>,
+    ) {
+        match change {
+            super::RelationshipCollectionIdentityChange::Added(identity) => {
+                assert_eq!(
+                    identity.as_ref().map(|identity| identity.registration_id()),
+                    expected
+                );
+            }
+            other => panic!("expected added relationship identity change, got {other:?}"),
+        }
+    }
+
+    fn assert_collection_identity_removed(
+        change: &super::RelationshipCollectionIdentityChange,
+        expected: Option<usize>,
+    ) {
+        match change {
+            super::RelationshipCollectionIdentityChange::Removed(identity) => {
+                assert_eq!(
+                    identity.as_ref().map(|identity| identity.registration_id()),
+                    expected
+                );
+            }
+            other => panic!("expected removed relationship identity change, got {other:?}"),
         }
     }
 
@@ -952,6 +1301,166 @@ mod tests {
             format!("{:?}", lazy_children),
             "LazyCollection { values: [8], loaded: true }"
         );
+    }
+
+    #[test]
+    fn navigation_wrappers_capture_tracked_relationship_identities() {
+        let registry = Arc::new(super::TrackingRegistry::default());
+        let tracked_one = tracked_relationship_entity(&registry, 1);
+        let tracked_two = tracked_relationship_entity(&registry, 2);
+        let tracked_one_id = tracked_one.relationship_registration_id().unwrap();
+        let tracked_two_id = tracked_two.relationship_registration_id().unwrap();
+
+        let mut owner = super::Navigation::empty();
+        owner.set_tracked_related(Some(&tracked_one)).unwrap();
+        owner.set_tracked_related(Some(&tracked_two)).unwrap();
+        owner.set_tracked_related(None).unwrap();
+
+        assert_eq!(owner.as_ref(), None);
+        let (changes, identity_changes) = owner.take_relationship_change_batch();
+        assert_eq!(
+            changes,
+            vec![
+                RelationshipNavigationChange::Set {
+                    previous: None,
+                    current: Some(relationship_entity(1)),
+                },
+                RelationshipNavigationChange::Set {
+                    previous: Some(relationship_entity(1)),
+                    current: Some(relationship_entity(2)),
+                },
+                RelationshipNavigationChange::Set {
+                    previous: Some(relationship_entity(2)),
+                    current: None,
+                },
+            ]
+        );
+        assert_eq!(identity_changes.len(), 3);
+        assert_navigation_identity_change(&identity_changes[0], None, Some(tracked_one_id));
+        assert_navigation_identity_change(
+            &identity_changes[1],
+            Some(tracked_one_id),
+            Some(tracked_two_id),
+        );
+        assert_navigation_identity_change(&identity_changes[2], Some(tracked_two_id), None);
+        assert!(owner.relationship_changes().is_empty());
+        assert!(owner.relationship_identity_changes().is_empty());
+
+        let mut lazy_owner = LazyNavigation::unloaded();
+        lazy_owner.set_loaded(Some(relationship_entity(10)));
+        lazy_owner.set_tracked_related(Some(&tracked_one)).unwrap();
+
+        assert!(lazy_owner.is_loaded());
+        assert_eq!(lazy_owner.as_ref(), Some(&relationship_entity(1)));
+        let (changes, identity_changes) = lazy_owner.take_relationship_change_batch();
+        assert_eq!(
+            changes,
+            vec![RelationshipNavigationChange::Set {
+                previous: Some(relationship_entity(10)),
+                current: Some(relationship_entity(1)),
+            }]
+        );
+        assert_eq!(identity_changes.len(), 1);
+        assert_navigation_identity_change(&identity_changes[0], None, Some(tracked_one_id));
+        assert!(lazy_owner.relationship_identity_changes().is_empty());
+    }
+
+    #[test]
+    fn collection_wrappers_capture_tracked_relationship_identities() {
+        let registry = Arc::new(super::TrackingRegistry::default());
+        let tracked = tracked_relationship_entity(&registry, 1);
+        let tracked_id = tracked.relationship_registration_id().unwrap();
+
+        let mut children = super::Collection::from_vec(vec![relationship_entity(10)]);
+        children.push_related(relationship_entity(20));
+        children.push_tracked_related(&tracked).unwrap();
+
+        assert_eq!(
+            children.as_slice(),
+            &[
+                relationship_entity(10),
+                relationship_entity(20),
+                relationship_entity(1),
+            ]
+        );
+        assert_eq!(children.remove_related_at(0), Some(relationship_entity(10)));
+        assert_eq!(children.remove_related_at(1), Some(relationship_entity(1)));
+
+        let (changes, identity_changes) = children.take_relationship_change_batch();
+        assert_eq!(
+            changes,
+            vec![
+                RelationshipCollectionChange::Added(relationship_entity(20)),
+                RelationshipCollectionChange::Added(relationship_entity(1)),
+                RelationshipCollectionChange::Removed(relationship_entity(10)),
+                RelationshipCollectionChange::Removed(relationship_entity(1)),
+            ]
+        );
+        assert_eq!(identity_changes.len(), 4);
+        assert_collection_identity_added(&identity_changes[0], None);
+        assert_collection_identity_added(&identity_changes[1], Some(tracked_id));
+        assert_collection_identity_removed(&identity_changes[2], None);
+        assert_collection_identity_removed(&identity_changes[3], Some(tracked_id));
+        assert!(children.relationship_changes().is_empty());
+        assert!(children.relationship_identity_changes().is_empty());
+
+        let mut lazy_children = LazyCollection::unloaded();
+        lazy_children.set_loaded(vec![relationship_entity(30)]);
+        lazy_children.push_tracked_related(&tracked).unwrap();
+
+        assert!(lazy_children.is_loaded());
+        assert_eq!(
+            lazy_children.as_slice(),
+            &[relationship_entity(30), relationship_entity(1)]
+        );
+        assert_eq!(
+            lazy_children.remove_related_at(1),
+            Some(relationship_entity(1))
+        );
+
+        let (changes, identity_changes) = lazy_children.take_relationship_change_batch();
+        assert_eq!(
+            changes,
+            vec![
+                RelationshipCollectionChange::Added(relationship_entity(1)),
+                RelationshipCollectionChange::Removed(relationship_entity(1)),
+            ]
+        );
+        assert_eq!(identity_changes.len(), 2);
+        assert_collection_identity_added(&identity_changes[0], Some(tracked_id));
+        assert_collection_identity_removed(&identity_changes[1], Some(tracked_id));
+        assert!(lazy_children.relationship_identity_changes().is_empty());
+    }
+
+    #[test]
+    fn tracked_relationship_mutations_reject_detached_entities() {
+        let detached = Tracked::from_added(relationship_entity(1));
+
+        let mut owner = super::Navigation::empty();
+        let error = owner.set_tracked_related(Some(&detached)).unwrap_err();
+        assert_eq!(error.kind(), super::core::OrmErrorKind::Compile);
+        assert_eq!(
+            error.message(),
+            "relationship wrapper tracked mutation requires an entity attached to a DbContext"
+        );
+        assert!(owner.relationship_changes().is_empty());
+        assert!(owner.relationship_identity_changes().is_empty());
+
+        let mut children = super::Collection::empty();
+        let error = children.push_tracked_related(&detached).unwrap_err();
+        assert_eq!(error.kind(), super::core::OrmErrorKind::Compile);
+        assert_eq!(
+            error.message(),
+            "relationship wrapper tracked mutation requires an entity attached to a DbContext"
+        );
+        assert!(children.relationship_changes().is_empty());
+        assert!(children.relationship_identity_changes().is_empty());
+
+        let mut lazy_children = LazyCollection::unloaded();
+        let error = lazy_children.push_tracked_related(&detached).unwrap_err();
+        assert_eq!(error.kind(), super::core::OrmErrorKind::Compile);
+        assert!(lazy_children.relationship_changes().is_empty());
+        assert!(lazy_children.relationship_identity_changes().is_empty());
     }
 
     #[test]
