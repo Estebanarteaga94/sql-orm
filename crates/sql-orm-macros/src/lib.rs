@@ -1238,6 +1238,41 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
             }
         })
         .collect::<Vec<_>>();
+    let relationship_change_batches = navigations
+        .iter()
+        .map(|navigation| {
+            let field_ident =
+                Ident::new(&navigation.rust_field.value(), navigation.rust_field.span());
+            let rust_field = &navigation.rust_field;
+            let identity_change_variant = match navigation.kind {
+                NavigationKindConfig::HasMany => {
+                    quote! { ::sql_orm::RelationshipMutationIdentityChange::Collection }
+                }
+                NavigationKindConfig::BelongsTo | NavigationKindConfig::HasOne => {
+                    quote! { ::sql_orm::RelationshipMutationIdentityChange::Navigation }
+                }
+            };
+
+            quote! {
+                {
+                    let changes = self
+                        .#field_ident
+                        .relationship_identity_changes()
+                        .iter()
+                        .cloned()
+                        .map(#identity_change_variant)
+                        .collect::<::std::vec::Vec<_>>();
+
+                    if !changes.is_empty() {
+                        let navigation = <Self as ::sql_orm::core::Entity>::metadata()
+                            .navigation(#rust_field)
+                            .expect("generated relationship mutation batch must reference navigation metadata");
+                        batches.push(::sql_orm::RelationshipMutationBatch::new(navigation, changes));
+                    }
+                }
+            }
+        })
+        .collect::<Vec<_>>();
 
     let (metadata_static, metadata_expr) = if has_generated_policies
         || has_inverse_navigation_metadata
@@ -1367,6 +1402,12 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
         #soft_delete_contract_impl
         #tenant_contract_impl
         impl ::sql_orm::RelationshipMutationSource for #ident {
+            fn relationship_change_batches(&self) -> ::std::vec::Vec<::sql_orm::RelationshipMutationBatch> {
+                let mut batches = ::std::vec::Vec::new();
+                #(#relationship_change_batches)*
+                batches
+            }
+
             fn pending_relationship_change_count(&self) -> usize {
                 0usize #(#relationship_change_counts)*
             }

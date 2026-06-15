@@ -139,6 +139,13 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   wrapper state changes. Ordinary value-based APIs still record identity
   `None`, and hidden `take_relationship_change_batch()` drains public value
   changes plus internal identity changes atomically for the future collector.
+- derived entities now expose a non-destructive internal collector through
+  `RelationshipMutationSource::relationship_change_batches()`. The generated
+  implementation groups pending wrapper-local identity logs by
+  `NavigationMetadata`, preserving navigation kind, target table and foreign
+  key metadata without consuming the wrapper logs. This gives the future
+  planner a stable bridge from entity fields to relationship metadata before
+  any SQL execution is attempted.
 - the internal tracker now has a first relationship-command reconciliation
   slice: `RelationshipCommand` values can be checked against tracked
   registration state before SQL execution, producing a

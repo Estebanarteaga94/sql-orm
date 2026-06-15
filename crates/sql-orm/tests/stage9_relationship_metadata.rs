@@ -291,6 +291,75 @@ fn derived_relationship_mutation_source_counts_only_explicit_wrapper_changes() {
 }
 
 #[test]
+fn derived_relationship_mutation_source_collects_metadata_and_identity_logs() {
+    let mut project = Project {
+        id: 7,
+        name: "Roadmap".to_string(),
+        tasks: Collection::empty(),
+    };
+    project.tasks.push_related(ProjectTask {
+        id: 11,
+        project_id: 7,
+        project: Navigation::empty(),
+    });
+
+    let batches = sql_orm::RelationshipMutationSource::relationship_change_batches(&project);
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].navigation().rust_field, "tasks");
+    assert_eq!(batches[0].navigation().kind, NavigationKind::HasMany);
+    assert_eq!(
+        batches[0].navigation().foreign_key_name,
+        Some("fk_tasks_project_ref")
+    );
+    assert_eq!(batches[0].len(), 1);
+    assert_eq!(
+        batches[0].changes(),
+        &[sql_orm::RelationshipMutationIdentityChange::Collection(
+            sql_orm::RelationshipCollectionIdentityChange::Added(None),
+        )]
+    );
+    assert_eq!(
+        sql_orm::RelationshipMutationSource::pending_relationship_change_count(&project),
+        1,
+        "relationship collection must be non-destructive"
+    );
+
+    let mut task = ProjectTask {
+        id: 10,
+        project_id: 7,
+        project: Navigation::empty(),
+    };
+    task.project.set_related(Some(Project {
+        id: 7,
+        name: "Roadmap".to_string(),
+        tasks: Collection::empty(),
+    }));
+
+    let batches = sql_orm::RelationshipMutationSource::relationship_change_batches(&task);
+    assert_eq!(batches.len(), 1);
+    assert_eq!(batches[0].navigation().rust_field, "project");
+    assert_eq!(batches[0].navigation().kind, NavigationKind::BelongsTo);
+    assert_eq!(
+        batches[0].navigation().foreign_key_name,
+        Some("fk_tasks_project_ref")
+    );
+    assert_eq!(
+        batches[0].changes(),
+        &[sql_orm::RelationshipMutationIdentityChange::Navigation(
+            sql_orm::RelationshipNavigationIdentityChange::Set {
+                previous: None,
+                current: None,
+            },
+        )]
+    );
+    assert_eq!(
+        sql_orm::RelationshipMutationSource::pending_relationship_change_count(&task),
+        1,
+        "single-navigation collection must be non-destructive"
+    );
+}
+
+#[test]
 fn inverse_navigation_metadata_reuses_target_foreign_key_metadata() {
     let metadata = Project::metadata();
 

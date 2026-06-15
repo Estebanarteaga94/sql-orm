@@ -158,8 +158,15 @@ pub trait IncludeCollection<T>: core::Entity {
 
 #[doc(hidden)]
 pub trait RelationshipMutationSource: core::Entity {
+    fn relationship_change_batches(&self) -> Vec<RelationshipMutationBatch> {
+        Vec::new()
+    }
+
     fn pending_relationship_change_count(&self) -> usize {
-        0
+        self.relationship_change_batches()
+            .iter()
+            .map(RelationshipMutationBatch::len)
+            .sum()
     }
 }
 
@@ -190,6 +197,49 @@ pub enum RelationshipCollectionChange<T> {
     Added(T),
     /// A dependent value was explicitly removed from the collection.
     Removed(T),
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipMutationBatch {
+    navigation: &'static NavigationMetadata,
+    changes: Vec<RelationshipMutationIdentityChange>,
+}
+
+#[doc(hidden)]
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RelationshipMutationIdentityChange {
+    Navigation(RelationshipNavigationIdentityChange),
+    Collection(RelationshipCollectionIdentityChange),
+}
+
+#[doc(hidden)]
+impl RelationshipMutationBatch {
+    pub fn new(
+        navigation: &'static NavigationMetadata,
+        changes: Vec<RelationshipMutationIdentityChange>,
+    ) -> Self {
+        Self {
+            navigation,
+            changes,
+        }
+    }
+
+    pub const fn navigation(&self) -> &'static NavigationMetadata {
+        self.navigation
+    }
+
+    pub fn changes(&self) -> &[RelationshipMutationIdentityChange] {
+        &self.changes
+    }
+
+    pub fn len(&self) -> usize {
+        self.changes.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.changes.is_empty()
+    }
 }
 
 #[doc(hidden)]

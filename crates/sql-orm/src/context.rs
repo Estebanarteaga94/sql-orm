@@ -1230,9 +1230,9 @@ impl<E: Entity> DbSet<E> {
     {
         for tracked in self.tracking_registry.tracked_for::<E>() {
             let current = tracked.current_clone();
-            if current.pending_relationship_change_count() > 0 {
+            if !current.relationship_change_batches().is_empty() {
                 return Err(OrmError::compile(format!(
-                    "save_changes cannot persist relationship wrapper mutations for entity `{}` yet because wrapper changes do not carry tracked registration identity",
+                    "save_changes cannot persist relationship wrapper mutations for entity `{}` yet because relationship command collection is not connected to execution",
                     E::metadata().rust_name
                 )));
             }
@@ -2231,6 +2231,17 @@ mod tests {
     struct TestSoftDeleteProvider;
     struct TestAuditProvider;
 
+    static RELATIONSHIP_GUARD_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
+        "children",
+        NavigationKind::HasMany,
+        "RelationshipGuardChild",
+        "dbo",
+        "relationship_guard_children",
+        &["id"],
+        &["guard_id"],
+        Some("fk_relationship_guard_children_guard_id"),
+    );
+
     static TEST_ENTITY_COLUMNS: [ColumnMetadata; 3] = [
         ColumnMetadata {
             rust_field: "id",
@@ -3221,6 +3232,22 @@ mod tests {
     }
 
     impl RelationshipMutationSource for RelationshipGuardEntity {
+        fn relationship_change_batches(&self) -> Vec<crate::RelationshipMutationBatch> {
+            if self.pending_relationship_changes == 0 {
+                return Vec::new();
+            }
+
+            vec![crate::RelationshipMutationBatch::new(
+                &RELATIONSHIP_GUARD_NAVIGATION,
+                vec![
+                    crate::RelationshipMutationIdentityChange::Collection(
+                        crate::RelationshipCollectionIdentityChange::Added(None),
+                    );
+                    self.pending_relationship_changes
+                ],
+            )]
+        }
+
         fn pending_relationship_change_count(&self) -> usize {
             self.pending_relationship_changes
         }
@@ -4735,7 +4762,7 @@ mod tests {
         assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert_eq!(
             error.message(),
-            "save_changes cannot persist relationship wrapper mutations for entity `RelationshipGuardEntity` yet because wrapper changes do not carry tracked registration identity"
+            "save_changes cannot persist relationship wrapper mutations for entity `RelationshipGuardEntity` yet because relationship command collection is not connected to execution"
         );
     }
 
