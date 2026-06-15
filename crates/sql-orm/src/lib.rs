@@ -156,6 +156,13 @@ pub trait IncludeCollection<T>: core::Entity {
     ) -> Result<(), core::OrmError>;
 }
 
+#[doc(hidden)]
+pub trait RelationshipMutationSource: core::Entity {
+    fn pending_relationship_change_count(&self) -> usize {
+        0
+    }
+}
+
 /// Captured mutation for a single navigation wrapper.
 ///
 /// These values are an internal stepping stone for future graph persistence.

@@ -1228,6 +1228,16 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
     );
     let include_navigation_impls = include_navigation_impls(&ident, &navigations)?;
     let include_collection_impls = include_collection_impls(&ident, &navigations)?;
+    let relationship_change_counts = navigations
+        .iter()
+        .map(|navigation| {
+            let field_ident =
+                Ident::new(&navigation.rust_field.value(), navigation.rust_field.span());
+            quote! {
+                + self.#field_ident.relationship_changes().len()
+            }
+        })
+        .collect::<Vec<_>>();
 
     let (metadata_static, metadata_expr) = if has_generated_policies
         || has_inverse_navigation_metadata
@@ -1356,6 +1366,11 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
         #audit_contract_impl
         #soft_delete_contract_impl
         #tenant_contract_impl
+        impl ::sql_orm::RelationshipMutationSource for #ident {
+            fn pending_relationship_change_count(&self) -> usize {
+                0usize #(#relationship_change_counts)*
+            }
+        }
         #(#include_navigation_impls)*
         #(#include_collection_impls)*
     })
@@ -1503,6 +1518,19 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let relationship_guard_steps = fields
+        .iter()
+        .map(|field| {
+            let field_ident = field
+                .ident
+                .as_ref()
+                .ok_or_else(|| Error::new_spanned(field, "DbContext requiere campos nombrados"))?;
+            Ok(quote! {
+                self.#field_ident.reject_pending_relationship_changes()?;
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     let save_changes_bounds = fields
         .iter()
         .map(|field| {
@@ -1517,10 +1545,13 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                 #entity_type: ::core::clone::Clone
                     + ::sql_orm::EntityPersist
                     + ::sql_orm::EntityPrimaryKey
+                    + ::sql_orm::RelationshipMutationSource
                     + ::sql_orm::SoftDeleteEntity
                     + ::sql_orm::TenantScopedEntity
                     + ::sql_orm::core::FromRow
                     + ::core::marker::Send
+                    + ::core::marker::Sync
+                    + 'static
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1764,6 +1795,14 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                 <Self as ::sql_orm::DbContext>::clear_tracker(self)
             }
 
+            fn __sql_orm_reject_pending_relationship_changes(&self) -> Result<(), ::sql_orm::core::OrmError>
+            where
+                #(#save_changes_bounds,)*
+            {
+                #(#relationship_guard_steps)*
+                Ok(())
+            }
+
             async fn __sql_orm_save_changes_without_transaction(&self) -> Result<usize, ::sql_orm::core::OrmError>
             where
                 #(#save_changes_bounds,)*
@@ -1820,6 +1859,8 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
             where
                 #(#save_changes_bounds,)*
             {
+                self.__sql_orm_reject_pending_relationship_changes()?;
+
                 let shared_connection =
                     <Self as ::sql_orm::DbContext>::shared_connection(self);
 

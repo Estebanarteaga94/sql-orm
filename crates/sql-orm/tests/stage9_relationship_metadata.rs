@@ -256,6 +256,41 @@ fn has_many_navigation_can_receive_included_collection() {
 }
 
 #[test]
+fn derived_relationship_mutation_source_counts_only_explicit_wrapper_changes() {
+    let mut project = Project {
+        id: 7,
+        name: "Roadmap".to_string(),
+        tasks: Collection::empty(),
+    };
+
+    project
+        .set_included_collection(
+            "tasks",
+            vec![ProjectTask {
+                id: 10,
+                project_id: 7,
+                project: Navigation::empty(),
+            }],
+        )
+        .unwrap();
+    assert_eq!(
+        sql_orm::RelationshipMutationSource::pending_relationship_change_count(&project),
+        0
+    );
+
+    project.tasks.push_related(ProjectTask {
+        id: 11,
+        project_id: 7,
+        project: Navigation::empty(),
+    });
+
+    assert_eq!(
+        sql_orm::RelationshipMutationSource::pending_relationship_change_count(&project),
+        1
+    );
+}
+
+#[test]
 fn inverse_navigation_metadata_reuses_target_foreign_key_metadata() {
     let metadata = Project::metadata();
 

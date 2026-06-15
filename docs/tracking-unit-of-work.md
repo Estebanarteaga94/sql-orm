@@ -125,8 +125,10 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   `push_related(...)`, `remove_related_at(...)` plus relationship-change
   readers/drainers. ORM materialization APIs such as `set(...)`,
   `set_loaded(...)`, `from_option(...)` and `from_vec(...)` intentionally do
-  not capture commands. These captured values are not yet consumed
-  automatically by `save_changes()`.
+  not capture commands. These captured values are not yet executed
+  automatically by `save_changes()`; generated `save_changes()` now rejects
+  tracked entities that still contain pending wrapper-local relationship
+  mutations with a `Compile` error before opening an internal transaction.
 - the internal tracker now has a first relationship-command reconciliation
   slice: `RelationshipCommand` values can be checked against tracked
   registration state before SQL execution, producing a
@@ -144,6 +146,13 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   and SQL compilation policies stay centralized. This executor is not yet
   invoked automatically by generated `save_changes()`, and relationship
   delete operations remain deferred until a policy is documented.
+- generated `#[derive(Entity)]` implements a hidden
+  `RelationshipMutationSource` hook that counts pending mutation logs inside
+  navigation wrappers. Generated `save_changes()` calls a `DbSet` guard for
+  every context entity type before starting an internal transaction, so graph
+  mutations are no longer silently ignored when they are present on tracked
+  entities. The guard is intentionally fail-fast until wrapper mutations carry
+  enough tracked identity to build unambiguous `RelationshipCommand` values.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current
@@ -440,9 +449,11 @@ The current code implements the first `DbSet` executor slice for step 3:
 `DbSet<E>` can consume a `RelationshipReconciliationPlan` for entity type `E`,
 merge insert/update relationship values with the normal entity persistence
 payload and delegate to the existing `DbSet` insert/update internals. The macro
-generated `save_changes()` still needs a later wiring step to collect wrapper
-commands, reconcile them once per context and call this executor in the
-metadata-based operation order.
+generated `save_changes()` now has the first guard needed for that wiring: it
+detects pending wrapper-local relationship changes and returns `Compile`
+instead of ignoring them. A later step still needs to store enough tracked
+identity in wrapper mutations, collect commands, reconcile them once per
+context and call this executor in the metadata-based operation order.
 
 The private command model should describe intent, not SQL:
 

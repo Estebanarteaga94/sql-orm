@@ -7,8 +7,8 @@ use crate::soft_delete_runtime::{
 use crate::tracking::{ReconciledRelationshipOperationKind, RelationshipReconciliationPlan};
 use crate::{AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, AuditValues};
 use crate::{
-    IncludeCollection, RawCommand, RawQuery, SoftDeleteEntity, TenantContext, TenantScopedEntity,
-    Tracked, TrackingRegistry, TrackingRegistryHandle,
+    IncludeCollection, RawCommand, RawQuery, RelationshipMutationSource, SoftDeleteEntity,
+    TenantContext, TenantScopedEntity, Tracked, TrackingRegistry, TrackingRegistryHandle,
 };
 use core::future::Future;
 use std::marker::PhantomData;
@@ -1223,6 +1223,24 @@ impl<E: Entity> DbSet<E> {
         Ok(saved)
     }
 
+    #[doc(hidden)]
+    pub fn reject_pending_relationship_changes(&self) -> Result<(), OrmError>
+    where
+        E: Clone + RelationshipMutationSource + Send + Sync + 'static,
+    {
+        for tracked in self.tracking_registry.tracked_for::<E>() {
+            let current = tracked.current_clone();
+            if current.pending_relationship_change_count() > 0 {
+                return Err(OrmError::compile(format!(
+                    "save_changes cannot persist relationship wrapper mutations for entity `{}` yet because wrapper changes do not carry tracked registration identity",
+                    E::metadata().rust_name
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
     /// Inserts a new row and materializes the inserted entity.
     ///
     /// The insert path applies tenant insert fill/validation and audit runtime
@@ -2146,8 +2164,8 @@ mod tests {
     use crate::{
         AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, EntityPersist,
         EntityPersistMode, EntityPrimaryKey, IncludeCollection, IncludeNavigation,
-        SoftDeleteContext, SoftDeleteEntity, SoftDeleteOperation, SoftDeleteProvider,
-        SoftDeleteRequestValues, TenantScopedEntity, Tracked,
+        RelationshipMutationSource, SoftDeleteContext, SoftDeleteEntity, SoftDeleteOperation,
+        SoftDeleteProvider, SoftDeleteRequestValues, TenantScopedEntity, Tracked,
     };
     use sql_orm_core::{
         ColumnMetadata, ColumnValue, Entity, EntityMetadata, EntityPolicyMetadata,
@@ -2178,6 +2196,10 @@ mod tests {
     }
     #[derive(Clone)]
     struct ExplicitLoadChild;
+    #[derive(Clone)]
+    struct RelationshipGuardEntity {
+        pending_relationship_changes: usize,
+    }
     #[derive(Debug, Clone)]
     struct SingleNavigationRoot {
         navigation_loaded: bool,
@@ -2381,6 +2403,39 @@ mod tests {
         },
         indexes: &[],
         foreign_keys: &EXPLICIT_LOAD_CHILD_FOREIGN_KEYS,
+        navigations: &[],
+    };
+
+    static RELATIONSHIP_GUARD_ENTITY_COLUMNS: [ColumnMetadata; 1] = [ColumnMetadata {
+        rust_field: "id",
+        column_name: "id",
+        renamed_from: None,
+        sql_type: SqlServerType::BigInt,
+        nullable: false,
+        primary_key: true,
+        identity: None,
+        default_sql: None,
+        computed_sql: None,
+        rowversion: false,
+        insertable: true,
+        updatable: false,
+        max_length: None,
+        precision: None,
+        scale: None,
+    }];
+
+    static RELATIONSHIP_GUARD_ENTITY_METADATA: EntityMetadata = EntityMetadata {
+        rust_name: "RelationshipGuardEntity",
+        schema: "dbo",
+        table: "relationship_guard_entities",
+        renamed_from: None,
+        columns: &RELATIONSHIP_GUARD_ENTITY_COLUMNS,
+        primary_key: PrimaryKeyMetadata {
+            name: None,
+            columns: &["id"],
+        },
+        indexes: &[],
+        foreign_keys: &[],
         navigations: &[],
     };
 
@@ -2936,6 +2991,12 @@ mod tests {
         }
     }
 
+    impl Entity for RelationshipGuardEntity {
+        fn metadata() -> &'static EntityMetadata {
+            &RELATIONSHIP_GUARD_ENTITY_METADATA
+        }
+    }
+
     impl Entity for SingleNavigationRoot {
         fn metadata() -> &'static EntityMetadata {
             &SINGLE_NAVIGATION_ROOT_METADATA
@@ -3110,6 +3171,66 @@ mod tests {
 
         fn sync_persisted(&mut self, persisted: Self) {
             *self = persisted;
+        }
+    }
+
+    impl AuditEntity for RelationshipGuardEntity {
+        fn audit_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl SoftDeleteEntity for RelationshipGuardEntity {
+        fn soft_delete_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl TenantScopedEntity for RelationshipGuardEntity {
+        fn tenant_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl EntityPrimaryKey for RelationshipGuardEntity {
+        fn primary_key_value(&self) -> Result<SqlValue, OrmError> {
+            Ok(SqlValue::I64(1))
+        }
+    }
+
+    impl EntityPersist for RelationshipGuardEntity {
+        fn persist_mode(&self) -> Result<EntityPersistMode, OrmError> {
+            Ok(EntityPersistMode::Update(SqlValue::I64(1)))
+        }
+
+        fn insert_values(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn update_changes(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn concurrency_token(&self) -> Result<Option<SqlValue>, OrmError> {
+            Ok(None)
+        }
+
+        fn sync_persisted(&mut self, persisted: Self) {
+            *self = persisted;
+        }
+    }
+
+    impl RelationshipMutationSource for RelationshipGuardEntity {
+        fn pending_relationship_change_count(&self) -> usize {
+            self.pending_relationship_changes
+        }
+    }
+
+    impl FromRow for RelationshipGuardEntity {
+        fn from_row<R: Row>(_row: &R) -> Result<Self, OrmError> {
+            Ok(Self {
+                pending_relationship_changes: 0,
+            })
         }
     }
 
@@ -4589,6 +4710,33 @@ mod tests {
         );
         assert_eq!(tracked.state(), crate::EntityState::Unchanged);
         assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[test]
+    fn reject_pending_relationship_changes_allows_tracked_entities_without_wrapper_mutations() {
+        let dbset = DbSet::<RelationshipGuardEntity>::disconnected();
+        let _tracked = dbset.add_tracked(RelationshipGuardEntity {
+            pending_relationship_changes: 0,
+        });
+
+        dbset.reject_pending_relationship_changes().unwrap();
+    }
+
+    #[test]
+    fn reject_pending_relationship_changes_fails_before_connection_is_required() {
+        let dbset = DbSet::<RelationshipGuardEntity>::disconnected();
+        let mut tracked = dbset.add_tracked(RelationshipGuardEntity {
+            pending_relationship_changes: 0,
+        });
+        tracked.current_mut().pending_relationship_changes = 1;
+
+        let error = dbset.reject_pending_relationship_changes().unwrap_err();
+
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+        assert_eq!(
+            error.message(),
+            "save_changes cannot persist relationship wrapper mutations for entity `RelationshipGuardEntity` yet because wrapper changes do not carry tracked registration identity"
+        );
     }
 
     #[test]
