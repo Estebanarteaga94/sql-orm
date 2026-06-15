@@ -4,6 +4,7 @@ use crate::soft_delete_runtime::{
     SoftDeleteOperation, SoftDeleteProvider, SoftDeleteRequestValues, SoftDeleteValues,
     apply_soft_delete_values,
 };
+use crate::tracking::{ReconciledRelationshipOperationKind, RelationshipReconciliationPlan};
 use crate::{AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, AuditValues};
 use crate::{
     IncludeCollection, RawCommand, RawQuery, SoftDeleteEntity, TenantContext, TenantScopedEntity,
@@ -18,7 +19,7 @@ use std::sync::{
 
 use crate::{EntityPersist, EntityPrimaryKey};
 use sql_orm_core::{
-    Changeset, Entity, EntityMetadata, FromRow, Insertable, NavigationKind, OrmError,
+    Changeset, ColumnValue, Entity, EntityMetadata, FromRow, Insertable, NavigationKind, OrmError,
     SqlTypeMapping, SqlValue,
 };
 use sql_orm_query::{
@@ -1124,6 +1125,104 @@ impl<E: Entity> DbSet<E> {
         Ok(saved)
     }
 
+    #[allow(dead_code)]
+    pub(crate) async fn save_reconciled_relationship_operations(
+        &self,
+        plan: &RelationshipReconciliationPlan,
+    ) -> Result<usize, OrmError>
+    where
+        E: AuditEntity
+            + Clone
+            + EntityPersist
+            + EntityPrimaryKey
+            + FromRow
+            + Send
+            + SoftDeleteEntity
+            + Sync
+            + TenantScopedEntity
+            + 'static,
+    {
+        let tracked_entities = self.tracking_registry.tracked_for::<E>();
+        let has_reconciled_operation = tracked_entities.iter().any(|tracked| {
+            plan.operations()
+                .iter()
+                .any(|operation| operation.registration_id() == tracked.registration_id())
+        });
+        if !has_reconciled_operation {
+            return Ok(0);
+        }
+
+        self.ensure_tracking_primary_key_scope()?;
+
+        let mut saved = 0;
+
+        for tracked in tracked_entities {
+            let Some(operation) = plan
+                .operations()
+                .iter()
+                .find(|operation| operation.registration_id() == tracked.registration_id())
+            else {
+                continue;
+            };
+
+            match operation.kind() {
+                ReconciledRelationshipOperationKind::Insert => {
+                    if tracked.state() != crate::EntityState::Added {
+                        return Err(OrmError::compile(format!(
+                            "reconciled relationship insert for entity `{}` requires an Added tracked entry",
+                            E::metadata().rust_name
+                        )));
+                    }
+
+                    let current: E = tracked.current_clone();
+                    let values = merge_relationship_values(
+                        current.insert_values(),
+                        operation.relationship_values(),
+                    )?;
+                    let persisted = self.insert_entity_values(values).await?;
+                    let persisted_key = persisted.primary_key_value()?;
+
+                    tracked.sync_persisted(persisted);
+                    self.tracking_registry
+                        .update_persisted_identity::<E>(tracked.registration_id(), persisted_key)?;
+                    saved += 1;
+                }
+                ReconciledRelationshipOperationKind::Update => {
+                    if tracked.state() != crate::EntityState::Modified {
+                        return Err(OrmError::compile(format!(
+                            "reconciled relationship update for entity `{}` requires a Modified tracked entry",
+                            E::metadata().rust_name
+                        )));
+                    }
+
+                    let current: E = tracked.current_clone();
+                    let key = current.primary_key_value()?;
+                    let changes = merge_relationship_values(
+                        current.update_changes(),
+                        operation.relationship_values(),
+                    )?;
+                    let persisted = self
+                        .update_entity_values_by_sql_value(
+                            key,
+                            changes,
+                            current.concurrency_token()?,
+                        )
+                        .await?
+                        .ok_or_else(|| {
+                            OrmError::concurrency(
+                                "save_changes could not update a tracked entity for the current primary key",
+                            )
+                        })?;
+
+                    tracked.sync_persisted(persisted);
+                    saved += 1;
+                }
+            }
+        }
+
+        Ok(saved)
+    }
+
     /// Inserts a new row and materializes the inserted entity.
     ///
     /// The insert path applies tenant insert fill/validation and audit runtime
@@ -1498,6 +1597,31 @@ impl<E: Entity> std::fmt::Debug for DbSet<E> {
             .field("table", &E::metadata().table)
             .finish()
     }
+}
+
+#[allow(dead_code)]
+fn merge_relationship_values(
+    mut entity_values: Vec<ColumnValue>,
+    relationship_values: &[ColumnValue],
+) -> Result<Vec<ColumnValue>, OrmError> {
+    for relationship_value in relationship_values {
+        if let Some(existing_value) = entity_values
+            .iter()
+            .find(|value| value.column_name == relationship_value.column_name)
+        {
+            if existing_value.value != relationship_value.value {
+                return Err(OrmError::compile(format!(
+                    "relationship operation assigns column `{}` but the tracked entity already has a different value",
+                    relationship_value.column_name
+                )));
+            }
+            continue;
+        }
+
+        entity_values.push(relationship_value.clone());
+    }
+
+    Ok(entity_values)
 }
 
 impl<E: Entity> DbSet<E> {
@@ -2015,6 +2139,10 @@ mod tests {
     use super::{
         PooledTransactionCleanupPhase, PooledTransactionCleanupPlan, ensure_transactions_supported,
     };
+    use crate::tracking::{
+        ReconciledRelationshipOperation, ReconciledRelationshipOperationKind,
+        RelationshipReconciliationPlan,
+    };
     use crate::{
         AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, EntityPersist,
         EntityPersistMode, EntityPrimaryKey, IncludeCollection, IncludeNavigation,
@@ -2048,6 +2176,7 @@ mod tests {
         id: i64,
         children_loaded: usize,
     }
+    #[derive(Clone)]
     struct ExplicitLoadChild;
     #[derive(Debug, Clone)]
     struct SingleNavigationRoot {
@@ -2947,6 +3076,40 @@ mod tests {
     impl SoftDeleteEntity for ExplicitLoadChild {
         fn soft_delete_policy() -> Option<EntityPolicyMetadata> {
             None
+        }
+    }
+
+    impl AuditEntity for ExplicitLoadChild {
+        fn audit_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl EntityPrimaryKey for ExplicitLoadChild {
+        fn primary_key_value(&self) -> Result<SqlValue, OrmError> {
+            Ok(SqlValue::I64(11))
+        }
+    }
+
+    impl EntityPersist for ExplicitLoadChild {
+        fn persist_mode(&self) -> Result<EntityPersistMode, OrmError> {
+            Ok(EntityPersistMode::Update(SqlValue::I64(11)))
+        }
+
+        fn insert_values(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn update_changes(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn concurrency_token(&self) -> Result<Option<SqlValue>, OrmError> {
+            Ok(None)
+        }
+
+        fn sync_persisted(&mut self, persisted: Self) {
+            *self = persisted;
         }
     }
 
@@ -4281,6 +4444,150 @@ mod tests {
 
         assert_eq!(saved, 0);
         assert_eq!(tracked.state(), crate::EntityState::Added);
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[test]
+    fn reconciled_relationship_value_merge_appends_new_fk_values() {
+        let values = super::merge_relationship_values(
+            vec![ColumnValue::new(
+                "name",
+                SqlValue::String("child".to_string()),
+            )],
+            &[
+                ColumnValue::new("root_id", SqlValue::I64(7)),
+                ColumnValue::new("root_id", SqlValue::I64(7)),
+            ],
+        )
+        .unwrap();
+
+        assert_eq!(
+            values,
+            vec![
+                ColumnValue::new("name", SqlValue::String("child".to_string())),
+                ColumnValue::new("root_id", SqlValue::I64(7)),
+            ]
+        );
+    }
+
+    #[test]
+    fn reconciled_relationship_value_merge_rejects_manual_fk_conflict() {
+        let error = super::merge_relationship_values(
+            vec![ColumnValue::new("root_id", SqlValue::I64(1))],
+            &[ColumnValue::new("root_id", SqlValue::I64(2))],
+        )
+        .unwrap_err();
+
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+        assert_eq!(
+            error.message(),
+            "relationship operation assigns column `root_id` but the tracked entity already has a different value"
+        );
+    }
+
+    #[tokio::test]
+    async fn save_reconciled_relationship_operations_returns_zero_without_matching_operations() {
+        let dbset = DbSet::<CompositeKeyEntity>::disconnected();
+        let registry = dbset.tracking_registry();
+        let tracked = dbset.add_tracked(CompositeKeyEntity);
+        let plan = RelationshipReconciliationPlan::default();
+
+        let saved = dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap();
+
+        assert_eq!(saved, 0);
+        assert_eq!(tracked.state(), crate::EntityState::Added);
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn save_reconciled_relationship_operations_routes_insert_through_dbset_values() {
+        let dbset = DbSet::<ExplicitLoadChild>::disconnected();
+        let registry = dbset.tracking_registry();
+        let tracked = dbset.add_tracked(ExplicitLoadChild);
+        let registration_id = registry.registrations()[0].entry_id;
+        let plan = RelationshipReconciliationPlan::from_operations_for_test(vec![
+            ReconciledRelationshipOperation::for_test(
+                registration_id,
+                ReconciledRelationshipOperationKind::Insert,
+                vec![ColumnValue::new("root_id", SqlValue::I64(7))],
+            ),
+        ]);
+
+        let error = dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+        assert_eq!(tracked.state(), crate::EntityState::Added);
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn save_reconciled_relationship_operations_routes_update_through_dbset_values() {
+        let dbset = DbSet::<ExplicitLoadChild>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(ExplicitLoadChild);
+        tracked
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(11))
+            .unwrap();
+        tracked.mark_modified();
+        let registration_id = registry.registrations()[0].entry_id;
+        let plan = RelationshipReconciliationPlan::from_operations_for_test(vec![
+            ReconciledRelationshipOperation::for_test(
+                registration_id,
+                ReconciledRelationshipOperationKind::Update,
+                vec![ColumnValue::new("root_id", SqlValue::I64(7))],
+            ),
+        ]);
+
+        let error = dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+        assert_eq!(tracked.state(), crate::EntityState::Modified);
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn save_reconciled_relationship_operations_rejects_state_mismatch_before_sql() {
+        let dbset = DbSet::<ExplicitLoadChild>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(ExplicitLoadChild);
+        tracked
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(11))
+            .unwrap();
+        let registration_id = registry.registrations()[0].entry_id;
+        let plan = RelationshipReconciliationPlan::from_operations_for_test(vec![
+            ReconciledRelationshipOperation::for_test(
+                registration_id,
+                ReconciledRelationshipOperationKind::Insert,
+                vec![ColumnValue::new("root_id", SqlValue::I64(7))],
+            ),
+        ]);
+
+        let error = dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+        assert_eq!(
+            error.message(),
+            "reconciled relationship insert for entity `ExplicitLoadChild` requires an Added tracked entry"
+        );
+        assert_eq!(tracked.state(), crate::EntityState::Unchanged);
         assert_eq!(registry.entry_count(), 1);
     }
 

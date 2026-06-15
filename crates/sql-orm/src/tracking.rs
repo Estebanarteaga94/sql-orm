@@ -240,6 +240,13 @@ impl RelationshipReconciliationPlan {
         &self.operations
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_operations_for_test(
+        operations: Vec<ReconciledRelationshipOperation>,
+    ) -> Self {
+        Self { operations }
+    }
+
     fn push_or_merge(
         &mut self,
         operation: ReconciledRelationshipOperation,
@@ -282,6 +289,19 @@ impl RelationshipReconciliationPlan {
 
 #[allow(dead_code)]
 impl ReconciledRelationshipOperation {
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        registration_id: usize,
+        kind: ReconciledRelationshipOperationKind,
+        relationship_values: Vec<ColumnValue>,
+    ) -> Self {
+        Self {
+            registration_id,
+            kind,
+            relationship_values,
+        }
+    }
+
     pub(crate) fn registration_id(&self) -> usize {
         self.registration_id
     }

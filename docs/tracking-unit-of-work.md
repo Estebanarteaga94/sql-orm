@@ -135,7 +135,15 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   `Unchanged` dependents into `Modified` updates for moves/removals, rejects
   deleted principals/dependents and required removals unless the dependent is
   already `Deleted`, and detects conflicting FK values for one tracked entity.
-  This plan is not yet wired into `save_changes()` execution.
+- `DbSet` now has an internal executor slice for reconciled relationship
+  insert/update operations. It filters operations by tracked entity type,
+  merges reconciled FK values with `EntityPersist::insert_values()` or
+  `EntityPersist::update_changes()`, rejects manual FK conflicts as
+  `Compile`, and then calls the existing `insert_entity_values(...)` /
+  `update_entity_values_by_sql_value(...)` paths so tenant, audit, rowversion
+  and SQL compilation policies stay centralized. This executor is not yet
+  invoked automatically by generated `save_changes()`, and relationship
+  delete operations remain deferred until a policy is documented.
 
 The registry still stores a pointer while a `Tracked<T>` wrapper is alive so
 mutable wrapper changes can be synchronized into the registry-owned current
@@ -427,6 +435,14 @@ steps inside the public crate:
 1. Capture relationship commands from explicit navigation-wrapper mutation APIs.
 2. Reconcile those commands with the context-owned `TrackingRegistry`.
 3. Execute the reconciled entity operations through existing `DbSet` routes.
+
+The current code implements the first `DbSet` executor slice for step 3:
+`DbSet<E>` can consume a `RelationshipReconciliationPlan` for entity type `E`,
+merge insert/update relationship values with the normal entity persistence
+payload and delegate to the existing `DbSet` insert/update internals. The macro
+generated `save_changes()` still needs a later wiring step to collect wrapper
+commands, reconcile them once per context and call this executor in the
+metadata-based operation order.
 
 The private command model should describe intent, not SQL:
 
