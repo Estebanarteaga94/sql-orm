@@ -635,7 +635,7 @@ See [docs/stability-audit.md](docs/stability-audit.md) for the updated stability
 | `save_changes()` | Stable for explicit single-primary-key tracking |
 | Composite primary keys | Metadata exists, public persistence support is limited |
 | Tracking ownership | Pending `Added`, `Modified`, and `Deleted` work is registry-owned after wrapper drop/consume; detached loaded identities can reattach to registry snapshots; one live tracked handle per persisted identity is allowed per context |
-| Relationship graph persistence | Not implemented; persist dependents or explicit join entities directly |
+| Relationship graph persistence | Supported for the validated simple-FK subset: dependent insert from tracked relationship mutation, FK move, optional removal as `SET NULL`, required removal rejection, and assignment conflict detection |
 | Many-to-many navigation | Use an explicit join entity |
 | Lazy loading | No automatic I/O from field access |
 | `include_many(...).split_query()` | API exists, execution returns not implemented |

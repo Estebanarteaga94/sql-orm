@@ -209,11 +209,11 @@ pub struct UserRole {
 
 Query through the join entity using explicit joins, navigation joins or
 `include(...)` / `include_many(...)` on the supported `belongs_to` and
-`has_many` edges. Persisting relationship changes is also explicit: insert or
-delete `UserRole` rows directly. Mutating `User.roles`-style direct
-collections is not supported because `save_changes()` does not yet define
-stable relationship-update semantics for added/removed links, duplicate links,
-composite keys, tenant boundaries or soft-deleted join rows.
+`has_many` edges. Persisting direct many-to-many relationship changes is also
+explicit: insert or delete `UserRole` rows directly. Mutating
+`User.roles`-style direct collections is not supported because `save_changes()`
+does not define stable relationship-update semantics for added/removed links,
+duplicate links, composite keys, tenant boundaries or soft-deleted join rows.
 
 ### Explicit Navigation Joins
 
@@ -368,15 +368,17 @@ only through the current context registry and the root entity for this cut:
   the same context.
 - Related entities loaded into `Navigation<T>`, `Collection<T>`,
   `LazyNavigation<T>` or `LazyCollection<T>` are not automatically tracked.
-- Mutating a navigation field through `tracked.current_mut()` still follows the
-  generic tracking rule and marks the root as `Modified`, but `save_changes()`
-  does not persist relationship graph changes as inserts, deletes, FK updates
-  or many-to-many updates.
+- Mutating a navigation field through tracked relationship helpers is persisted
+  by `save_changes()` only for the validated simple-FK slice: dependent insert,
+  FK move and optional removal as `SET NULL`. Required removals without
+  explicit dependent delete fail before SQL. Direct many-to-many updates remain
+  out of scope.
 
-This is identity-map reuse, not graph tracking. Navigation loading avoids
-pretending that relationship persistence is solved: changes to wrappers are not
-translated into dependent inserts/deletes, foreign-key moves or many-to-many
-link updates.
+This is identity-map reuse plus a narrow graph-persistence slice, not broad
+graph tracking. Navigation loading still does not register loaded graphs
+automatically. Wrapper mutations are translated only for simple FK/PK
+relationship commands; many-to-many link updates still go through explicit join
+entities.
 
 ### Identity Map Design
 
@@ -402,10 +404,11 @@ SQL does not join the identity map automatically, newly materialized related
 rows are not registered automatically, and disconnected entities remain plain
 values unless the caller explicitly tracks them.
 
-Relationship persistence remains a separate policy decision. The current
-identity-map cut defines snapshot reuse for already tracked identities, but it
-does not infer FK updates, dependent inserts/deletes, or many-to-many changes
-from wrapper mutations.
+Relationship persistence remains deliberately scoped. The current identity-map
+cut defines snapshot reuse for already tracked identities, and the graph
+planner handles simple FK/PK commands from tracked wrapper mutations. It still
+does not infer direct many-to-many changes or composite relationship
+persistence from wrapper mutations.
 
 ### Opt-In Lazy Loading
 

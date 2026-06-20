@@ -27,6 +27,11 @@ explicit single-primary-key tracking. The current implementation keeps pending
 wrapper is dropped or consumed, marks `Modified` on mutable access before later
 structural no-op detection, supports persistence through the existing simple-PK
 CRUD routes, and does not track navigation graphs or relationship changes.
+CRUD routes. Navigation loading still does not register loaded graphs
+automatically, but the runtime now has a validated simple-FK relationship
+persistence slice for tracked wrapper mutations: dependent insert, FK move,
+optional removal as `SET NULL`, required removal rejection and conflicting
+assignment rejection.
 
 ## Deferred Or Blocked Surfaces
 
@@ -37,7 +42,7 @@ These surfaces are documented as unavailable or blocked, not experimental:
 | `include_many(...).split_query()` | Public builder method exists, but execution returns a clear not-implemented error. Join-based collection include is the available path. | Future navigation follow-up |
 | Direct many-to-many navigation | Rejected; use an explicit join entity with ordinary foreign keys and supported navigation edges. | Future relationship-update design |
 | Automatic lazy loading | Not available; lazy wrappers are state containers and never issue SQL by themselves. | Future explicit async loader design |
-| Navigation graph tracking and relationship persistence | Not implemented; includes and explicit loads do not register related entities automatically, and `save_changes()` does not persist relationship mutations. | Future relationship-update design |
+| Navigation graph tracking and relationship persistence | Simple-FK tracked relationship mutations are implemented and validated for dependent insert, FK move, optional `SET NULL`, required-removal rejection and assignment conflicts. Includes and explicit loads still do not register loaded graphs automatically. | Future relationship-update hardening |
 | Split-query execution for `include_many(...)` | `include_many(...)` is available through join-based loading; `split_query()` remains a documented non-executing builder path. | Future navigation follow-up |
 | `database downgrade` | Implemented in Etapa 23 as explicit-target script generation plus opt-in `--execute`; requires local `up.sql` checksum validation and executable `down.sql`. | Available with limits |
 | `migration.rs` | Deferred from the migration MVP; current artifacts are `up.sql`, `down.sql`, and `model_snapshot.json`. | Future migrations stage |
@@ -79,8 +84,8 @@ The audited documents are consistent with the current implementation:
   current limits without treating typed aggregations or explicit simple-PK
   tracking as unavailable.
 - `docs/context.md` records that Etapa 21 stabilized explicit tracking for the
-  `0.2.0-rc.2` scope while leaving graph persistence and composite primary key
-  tracking in the roadmap.
+  `0.2.0-rc.2` scope while leaving composite primary key tracking and broader
+  graph persistence outside the validated simple-FK slice in the roadmap.
 
 The remaining deferred items above should stay documented as limits until a
 future release explicitly designs, implements, and validates them.

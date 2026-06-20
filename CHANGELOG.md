@@ -122,12 +122,17 @@ this cut has been promoted into the planned next release above.
 - Define stability criteria for `Tracked<T>`, `EntityState`, `find_tracked`, `add_tracked`, `remove_tracked`, and `save_changes()`. The criteria are recorded in `docs/tracking-stability.md`.
 - Replace the current experimental tracking assumptions with stable unit-of-work guarantees, transaction behavior, policy integration, and public tests. The stable explicit tracking surface now covers deterministic identity registration, registry-owned pending `Added`/`Modified`/`Deleted` snapshots after wrapper drop or consume, reattaching detached loaded identities from registry snapshots, rejecting persisted identity collisions against live or detached entries, stable missing-registration error precedence during persisted identity sync, preserving the tracking registry when `save_changes()` opens its internal transaction, reusing already tracked related snapshots in `load_collection_tracked(...)`, `load_collection(...)`, `include(...)` and `include_many(...)`, explicit detach/clear behavior, structural no-op detection for `Modified` entities, deterministic `save_changes()` operation ordering for simple foreign keys, no-op phase short-circuits, registry idempotency, tenant/audit runtime coverage for `save_changes()`, public trybuild coverage, and generated rustdoc for `save_changes()`.
 - The first stable-cut identity-map policy is explicit: one live `Tracked<T>` handle per persisted identity per context; detached entries may be reattached, duplicate live handles are rejected with `OrmError`, and registry-owned snapshots can be accepted or replaced after persistence without requiring the original wrapper to stay alive.
-- Keep relationship graph persistence out of the first stable tracking cut until dependent insert/delete, foreign-key move, optional relationship, many-to-many join-row and conflict semantics are defined.
+- Add and validate the first relationship graph-persistence slice for simple
+  FK/PK tracking: dependent insert from relationship mutation, FK move,
+  optional removal as `SET NULL`, required removal rejection and conflicting
+  assignment rejection. Direct many-to-many and composite relationship shapes
+  remain outside this slice.
 - Integrate stable `save_changes()` with transaction semantics, optimistic concurrency, `soft_delete`, `tenant`, audit providers, Active Record, explicit state APIs, primary-key limits, public tests, rustdoc, and final documentation.
 - The wrapper-lifetime blocker for pending `Added`, `Modified`, and `Deleted` work has been removed, final Stage 21 validation plus runtime coverage are recorded, and the release-level compatibility decision promotes `Tracked<T>` and `save_changes()` to stable for explicit single-primary-key tracking.
 - `examples/todo-app` was revalidated against real SQL Server on 2026-05-17 using local `tempdb`: fixture setup, ignored smoke test, HTTP read endpoints and migration script apply passed.
-- Relationship graph persistence, multiple live handles for the same persisted
-  identity, and composite primary key tracking remain future roadmap items.
+- Multiple live handles for the same persisted identity, direct many-to-many
+  relationship persistence beyond explicit join entities, and composite primary
+  key tracking remain future roadmap items.
 
 ### Etapa 22: Transactions From Pool
 

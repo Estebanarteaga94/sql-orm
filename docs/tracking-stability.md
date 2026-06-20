@@ -35,7 +35,8 @@ The current implementation is intentionally narrow:
 - Persistence reuses the existing `DbSet` insert/update/delete paths.
 - Public tracking persistence is still centered on simple primary keys.
 - Navigation includes and explicit loads do not register related entities
-  automatically and do not persist relationship changes.
+  automatically. Relationship persistence is available only for the validated
+  simple-FK tracking slice.
 
 Those facts are the stable contract for explicit tracking with simple primary
 keys. As of the final documentation pass on 2026-05-17, wrapper lifetime is no
@@ -267,15 +268,16 @@ There must not be two independent persistence routes for the same tracked row.
 
 ## Navigation Interaction
 
-The first stable tracking cut does not need to persist relationship changes,
-but it must define the boundary:
+The first stable tracking cut includes a narrow relationship-persistence
+boundary:
 
 - `include(...)` and `include_many(...)` may materialize ordinary values
   without registering them automatically,
 - explicit tracked loads may attach values to a root without marking the root
   as modified,
-- relationship mutations inside `Navigation<T>` or `Collection<T>` are ignored
-  unless a future graph-tracking task implements them,
+- tracked relationship mutations inside `Navigation<T>` or `Collection<T>` may
+  persist dependent insert, FK move and optional removal as `SET NULL` for
+  simple FK/PK pairs,
 - direct many-to-many remains outside stable tracking.
 
 If identity map support is introduced for navigation loading, it must share the
@@ -300,7 +302,9 @@ The stabilization work was completed with the following pass:
 
 Real SQL Server was available during the final pass, including runtime coverage
 for insert, update, delete, soft delete, tenant, audit, rowversion and
-transactions.
+transactions. A later relationship runtime pass also validated the simple-FK
+graph-persistence slice: dependent insert, FK move, optional removal as
+`SET NULL`, required removal rejection and conflicting assignment rejection.
 
 ## Out Of Scope For The First Stable Cut
 

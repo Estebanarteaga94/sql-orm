@@ -114,7 +114,7 @@ These items exist only with explicit limits or partial scope:
 - `raw<T>()` and `raw_exec()` do not apply ORM filters for `tenant` or `soft_delete`. The caller must write those predicates manually.
 - Soft-delete automatic read filters apply to the root entity of `DbSetQuery<E>`, not to every manually joined entity.
 - Query aliases for multiple references to the same table are supported through explicit aliases. Fully automatic alias assignment is still not implemented.
-- Navigation properties expose metadata, explicit navigation joins, single-navigation includes, join-based collection includes and explicit collection loading. Relationship graph persistence, direct many-to-many, split-query execution and automatic lazy loading remain limited or deferred.
+- Navigation properties expose metadata, explicit navigation joins, single-navigation includes, join-based collection includes, explicit collection loading and a validated simple-FK graph-persistence slice for tracked relationship mutations. Direct many-to-many, split-query execution, automatic lazy loading and composite relationship persistence remain limited or deferred.
 - Typed aggregations are implemented for scalar and grouped DTO queries. Window functions, rollups, cubes and distinct aggregates remain outside the current cut.
 - Audit policy columns are not visible entity fields and do not generate column symbols. Audited entities expose audit-owned columns through `AuditEntity::audit_policy()`.
 - `AuditProvider` has a public runtime contract, is transported through contexts, and is applied to insert/update paths when audited entities have missing audit-owned values.
@@ -127,7 +127,7 @@ These items exist only with explicit limits or partial scope:
 The following should not be documented as available behavior:
 
 - Field-level access or generated symbols for policy-contributed audit columns such as `Todo::created_at`.
-- Direct many-to-many navigation, automatic nested includes, automatic lazy loading and stable graph tracking.
+- Direct many-to-many navigation, automatic nested includes, automatic lazy loading and graph persistence beyond the validated simple-FK tracking slice.
 - Fully automatic table alias assignment for self-joins or repeated table joins.
 - Window functions, rollups, cubes and distinct aggregate APIs.
 - Complete composite-primary-key persistence across all public CRUD, Active Record and tracking paths.
@@ -140,7 +140,7 @@ The following should not be documented as available behavior:
 
 `Entity -> EntityMetadata -> Query AST -> SQL Server SQL -> Tiberius execution -> Row -> Entity or DTO`
 
-It should avoid presenting planned-only behavior as shipped. Claims about direct many-to-many navigation, automatic lazy loading, relationship graph persistence, multi-database abstractions, advanced aggregate SQL shapes and composite primary key CRUD should be marked as unavailable unless a future implementation changes those limits.
+It should avoid presenting planned-only behavior as shipped. Claims about direct many-to-many navigation, automatic lazy loading, graph persistence beyond the validated simple-FK slice, multi-database abstractions, advanced aggregate SQL shapes and composite primary key CRUD should be marked as unavailable unless a future implementation changes those limits.
 
 The public README can safely link to this audit and to `docs/core-concepts.md` once created, but should not duplicate the full inventory.
 

@@ -59,10 +59,11 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   `Deleted` wrapper returns the stable tracking error without unregistering the
   pending delete, and `tracked.delete(&db)` on an already detached `Deleted`
   wrapper is idempotent without touching Active Record,
-- navigation interop is intentionally non-graph-aware in this slice: includes
-  and explicit loads do not register related entities, assignment of single or
-  collection navigations to a tracked root does not mark the root `Modified`,
-  and `save_changes()` does not persist relationship wrapper mutations.
+- navigation interop remains explicit: includes and explicit loads do not
+  register related entities automatically, assignment performed by
+  materialization/loading contracts does not mark the root `Modified`, and
+  tracked wrapper mutations are persisted only through the validated simple-FK
+  relationship planner slice.
 - ownership behavior for the current registry-backed implementation is
   covered: cloning a `Tracked<T>` produces a detached wrapper that cannot
   unregister the original entry, and consuming a pending registered wrapper
@@ -155,14 +156,13 @@ As of 2026-05-17, the first registry-backed unit-of-work slice is implemented:
   deleted principals/dependents and required removals unless the dependent is
   already `Deleted`, and detects conflicting FK values for one tracked entity.
 - `DbSet` now has an internal executor slice for reconciled relationship
-  insert/update operations. It filters operations by tracked entity type,
-  merges reconciled FK values with `EntityPersist::insert_values()` or
-  `EntityPersist::update_changes()`, rejects manual FK conflicts as
-  `Compile`, and then calls the existing `insert_entity_values(...)` /
-  `update_entity_values_by_sql_value(...)` paths so tenant, audit, rowversion
-  and SQL compilation policies stay centralized. This executor is not yet
-  invoked automatically by generated `save_changes()`, and relationship
-  delete operations remain deferred until a policy is documented.
+  insert/update/delete operations. It filters operations by tracked entity
+  type, merges reconciled FK values with `EntityPersist::insert_values()` or
+  `EntityPersist::update_changes()`, rejects manual FK conflicts as `Compile`,
+  and then calls the existing insert/update/delete internals so tenant, audit,
+  rowversion and SQL compilation policies stay centralized. Generated
+  `save_changes()` invokes this executor for the supported simple-FK
+  relationship plan before the ordinary `Added`/`Modified`/`Deleted` phases.
 - generated `#[derive(Entity)]` implements a hidden
   `RelationshipMutationSource` hook that counts pending mutation logs inside
   navigation wrappers. Generated `save_changes()` calls a `DbSet` guard for
@@ -183,7 +183,7 @@ The public tracking surface is stable for explicit tracking with simple
 primary keys after the release-level Stage 21 validation and documentation
 pass. The current implementation has removed wrapper lifetime as a persistence
 requirement for pending work, while retaining documented limits around
-relationship graph persistence.
+graph persistence beyond the validated simple-FK relationship slice.
 
 As of 2026-05-16, registry diagnostics expose a stable `entry_id` through
 `TrackedEntityRegistration`. This is the first observable step toward owned
@@ -275,8 +275,8 @@ the current unit of work.
 
 ## Navigation Interop
 
-Navigation loading remains explicit and outside graph persistence in the first
-stable cut.
+Navigation loading remains explicit and does not automatically register loaded
+graphs in the first stable cut.
 
 Current rules:
 
@@ -295,9 +295,10 @@ Current rules:
   the generated `IncludeNavigation<T>` contract.
 - Related entities assigned into `Navigation<T>`, `LazyNavigation<T>`,
   `Collection<T>` or `LazyCollection<T>` are not tracked automatically.
-- Mutating navigation wrappers is ignored by `save_changes()`; it does not
-  insert dependents, delete dependents, update foreign keys or persist direct
-  many-to-many changes.
+- Tracked navigation-wrapper mutations are consumed by `save_changes()` only
+  for the validated simple-FK slice: dependent insert, FK move and optional
+  removal as `SET NULL`. Required removals without explicit dependent delete
+  fail before SQL, and direct many-to-many changes remain out of scope.
 
 The current identity-map slice is context-owned for tracked entries and shared
 with navigation materialization only as related-entity snapshot replacement.
@@ -306,17 +307,15 @@ and `include(...)`, `include_many(...)`, ordinary `load_collection(...)` and
 `load_collection_tracked(...)` now reuse already tracked related snapshots.
 Root materialization and untracked related rows remain ordinary values.
 
-## Future Relationship Persistence
+## Relationship Persistence
 
-Relationship persistence is deliberately outside the first stable tracking cut.
-The current navigation wrappers describe loaded graph state; they are not
-change commands.
+Relationship persistence is deliberately scoped in the current stable tracking
+cut. Navigation wrappers can describe loaded graph state, and explicit tracked
+mutation helpers can also produce relationship commands for a simple-FK planner.
 
-Before `save_changes()` can persist relationship changes, the project must
-define explicit graph update semantics for:
+The implemented semantics cover:
 
 - dependent inserts attached through `Collection<T>` or `LazyCollection<T>`;
-- dependent deletes removed from a loaded collection;
 - foreign-key updates caused by moving a dependent between principals;
 - optional versus required relationships and `SET NULL` behavior;
 - direct many-to-many exclusions, where explicit join entities remain the
@@ -325,9 +324,9 @@ define explicit graph update semantics for:
 - ordering and rollback behavior when relationship changes mix with ordinary
   `Added`, `Modified` and `Deleted` entity operations.
 
-The future implementation must still route persistence through the existing
-`DbSet` insert, update and delete paths so tenant, audit, soft-delete,
-rowversion and SQL Server execution boundaries remain centralized. It must not
+The implementation routes persistence through the existing `DbSet` insert,
+update and delete paths so tenant, audit, soft-delete, rowversion and SQL
+Server execution boundaries remain centralized. It must not
 move SQL generation into `sql-orm-query` or execution into tracking.
 
 ### Relationship Change Semantics
@@ -457,22 +456,20 @@ commands that were merged into another entity operation.
 
 ### Internal Relationship Command Planner
 
-The future graph-persistence implementation should be split into three private
-steps inside the public crate:
+The graph-persistence implementation is split into three private steps inside
+the public crate:
 
 1. Capture relationship commands from explicit navigation-wrapper mutation APIs.
 2. Reconcile those commands with the context-owned `TrackingRegistry`.
 3. Execute the reconciled entity operations through existing `DbSet` routes.
 
-The current code implements the first `DbSet` executor slice for step 3:
+The current code implements those steps for simple FK/PK relationships:
 `DbSet<E>` can consume a `RelationshipReconciliationPlan` for entity type `E`,
 merge insert/update relationship values with the normal entity persistence
-payload and delegate to the existing `DbSet` insert/update internals. The macro
-generated `save_changes()` now has the first guard needed for that wiring: it
-detects pending wrapper-local relationship changes and returns `Compile`
-instead of ignoring them. A later step still needs to store enough tracked
-identity in wrapper mutations, collect commands, reconcile them once per
-context and call this executor in the metadata-based operation order.
+payload and delegate to the existing `DbSet` internals. The macro-generated
+`save_changes()` collects wrapper-local relationship changes, reconciles them
+once per context, executes the plan in metadata-based operation order, and
+then clears consumed wrapper-local relationship logs after a successful save.
 
 The private command model should describe intent, not SQL:
 

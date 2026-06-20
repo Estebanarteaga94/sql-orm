@@ -189,9 +189,11 @@ Relevant limits:
 - Registry-owned snapshots are also used when `save_changes()` accepts no-op
   modifications or synchronizes persisted rows, so those paths do not require
   the original wrapper to remain alive.
-- Navigation wrapper mutations are not graph update commands. Persist
-  relationship changes by updating, deleting or inserting the dependent entity
-  or explicit join entity directly.
+- Navigation wrapper mutations are graph update commands only for the validated
+  simple-FK tracking slice: dependent insert, FK move and optional removal as
+  `SET NULL`. Required removals without explicit dependent delete, conflicting
+  assignments, direct many-to-many and composite relationship shapes are
+  rejected or remain out of scope.
 - With `pool-bb8`, `db.transaction(...)` is supported for contexts created
   from `from_pool(...)`. The runtime pins one physical pooled connection for
   the full closure, reuses it for `save_changes()`, tenant, audit and
@@ -269,15 +271,17 @@ newly materialized related rows untracked.
 Navigation graph tracking remains intentionally narrow. Includes return
 ordinary entity values and do not register included graphs automatically.
 `load_collection_tracked(...)` mutates only the tracked root wrapper without
-tracking related entities. Relationship changes inside navigation wrappers are
-not persisted by `save_changes()` in the stable explicit-tracking cut.
-Wrappers do expose explicit mutation helpers for the future graph planner:
+tracking untracked related entities. Relationship changes inside navigation
+wrappers are persisted by `save_changes()` only for the simple-FK slice covered
+by runtime SQL Server tests: dependent insert, FK move and optional removal as
+`SET NULL`.
+Wrappers expose explicit mutation helpers for that graph planner:
 `Navigation<T>` / `LazyNavigation<T>` can record `set_related(...)`, and
 `Collection<T>` / `LazyCollection<T>` can record `push_related(...)` and
 `remove_related_at(...)`. Those helpers only capture wrapper-local
 `RelationshipNavigationChange<T>` / `RelationshipCollectionChange<T>` values
-for later reconciliation; they do not execute SQL, register related entities or
-change `save_changes()` behavior yet. Loading/materialization helpers such as
+for reconciliation; they do not execute SQL directly or register related
+entities. Loading/materialization helpers such as
 `set(...)`, `set_loaded(...)`, `from_option(...)` and `from_vec(...)` do not
 capture relationship changes.
 

@@ -130,18 +130,15 @@ helpers that accept unchanged values or synchronize persisted rows update those
 snapshots even when the original wrapper is gone. Stage 21 promoted this
 surface to stable for explicit tracking of entities with simple primary keys.
 
-Navigation loading does not turn the tracker into a graph tracker.
-Includes materialize ordinary entity values, and explicit tracked collection
-loading attaches related values to the tracked root without registering those
-related entities. Mutating a navigation wrapper can still mark the root wrapper
-as `Modified` through normal `Tracked<T>` mutable access, but `save_changes()`
-does not persist relationship graph changes yet.
-
-Future relationship persistence must be explicit about dependent inserts,
-dependent deletes, foreign-key moves, optional relationship `SET NULL`
-behavior, many-to-many join rows and conflicts with separately tracked
-entities. Until that exists, persist relationship changes through ordinary
-`DbSet` operations on the dependent entity or explicit join entity.
+Navigation loading does not automatically register loaded graphs. Includes
+materialize ordinary entity values, and explicit tracked collection loading
+attaches related values to the tracked root without registering untracked
+related entities. The current graph-persistence slice is explicit and limited:
+tracked relationship mutations can persist dependent inserts, foreign-key moves
+and optional removals as `SET NULL` for simple FK/PK pairs, while required
+removals without explicit dependent delete and conflicting principal
+assignments fail before SQL. Direct many-to-many and composite relationship
+shapes remain outside this runtime slice.
 
 The first stable-cut identity-map policy is context-owned and keyed by entity
 type and primary-key values. `find_tracked(...)` can reattach registry entries
@@ -403,9 +400,9 @@ For the criteria used to stabilize `Tracked<T>` and `save_changes()`, see
   `pool-bb8` is enabled by pinning one physical connection for the whole
   closure.
 - Navigation properties are implemented for metadata, inferred explicit joins,
-  single-navigation includes, join-based `has_many` includes, and explicit
-  `has_many` collection loading; automatic relationship persistence is not
-  implemented.
+  single-navigation includes, join-based `has_many` includes, explicit
+  `has_many` collection loading, and a validated simple-FK graph-persistence
+  slice for tracked relationship mutations.
 - Table aliases are implemented for explicit aliases, repeated joins and
   self-joins; fully automatic alias assignment is not implemented.
 - Typed scalar and grouped aggregate builders are implemented; window

@@ -27,9 +27,11 @@ The current implementation intentionally does not support:
 - hidden lazy loading from field access.
 - automatic nested include chains.
 - split-query execution for `include_many(...)`.
-- automatic relationship persistence from navigation wrapper mutations.
-- stable graph tracking or relationship identity semantics beyond reusing
-  already tracked related snapshots during navigation materialization.
+- automatic relationship persistence beyond the validated simple-FK tracking
+  slice.
+- stable graph tracking or relationship identity semantics beyond simple-FK
+  relationship commands and reusing already tracked related snapshots during
+  navigation materialization.
 
 ## Wrapper Types
 
@@ -467,20 +469,21 @@ Current rules:
 - related entities loaded into wrappers are not automatically tracked, although
   already tracked related identities are replaced with their registry-owned
   current snapshots.
-- mutating navigation wrappers does not cause `save_changes()` to insert,
-  delete or update relationship rows.
+- mutating tracked navigation wrappers can cause `save_changes()` to persist
+  the validated simple-FK relationship commands: dependent insert, FK move and
+  optional removal as `SET NULL`.
 
 The current identity-map slice is limited to canonical snapshot reuse for
 related entities that are already tracked. It does not register loaded graphs,
 does not preserve object identity for untracked roots, and does not make
-relationship persistence graph-aware.
+relationship persistence graph-wide.
 
-Relationship persistence is also future work. Removing an item from a loaded
-collection, assigning a different parent navigation, or filling a navigation
-wrapper does not currently mean "insert", "delete", "set null" or "update the
-foreign key". Until graph update semantics are designed and validated, persist
-relationship changes through ordinary entity operations: insert/update/delete
-the dependent entity or explicit join entity directly.
+Relationship persistence is implemented only for the validated simple-FK
+tracking slice. Tracked wrapper mutations can persist a new dependent insert,
+move a dependent by updating its foreign key, or remove an optional
+relationship by setting the FK to `NULL`. Required removals without explicit
+dependent delete fail before SQL, and direct many-to-many remains modeled
+through ordinary join entities.
 
 ## Validation
 
@@ -526,4 +529,5 @@ Without `KEEP_TEST_TABLES=1`, the test drops those tables after it finishes.
 - lazy wrappers never query by themselves.
 - raw SQL does not attach navigation wrappers.
 - DTO projections do not materialize navigation wrappers.
-- graph tracking and relationship persistence are not stable.
+- graph tracking is limited to the validated simple-FK relationship persistence
+  slice; broader graph persistence is not stable.
