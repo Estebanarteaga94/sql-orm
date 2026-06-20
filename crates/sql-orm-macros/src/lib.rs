@@ -1574,6 +1574,29 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let mut collect_dependent_relationship_steps = Vec::new();
+    for dependent_field in fields.iter() {
+        let dependent_field_ident = dependent_field.ident.as_ref().ok_or_else(|| {
+            Error::new_spanned(dependent_field, "DbContext requiere campos nombrados")
+        })?;
+        for principal_field in fields.iter() {
+            let principal_entity_type =
+                dbset_entity_type(&principal_field.ty).ok_or_else(|| {
+                    Error::new_spanned(
+                        &principal_field.ty,
+                        "DbContext requiere campos con tipo DbSet<Entidad>",
+                    )
+                })?;
+
+            collect_dependent_relationship_steps.push(quote! {
+                relationship_commands.extend(
+                    self.#dependent_field_ident
+                        .collect_dependent_relationship_commands::<#principal_entity_type>(context_entities)?
+                );
+            });
+        }
+    }
+
     let save_relationship_steps = fields
         .iter()
         .enumerate()
@@ -1887,6 +1910,7 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
 
                 let mut relationship_commands = ::std::vec::Vec::new();
                 #(#collect_relationship_steps)*
+                #(#collect_dependent_relationship_steps)*
                 let relationship_plan =
                     <Self as ::sql_orm::DbContext>::tracking_registry(self)
                         .reconcile_relationship_commands(&relationship_commands)?;

@@ -6,7 +6,7 @@ use crate::soft_delete_runtime::{
 };
 use crate::tracking::{
     ReconciledRelationshipOperationKind, RelationshipCommandBatchContext,
-    RelationshipReconciliationPlan, relationship_commands_from_batch,
+    RelationshipPrincipalValues, RelationshipReconciliationPlan, relationship_commands_from_batch,
 };
 use crate::{AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, AuditValues};
 use crate::{
@@ -1269,6 +1269,73 @@ impl<E: Entity> DbSet<E> {
     }
 
     #[doc(hidden)]
+    pub fn collect_dependent_relationship_commands<P>(
+        &self,
+        context_entities: &[&'static EntityMetadata],
+    ) -> Result<Vec<crate::RelationshipCommand>, OrmError>
+    where
+        E: Clone + RelationshipMutationSource + Send + Sync + 'static,
+        P: Clone + EntityPrimaryKey + Send + Sync + 'static,
+    {
+        let principal_metadata = P::metadata();
+        let mut principal_values = None::<Vec<RelationshipPrincipalValues>>;
+        let mut commands = Vec::new();
+
+        for tracked in self.tracking_registry.tracked_for::<E>() {
+            let current = tracked.current_clone();
+
+            for batch in current.relationship_change_batches() {
+                if !matches!(
+                    batch.navigation().kind,
+                    NavigationKind::BelongsTo | NavigationKind::HasOne
+                ) || batch.navigation().target_schema != principal_metadata.schema
+                    || batch.navigation().target_table != principal_metadata.table
+                    || batch.navigation().target_rust_name != principal_metadata.rust_name
+                {
+                    continue;
+                }
+
+                let principal_values = match &principal_values {
+                    Some(principal_values) => principal_values.clone(),
+                    None => {
+                        let dependent_column = dependent_relationship_column::<E>(
+                            batch.navigation(),
+                            principal_metadata,
+                            context_entities,
+                        )?;
+                        let values = self
+                            .tracking_registry
+                            .registered_current_values_for_metadata::<P>(principal_metadata)
+                            .into_iter()
+                            .map(|(registration_id, principal)| {
+                                Ok(RelationshipPrincipalValues::new(
+                                    registration_id,
+                                    vec![ColumnValue::new(
+                                        dependent_column,
+                                        principal.primary_key_value()?,
+                                    )],
+                                ))
+                            })
+                            .collect::<Result<Vec<_>, OrmError>>()?;
+                        principal_values = Some(values.clone());
+                        values
+                    }
+                };
+                let context = dependent_relationship_command_context::<E>(
+                    tracked.registration_id(),
+                    batch.navigation(),
+                    principal_metadata,
+                    context_entities,
+                    principal_values,
+                )?;
+                commands.extend(relationship_commands_from_batch(&batch, &context)?);
+            }
+        }
+
+        Ok(commands)
+    }
+
+    #[doc(hidden)]
     pub fn reject_pending_relationship_changes(&self) -> Result<(), OrmError>
     where
         E: Clone + RelationshipMutationSource + Send + Sync + 'static,
@@ -1293,13 +1360,14 @@ impl<E: Entity> DbSet<E> {
     {
         for tracked in self.tracking_registry.tracked_for::<E>() {
             let current = tracked.current_clone();
-            if current
-                .relationship_change_batches()
-                .iter()
-                .any(|batch| batch.navigation().kind != NavigationKind::HasMany)
-            {
+            if current.relationship_change_batches().iter().any(|batch| {
+                !matches!(
+                    batch.navigation().kind,
+                    NavigationKind::HasMany | NavigationKind::BelongsTo | NavigationKind::HasOne
+                )
+            }) {
                 return Err(OrmError::compile(format!(
-                    "save_changes cannot persist non-has_many relationship wrapper mutations for entity `{}` yet",
+                    "save_changes cannot persist unsupported relationship wrapper mutations for entity `{}` yet",
                     E::metadata().rust_name
                 )));
             }
@@ -1778,6 +1846,130 @@ where
         vec![ColumnValue::new(target_column.column_name, SqlValue::Null)],
         !target_column.nullable,
     ))
+}
+
+fn dependent_relationship_command_context<E>(
+    dependent_registration_id: usize,
+    navigation: &NavigationMetadata,
+    principal_metadata: &'static EntityMetadata,
+    context_entities: &[&'static EntityMetadata],
+    principal_values: Vec<RelationshipPrincipalValues>,
+) -> Result<RelationshipCommandBatchContext, OrmError>
+where
+    E: Entity,
+{
+    if !matches!(
+        navigation.kind,
+        NavigationKind::BelongsTo | NavigationKind::HasOne
+    ) {
+        return Err(OrmError::compile(
+            "dependent relationship command context requires belongs_to or has_one navigation",
+        ));
+    }
+
+    let dependent_column =
+        dependent_relationship_column::<E>(navigation, principal_metadata, context_entities)?;
+    let dependent_metadata = context_entity_metadata::<E>(context_entities)?;
+    let dependent_column_metadata =
+        dependent_metadata.column(dependent_column).ok_or_else(|| {
+            OrmError::compile(format!(
+                "dependent relationship `{}` column `{}` was not found on `{}`",
+                navigation.rust_field, dependent_column, dependent_metadata.rust_name
+            ))
+        })?;
+
+    Ok(RelationshipCommandBatchContext::for_dependent(
+        dependent_registration_id,
+        principal_values,
+        vec![ColumnValue::new(dependent_column, SqlValue::Null)],
+        !dependent_column_metadata.nullable,
+    ))
+}
+
+fn dependent_relationship_column<E>(
+    navigation: &NavigationMetadata,
+    principal_metadata: &'static EntityMetadata,
+    context_entities: &[&'static EntityMetadata],
+) -> Result<&'static str, OrmError>
+where
+    E: Entity,
+{
+    let dependent_metadata = context_entity_metadata::<E>(context_entities)?;
+    let foreign_key = if let Some(foreign_key_name) = navigation.foreign_key_name {
+        dependent_metadata
+            .foreign_key(foreign_key_name)
+            .ok_or_else(|| {
+                OrmError::compile(format!(
+                    "dependent relationship `{}` references foreign key `{}` missing from entity `{}`",
+                    navigation.rust_field, foreign_key_name, dependent_metadata.rust_name
+                ))
+            })?
+    } else {
+        let matching_foreign_keys = dependent_metadata
+            .foreign_keys_referencing(principal_metadata.schema, principal_metadata.table);
+        match matching_foreign_keys.as_slice() {
+            [foreign_key] => *foreign_key,
+            [] => {
+                return Err(OrmError::compile(format!(
+                    "dependent entity `{}` has no foreign key referencing principal `{}`",
+                    dependent_metadata.rust_name, principal_metadata.rust_name
+                )));
+            }
+            _ => {
+                return Err(OrmError::compile(format!(
+                    "dependent entity `{}` has multiple foreign keys referencing principal `{}`; dependent-side relationship collection requires an unambiguous foreign key",
+                    dependent_metadata.rust_name, principal_metadata.rust_name
+                )));
+            }
+        }
+    };
+
+    if foreign_key.columns.len() != 1 || foreign_key.referenced_columns.len() != 1 {
+        return Err(OrmError::compile(
+            "dependent relationship command context currently supports only simple foreign keys",
+        ));
+    }
+
+    if !foreign_key.references_table(principal_metadata.schema, principal_metadata.table) {
+        return Err(OrmError::compile(format!(
+            "dependent relationship `{}` foreign key does not reference principal `{}`",
+            navigation.rust_field, principal_metadata.rust_name
+        )));
+    }
+
+    if foreign_key.columns != navigation.local_columns
+        || foreign_key.referenced_columns != navigation.target_columns
+    {
+        return Err(OrmError::compile(format!(
+            "dependent relationship `{}` foreign key metadata does not match navigation columns",
+            navigation.rust_field
+        )));
+    }
+
+    Ok(foreign_key.columns[0])
+}
+
+fn context_entity_metadata<E>(
+    context_entities: &[&'static EntityMetadata],
+) -> Result<&'static EntityMetadata, OrmError>
+where
+    E: Entity,
+{
+    let metadata = E::metadata();
+    context_entities
+        .iter()
+        .copied()
+        .find(|candidate| {
+            candidate.schema == metadata.schema
+                && candidate.table == metadata.table
+                && candidate.rust_name == metadata.rust_name
+        })
+        .ok_or_else(|| {
+            OrmError::compile(format!(
+                "entity `{}` is not part of this DbContext",
+                metadata.rust_name
+            ))
+        })
 }
 
 impl<E: Entity> DbSet<E> {
@@ -2338,6 +2530,12 @@ mod tests {
     #[derive(Clone)]
     struct ExplicitLoadChild;
     #[derive(Clone)]
+    struct BelongsToRelationshipChild {
+        id: i64,
+        navigation: &'static NavigationMetadata,
+        changes: Vec<RelationshipMutationIdentityChange>,
+    }
+    #[derive(Clone)]
     struct HasManyRelationshipRoot {
         id: i64,
         navigation: &'static NavigationMetadata,
@@ -2564,15 +2762,27 @@ mod tests {
         navigations: &EXPLICIT_LOAD_NAVIGATIONS,
     };
 
-    static UNSUPPORTED_BELONGS_TO_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
-        "parent",
-        NavigationKind::BelongsTo,
-        "ExplicitLoadRoot",
+    static BELONGS_TO_RELATIONSHIP_CHILD_NAVIGATIONS: [NavigationMetadata; 1] =
+        [NavigationMetadata::new(
+            "parent",
+            NavigationKind::BelongsTo,
+            "HasManyRelationshipRoot",
+            "dbo",
+            "explicit_load_roots",
+            &["root_id"],
+            &["id"],
+            Some("fk_explicit_load_children_root"),
+        )];
+
+    static UNSUPPORTED_MANY_TO_MANY_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
+        "tags",
+        NavigationKind::ManyToMany,
+        "Tag",
         "dbo",
-        "explicit_load_roots",
-        &["root_id"],
+        "tags",
         &["id"],
-        Some("fk_explicit_load_children_root"),
+        &["id"],
+        None,
     );
 
     static EXPLICIT_LOAD_CHILD_METADATA: EntityMetadata = EntityMetadata {
@@ -2588,6 +2798,21 @@ mod tests {
         indexes: &[],
         foreign_keys: &EXPLICIT_LOAD_CHILD_FOREIGN_KEYS,
         navigations: &[],
+    };
+
+    static BELONGS_TO_RELATIONSHIP_CHILD_METADATA: EntityMetadata = EntityMetadata {
+        rust_name: "BelongsToRelationshipChild",
+        schema: "dbo",
+        table: "explicit_load_children",
+        renamed_from: None,
+        columns: &EXPLICIT_LOAD_CHILD_COLUMNS,
+        primary_key: PrimaryKeyMetadata {
+            name: None,
+            columns: &["id"],
+        },
+        indexes: &[],
+        foreign_keys: &EXPLICIT_LOAD_CHILD_FOREIGN_KEYS,
+        navigations: &BELONGS_TO_RELATIONSHIP_CHILD_NAVIGATIONS,
     };
 
     static RELATIONSHIP_GUARD_ENTITY_COLUMNS: [ColumnMetadata; 1] = [ColumnMetadata {
@@ -3175,6 +3400,12 @@ mod tests {
         }
     }
 
+    impl Entity for BelongsToRelationshipChild {
+        fn metadata() -> &'static EntityMetadata {
+            &BELONGS_TO_RELATIONSHIP_CHILD_METADATA
+        }
+    }
+
     impl Entity for HasManyRelationshipRoot {
         fn metadata() -> &'static EntityMetadata {
             &HAS_MANY_RELATIONSHIP_ROOT_METADATA
@@ -3361,6 +3592,75 @@ mod tests {
 
         fn sync_persisted(&mut self, persisted: Self) {
             *self = persisted;
+        }
+    }
+
+    impl SoftDeleteEntity for BelongsToRelationshipChild {
+        fn soft_delete_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl AuditEntity for BelongsToRelationshipChild {
+        fn audit_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl TenantScopedEntity for BelongsToRelationshipChild {
+        fn tenant_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl EntityPrimaryKey for BelongsToRelationshipChild {
+        fn primary_key_value(&self) -> Result<SqlValue, OrmError> {
+            Ok(SqlValue::I64(self.id))
+        }
+    }
+
+    impl EntityPersist for BelongsToRelationshipChild {
+        fn persist_mode(&self) -> Result<EntityPersistMode, OrmError> {
+            Ok(EntityPersistMode::Update(SqlValue::I64(self.id)))
+        }
+
+        fn insert_values(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn update_changes(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn concurrency_token(&self) -> Result<Option<SqlValue>, OrmError> {
+            Ok(None)
+        }
+
+        fn sync_persisted(&mut self, persisted: Self) {
+            *self = persisted;
+        }
+    }
+
+    impl FromRow for BelongsToRelationshipChild {
+        fn from_row<R: Row>(_row: &R) -> Result<Self, OrmError> {
+            Ok(Self {
+                id: 11,
+                navigation: &BELONGS_TO_RELATIONSHIP_CHILD_NAVIGATIONS[0],
+                changes: Vec::new(),
+            })
+        }
+    }
+
+    impl RelationshipMutationSource for BelongsToRelationshipChild {
+        fn relationship_change_batches(&self) -> Vec<crate::RelationshipMutationBatch> {
+            if self.changes.is_empty() {
+                return Vec::new();
+            }
+
+            vec![crate::RelationshipMutationBatch::new(
+                self.navigation,
+                self.changes.clone(),
+            )]
         }
     }
 
@@ -5038,6 +5338,166 @@ mod tests {
         assert_eq!(child.state(), crate::EntityState::Added);
     }
 
+    #[tokio::test]
+    async fn belongs_to_relationship_move_is_reconciled_and_dispatched_by_dependent_type() {
+        let dependent_dbset = DbSet::<BelongsToRelationshipChild>::disconnected();
+        let registry = dependent_dbset.tracking_registry();
+        let root_dbset = DbSet::<HasManyRelationshipRoot> {
+            connection: None,
+            tracking_registry: registry.clone(),
+            _entity: PhantomData,
+        };
+        let mut old_root = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 7,
+            navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+            changes: Vec::new(),
+        });
+        old_root
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+        let mut new_root = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 8,
+            navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+            changes: Vec::new(),
+        });
+        new_root
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(8))
+            .unwrap();
+        let old_root_identity = RelationshipTrackedIdentity::from_tracked(&old_root).unwrap();
+        let new_root_identity = RelationshipTrackedIdentity::from_tracked(&new_root).unwrap();
+        let mut child = Tracked::from_loaded(BelongsToRelationshipChild {
+            id: 11,
+            navigation: &BELONGS_TO_RELATIONSHIP_CHILD_NAVIGATIONS[0],
+            changes: vec![RelationshipMutationIdentityChange::Navigation(
+                RelationshipNavigationIdentityChange::Set {
+                    previous: Some(old_root_identity),
+                    current: Some(new_root_identity),
+                },
+            )],
+        });
+        child
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(11))
+            .unwrap();
+
+        let commands = dependent_dbset
+            .collect_dependent_relationship_commands::<HasManyRelationshipRoot>(&[
+                &BELONGS_TO_RELATIONSHIP_CHILD_METADATA,
+                &HAS_MANY_RELATIONSHIP_ROOT_METADATA,
+            ])
+            .unwrap();
+        let plan = registry.reconcile_relationship_commands(&commands).unwrap();
+
+        assert_eq!(child.state(), crate::EntityState::Modified);
+        assert_eq!(plan.operations().len(), 1);
+        assert_eq!(
+            plan.operations()[0].kind(),
+            ReconciledRelationshipOperationKind::Update
+        );
+        assert_eq!(
+            plan.operations()[0].relationship_values(),
+            &[ColumnValue::new("root_id", SqlValue::I64(8))]
+        );
+
+        let error = dependent_dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+        assert_eq!(root_dbset.tracking_registry().entry_count(), 3);
+    }
+
+    #[tokio::test]
+    async fn belongs_to_relationship_attach_added_child_routes_insert_values() {
+        let dependent_dbset = DbSet::<BelongsToRelationshipChild>::disconnected();
+        let registry = dependent_dbset.tracking_registry();
+        let mut root = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 7,
+            navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+            changes: Vec::new(),
+        });
+        root.attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+        let root_identity = RelationshipTrackedIdentity::from_tracked(&root).unwrap();
+        let child = dependent_dbset.add_tracked(BelongsToRelationshipChild {
+            id: 11,
+            navigation: &BELONGS_TO_RELATIONSHIP_CHILD_NAVIGATIONS[0],
+            changes: vec![RelationshipMutationIdentityChange::Navigation(
+                RelationshipNavigationIdentityChange::Set {
+                    previous: None,
+                    current: Some(root_identity),
+                },
+            )],
+        });
+
+        let commands = dependent_dbset
+            .collect_dependent_relationship_commands::<HasManyRelationshipRoot>(&[
+                &BELONGS_TO_RELATIONSHIP_CHILD_METADATA,
+                &HAS_MANY_RELATIONSHIP_ROOT_METADATA,
+            ])
+            .unwrap();
+        let plan = registry.reconcile_relationship_commands(&commands).unwrap();
+
+        assert_eq!(child.state(), crate::EntityState::Added);
+        assert_eq!(plan.operations().len(), 1);
+        assert_eq!(
+            plan.operations()[0].kind(),
+            ReconciledRelationshipOperationKind::Insert
+        );
+        assert_eq!(
+            plan.operations()[0].relationship_values(),
+            &[ColumnValue::new("root_id", SqlValue::I64(7))]
+        );
+
+        let error = dependent_dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+    }
+
+    #[test]
+    fn belongs_to_relationship_collection_rejects_detached_principal_before_sql() {
+        let dependent_dbset = DbSet::<BelongsToRelationshipChild>::disconnected();
+        let registry = dependent_dbset.tracking_registry();
+        let mut root = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 7,
+            navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+            changes: Vec::new(),
+        });
+        root.attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+        let root_identity = RelationshipTrackedIdentity::from_tracked(&root).unwrap();
+        root.detach();
+        let _child = dependent_dbset.add_tracked(BelongsToRelationshipChild {
+            id: 11,
+            navigation: &BELONGS_TO_RELATIONSHIP_CHILD_NAVIGATIONS[0],
+            changes: vec![RelationshipMutationIdentityChange::Navigation(
+                RelationshipNavigationIdentityChange::Set {
+                    previous: None,
+                    current: Some(root_identity),
+                },
+            )],
+        });
+
+        let error = dependent_dbset
+            .collect_dependent_relationship_commands::<HasManyRelationshipRoot>(&[
+                &BELONGS_TO_RELATIONSHIP_CHILD_METADATA,
+                &HAS_MANY_RELATIONSHIP_ROOT_METADATA,
+            ])
+            .unwrap_err();
+
+        assert!(error.message().contains("without FK values"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+    }
+
     #[test]
     fn has_many_relationship_collection_rejects_required_removal_before_sql() {
         let root_dbset = DbSet::<HasManyRelationshipRoot>::disconnected();
@@ -5084,7 +5544,7 @@ mod tests {
         let registry = dbset.tracking_registry();
         let mut tracked = Tracked::from_loaded(HasManyRelationshipRoot {
             id: 7,
-            navigation: &UNSUPPORTED_BELONGS_TO_NAVIGATION,
+            navigation: &UNSUPPORTED_MANY_TO_MANY_NAVIGATION,
             changes: vec![RelationshipMutationIdentityChange::Navigation(
                 RelationshipNavigationIdentityChange::Set {
                     previous: None,
@@ -5101,7 +5561,7 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(error.kind(), OrmErrorKind::Compile);
-        assert!(error.message().contains("non-has_many"));
+        assert!(error.message().contains("unsupported relationship"));
     }
 
     #[test]

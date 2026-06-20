@@ -1071,6 +1071,43 @@ impl TrackingRegistry {
             .collect()
     }
 
+    #[doc(hidden)]
+    pub fn registered_current_values_for_metadata<E>(
+        &self,
+        metadata: &'static EntityMetadata,
+    ) -> Vec<(usize, E)>
+    where
+        E: Clone + Send + Sync + 'static,
+    {
+        let mut state = self.state.lock().expect("tracking registry mutex poisoned");
+        state
+            .entries
+            .iter_mut()
+            .filter_map(|entry| {
+                if entry.entity_rust_name != metadata.rust_name
+                    || entry.identity.schema != metadata.schema
+                    || entry.identity.table != metadata.table
+                {
+                    return None;
+                }
+
+                if entry.wrapper_attached {
+                    unsafe {
+                        (entry.sync_current_from_wrapper)(
+                            &mut entry.snapshots,
+                            entry.inner_address,
+                        );
+                    }
+                }
+
+                entry
+                    .snapshots
+                    .downcast_ref::<TrackingSnapshots<E>>()
+                    .map(|snapshots| (entry.registration_id, snapshots.current.clone()))
+            })
+            .collect()
+    }
+
     #[allow(dead_code)]
     #[doc(hidden)]
     pub fn reconcile_relationship_commands(
