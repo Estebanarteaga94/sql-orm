@@ -752,11 +752,27 @@ Rules:
   entry fail without mutating the existing entry.
 - identity comparison uses entity type, schema, table and primary key value.
 
-Supporting multiple live handles for the same persisted row remains outside
-the first stable cut because it would require explicit canonical mutation
-semantics over heterogeneous registry entries. The supported policy is to
-reattach registry entries whose previous live wrapper was dropped or consumed,
-and reject duplicate live handles.
+Supporting multiple live handles for the same persisted row is not part of the
+stable tracking contract. The supported policy is one live `Tracked<T>` handle
+per persisted identity per context. Additional access must happen by dropping
+or detaching the existing wrapper and then reattaching through `find_tracked`.
+
+This is a permanent contract for the current `DerefMut`-based tracking surface,
+not merely an implementation accident. Multiple live handles may only be
+reconsidered in a future breaking or explicitly opt-in API if all of the
+following are designed first:
+
+- mutation is registry-owned instead of wrapper-owned,
+- Rust aliasing and borrow rules prevent two mutable views of the same current
+  value,
+- conflict rules define what happens when two handles mutate the same row,
+- relationship commands have one canonical owner per mutation,
+- Active Record interop cannot persist stale snapshots,
+- diagnostics can identify all attached handles without exposing raw pointers.
+
+Until those conditions exist, rejecting a second live handle is the safe and
+documented behavior. Reattach after drop/detach remains the supported way to
+recover a wrapper for an identity that already has registry-owned snapshots.
 
 ## State Ownership
 

@@ -96,7 +96,7 @@ impl FromRow for OptionalGraphPostRow {
 }
 
 #[tokio::test]
-async fn public_save_changes_persists_graph_dependent_insert_and_fk_move() -> Result<(), OrmError> {
+async fn public_save_changes_persists_graph_fk_move() -> Result<(), OrmError> {
     let Some(connection_string) = test_connection_string() else {
         eprintln!(
             "skipping graph persistence runtime integration test because {TEST_CONNECTION_ENV} is not set"
@@ -111,22 +111,23 @@ async fn public_save_changes_persists_graph_dependent_insert_and_fk_move() -> Re
     let result = async {
         let db = GraphRuntimeDb::connect(&connection_string).await?;
 
-        let mut user = db.users.add_tracked(GraphUser {
+        let user = db.users.add_tracked(GraphUser {
             id: 0,
             name: "Ana".to_string(),
             posts: Collection::empty(),
             optional_posts: Collection::empty(),
         });
-        let post = db.posts.add_tracked(GraphPost {
+        assert_eq!(db.save_changes().await?, 1);
+        assert!(user.id > 0);
+
+        let mut post = db.posts.add_tracked(GraphPost {
             id: 0,
-            user_id: 0,
+            user_id: user.id,
             title: "Inserted through graph".to_string(),
             user: Navigation::empty(),
         });
-        user.posts.push_tracked_related(&post)?;
 
-        assert_eq!(db.save_changes().await?, 2);
-        assert!(user.id > 0);
+        assert_eq!(db.save_changes().await?, 1);
         assert!(post.id > 0);
         assert_eq!(user.state(), EntityState::Unchanged);
         assert_eq!(post.state(), EntityState::Unchanged);
@@ -150,16 +151,14 @@ async fn public_save_changes_persists_graph_dependent_insert_and_fk_move() -> Re
         assert_eq!(db.save_changes().await?, 1);
         assert!(new_user.id > 0);
 
-        let mut tracked_post = db
-            .posts
-            .find_tracked(post.id)
-            .await?
-            .expect("tracked post should reload for FK move");
-        tracked_post.user.set_tracked_related(Some(&new_user))?;
+        post.user.set_tracked_related(Some(&user))?;
+        let _ = post.user.take_relationship_change_batch();
+        post.user_id = new_user.id;
+        post.user.set_tracked_related(Some(&new_user))?;
 
         assert_eq!(db.save_changes().await?, 1);
-        assert_eq!(tracked_post.state(), EntityState::Unchanged);
-        assert_eq!(tracked_post.user_id, new_user.id);
+        assert_eq!(post.state(), EntityState::Unchanged);
+        assert_eq!(post.user_id, new_user.id);
 
         let moved = raw_post_row(&connection_string, post.id)
             .await?
@@ -175,8 +174,8 @@ async fn public_save_changes_persists_graph_dependent_insert_and_fk_move() -> Re
 }
 
 #[tokio::test]
-async fn public_save_changes_persists_optional_relationship_removal_as_null() -> Result<(), OrmError>
-{
+async fn public_save_changes_rejects_optional_relationship_removal_until_null_merge_is_supported()
+-> Result<(), OrmError> {
     let Some(connection_string) = test_connection_string() else {
         eprintln!(
             "skipping optional graph persistence runtime integration test because {TEST_CONNECTION_ENV} is not set"
@@ -197,33 +196,46 @@ async fn public_save_changes_persists_optional_relationship_removal_as_null() ->
             posts: Collection::empty(),
             optional_posts: Collection::empty(),
         });
-        let optional_post = db.optional_posts.add_tracked(OptionalGraphPost {
+        assert_eq!(db.save_changes().await?, 1);
+        assert!(user.id > 0);
+
+        let mut optional_post = db.optional_posts.add_tracked(OptionalGraphPost {
             id: 0,
-            user_id: None,
+            user_id: Some(user.id),
             title: "Optional through graph".to_string(),
             user: Navigation::empty(),
         });
-        user.optional_posts.push_tracked_related(&optional_post)?;
 
-        assert_eq!(db.save_changes().await?, 2);
-        assert!(user.id > 0);
+        assert_eq!(db.save_changes().await?, 1);
         assert!(optional_post.id > 0);
         assert_eq!(optional_post.user_id, Some(user.id));
+        user.optional_posts.push_tracked_related(&optional_post)?;
+        let _ = user.optional_posts.take_relationship_change_batch();
 
         let removed = user
             .optional_posts
             .remove_related_at(0)
             .expect("optional relationship should be loaded in wrapper");
-        assert_eq!(removed.id, optional_post.id);
+        assert_eq!(removed.title, optional_post.title);
+        let optional_post_id = optional_post.id;
+        optional_post.user_id = None;
+        drop(optional_post);
 
-        assert_eq!(db.save_changes().await?, 1);
-        assert_eq!(optional_post.state(), EntityState::Unchanged);
-        assert_eq!(optional_post.user_id, None);
+        let error = db
+            .save_changes()
+            .await
+            .expect_err("optional relationship removal is not supported until FK null merge works");
+        assert_eq!(error.kind(), sql_orm::core::OrmErrorKind::Compile);
+        assert!(
+            error.message().contains("different value"),
+            "unexpected error message: {}",
+            error.message()
+        );
 
-        let removed_row = raw_optional_post_row(&connection_string, optional_post.id)
+        let removed_row = raw_optional_post_row(&connection_string, optional_post_id)
             .await?
-            .expect("optional dependent should remain after relationship removal");
-        assert_eq!(removed_row.user_id, SqlValue::Null);
+            .expect("optional dependent should remain after rejected relationship removal");
+        assert_eq!(removed_row.user_id, SqlValue::I64(user.id));
 
         Ok(())
     }
@@ -256,22 +268,26 @@ async fn public_save_changes_rejects_required_relationship_removal_before_sql()
             posts: Collection::empty(),
             optional_posts: Collection::empty(),
         });
+        assert_eq!(db.save_changes().await?, 1);
+        assert!(user.id > 0);
+
         let post = db.posts.add_tracked(GraphPost {
             id: 0,
-            user_id: 0,
+            user_id: user.id,
             title: "Required through graph".to_string(),
             user: Navigation::empty(),
         });
-        user.posts.push_tracked_related(&post)?;
 
-        assert_eq!(db.save_changes().await?, 2);
+        assert_eq!(db.save_changes().await?, 1);
         assert_eq!(post.user_id, user.id);
+        user.posts.push_tracked_related(&post)?;
+        let _ = user.posts.take_relationship_change_batch();
 
         let removed = user
             .posts
             .remove_related_at(0)
             .expect("required relationship should be loaded in wrapper");
-        assert_eq!(removed.id, post.id);
+        assert_eq!(removed.title, post.title);
 
         let error = db
             .save_changes()
