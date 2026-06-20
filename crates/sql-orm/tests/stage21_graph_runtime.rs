@@ -176,8 +176,8 @@ async fn public_save_changes_persists_graph_dependent_insert_and_fk_move() -> Re
 }
 
 #[tokio::test]
-async fn public_save_changes_rejects_optional_relationship_removal_until_null_merge_is_supported()
--> Result<(), OrmError> {
+async fn public_save_changes_persists_optional_relationship_removal_as_null() -> Result<(), OrmError>
+{
     let Some(connection_string) = test_connection_string() else {
         eprintln!(
             "skipping optional graph persistence runtime integration test because {TEST_CONNECTION_ENV} is not set"
@@ -223,21 +223,12 @@ async fn public_save_changes_rejects_optional_relationship_removal_until_null_me
         optional_post.user_id = None;
         drop(optional_post);
 
-        let error = db
-            .save_changes()
-            .await
-            .expect_err("optional relationship removal is not supported until FK null merge works");
-        assert_eq!(error.kind(), sql_orm::core::OrmErrorKind::Compile);
-        assert!(
-            error.message().contains("different value"),
-            "unexpected error message: {}",
-            error.message()
-        );
+        assert_eq!(db.save_changes().await?, 1);
 
         let removed_row = raw_optional_post_row(&connection_string, optional_post_id)
             .await?
-            .expect("optional dependent should remain after rejected relationship removal");
-        assert_eq!(removed_row.user_id, SqlValue::I64(user.id));
+            .expect("optional dependent should remain after relationship removal");
+        assert_eq!(removed_row.user_id, SqlValue::Null);
 
         Ok(())
     }

@@ -1800,7 +1800,7 @@ fn merge_relationship_values(
             .iter()
             .find(|value| value.column_name == relationship_value.column_name)
         {
-            if existing_value.value != relationship_value.value {
+            if !relationship_values_match(&existing_value.value, &relationship_value.value) {
                 return Err(OrmError::compile(format!(
                     "relationship operation assigns column `{}` but the tracked entity already has a different value",
                     relationship_value.column_name
@@ -1813,6 +1813,10 @@ fn merge_relationship_values(
     }
 
     Ok(entity_values)
+}
+
+fn relationship_values_match(left: &SqlValue, right: &SqlValue) -> bool {
+    left == right || (left.is_null() && right.is_null())
 }
 
 fn has_many_relationship_command_context<E>(
@@ -5216,6 +5220,26 @@ mod tests {
         assert_eq!(
             error.message(),
             "relationship operation assigns column `root_id` but the tracked entity already has a different value"
+        );
+    }
+
+    #[test]
+    fn reconciled_relationship_value_merge_accepts_equivalent_null_fk_values() {
+        let values = super::merge_relationship_values(
+            vec![ColumnValue::new(
+                "root_id",
+                SqlValue::TypedNull(SqlServerType::BigInt),
+            )],
+            &[ColumnValue::new("root_id", SqlValue::Null)],
+        )
+        .unwrap();
+
+        assert_eq!(
+            values,
+            vec![ColumnValue::new(
+                "root_id",
+                SqlValue::TypedNull(SqlServerType::BigInt)
+            )]
         );
     }
 
