@@ -298,6 +298,71 @@ async fn public_save_changes_rejects_required_relationship_removal_before_sql()
     result
 }
 
+#[tokio::test]
+async fn public_save_changes_rejects_conflicting_relationship_assignments_before_sql()
+-> Result<(), OrmError> {
+    let Some(connection_string) = test_connection_string() else {
+        eprintln!(
+            "skipping graph persistence conflict runtime integration test because {TEST_CONNECTION_ENV} is not set"
+        );
+        return Ok(());
+    };
+
+    let _fixture_guard = graph_runtime_fixture_lock().await;
+    let keep_tables = keep_test_tables();
+    reset_graph_tables(&connection_string).await?;
+
+    let result = async {
+        let db = GraphRuntimeDb::connect(&connection_string).await?;
+
+        let mut first_user = db.users.add_tracked(GraphUser {
+            id: 0,
+            name: "First principal".to_string(),
+            posts: Collection::empty(),
+            optional_posts: Collection::empty(),
+        });
+        let mut second_user = db.users.add_tracked(GraphUser {
+            id: 0,
+            name: "Second principal".to_string(),
+            posts: Collection::empty(),
+            optional_posts: Collection::empty(),
+        });
+        assert_eq!(db.save_changes().await?, 2);
+        assert!(first_user.id > 0);
+        assert!(second_user.id > 0);
+        assert_ne!(first_user.id, second_user.id);
+
+        let post = db.posts.add_tracked(GraphPost {
+            id: 0,
+            user_id: 0,
+            title: "Conflicting dependent".to_string(),
+            user: Navigation::empty(),
+        });
+        first_user.posts.push_tracked_related(&post)?;
+        second_user.posts.push_tracked_related(&post)?;
+
+        let error = db
+            .save_changes()
+            .await
+            .expect_err("conflicting relationship assignment should fail before SQL");
+        assert_eq!(error.kind(), sql_orm::core::OrmErrorKind::Compile);
+        assert!(
+            error.message().contains("different values"),
+            "unexpected error message: {}",
+            error.message()
+        );
+        assert_eq!(post.state(), EntityState::Added);
+        assert_eq!(post.id, 0);
+        assert_eq!(db.posts.query().count().await?, 0);
+
+        Ok(())
+    }
+    .await;
+
+    cleanup_graph_tables(&connection_string, keep_tables).await?;
+    result
+}
+
 fn test_connection_string() -> Option<String> {
     std::env::var(TEST_CONNECTION_ENV)
         .ok()
