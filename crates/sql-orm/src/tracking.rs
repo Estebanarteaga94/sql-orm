@@ -1857,6 +1857,17 @@ mod tests {
         Some("fk_composite_orders"),
     );
 
+    static DIRECT_MANY_TO_MANY_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
+        "tags",
+        NavigationKind::ManyToMany,
+        "Tag",
+        "sales",
+        "tags",
+        &["id"],
+        &["id"],
+        None,
+    );
+
     static CATEGORY_FOREIGN_KEYS: [ForeignKeyMetadata; 1] = [ForeignKeyMetadata::new(
         "fk_categories_parent",
         &["parent_id"],
@@ -3347,6 +3358,29 @@ mod tests {
         let error = relationship_commands_from_batch(&composite_batch, &context).unwrap_err();
 
         assert!(error.message().contains("simple foreign keys"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+    }
+
+    #[test]
+    fn relationship_batch_conversion_rejects_direct_many_to_many_relationships() {
+        let context = RelationshipCommandBatchContext::for_principal(
+            7,
+            vec![relation_value(SqlValue::I64(7))],
+            vec![relation_value(SqlValue::Null)],
+            false,
+        );
+        let batch = RelationshipMutationBatch::new(
+            &DIRECT_MANY_TO_MANY_NAVIGATION,
+            vec![RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Added(Some(RelationshipTrackedIdentity {
+                    registration_id: 11,
+                })),
+            )],
+        );
+
+        let error = relationship_commands_from_batch(&batch, &context).unwrap_err();
+
+        assert!(error.message().contains("direct many-to-many"));
         assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
