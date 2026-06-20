@@ -66,8 +66,12 @@
 //!   bypassing the existing `DbSet` persistence paths
 
 use crate::EntityPersist;
+use crate::{
+    RelationshipCollectionIdentityChange, RelationshipMutationBatch,
+    RelationshipMutationIdentityChange, RelationshipNavigationIdentityChange,
+};
 use core::ops::{Deref, DerefMut};
-use sql_orm_core::{ColumnValue, Entity, EntityMetadata, OrmError, SqlValue};
+use sql_orm_core::{ColumnValue, Entity, EntityMetadata, NavigationKind, OrmError, SqlValue};
 use std::any::{Any, TypeId};
 use std::fmt;
 use std::marker::PhantomData;
@@ -143,6 +147,16 @@ pub struct RelationshipCommand {
 
 #[doc(hidden)]
 #[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
+pub struct RelationshipCommandBatchContext {
+    principal_registration_id: usize,
+    set_relationship_values: Vec<ColumnValue>,
+    clear_relationship_values: Vec<ColumnValue>,
+    required: bool,
+}
+
+#[doc(hidden)]
+#[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum RelationshipCommandKind {
     AttachNew {
@@ -183,6 +197,23 @@ pub struct ReconciledRelationshipOperation {
 pub enum ReconciledRelationshipOperationKind {
     Insert,
     Update,
+}
+
+#[allow(dead_code)]
+impl RelationshipCommandBatchContext {
+    pub(crate) fn new(
+        principal_registration_id: usize,
+        set_relationship_values: Vec<ColumnValue>,
+        clear_relationship_values: Vec<ColumnValue>,
+        required: bool,
+    ) -> Self {
+        Self {
+            principal_registration_id,
+            set_relationship_values,
+            clear_relationship_values,
+            required,
+        }
+    }
 }
 
 #[allow(dead_code)]
@@ -232,6 +263,85 @@ impl RelationshipCommand {
             relationship_values,
         }
     }
+}
+
+#[doc(hidden)]
+#[allow(dead_code)]
+pub(crate) fn relationship_commands_from_batch(
+    batch: &RelationshipMutationBatch,
+    context: &RelationshipCommandBatchContext,
+) -> Result<Vec<RelationshipCommand>, OrmError> {
+    let navigation = batch.navigation();
+    if navigation.kind == NavigationKind::ManyToMany {
+        return Err(relationship_conflict_error(
+            "direct many-to-many relationship mutations are not supported by tracking",
+        ));
+    }
+
+    if navigation.local_columns.len() != 1 || navigation.target_columns.len() != 1 {
+        return Err(relationship_conflict_error(
+            "relationship command collection currently supports only simple foreign keys",
+        ));
+    }
+
+    let mut commands = Vec::new();
+    for change in batch.changes() {
+        match change {
+            RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Added(identity),
+            ) => {
+                let dependent_registration_id =
+                    required_relationship_identity(identity.as_ref(), "collection add")?;
+                commands.push(RelationshipCommand::attach_new_dependent(
+                    context.principal_registration_id,
+                    dependent_registration_id,
+                    context.set_relationship_values.clone(),
+                ));
+            }
+            RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Removed(identity),
+            ) => {
+                let dependent_registration_id =
+                    required_relationship_identity(identity.as_ref(), "collection remove")?;
+                commands.push(RelationshipCommand::remove_dependent(
+                    context.principal_registration_id,
+                    dependent_registration_id,
+                    context.required,
+                    context.clear_relationship_values.clone(),
+                ));
+            }
+            RelationshipMutationIdentityChange::Navigation(
+                RelationshipNavigationIdentityChange::Set { previous, current },
+            ) => match (previous, current) {
+                (Some(previous), Some(current)) => {
+                    commands.push(RelationshipCommand::move_dependent(
+                        Some(previous.registration_id()),
+                        context.principal_registration_id,
+                        current.registration_id(),
+                        context.set_relationship_values.clone(),
+                    ));
+                }
+                (None, Some(current)) => {
+                    commands.push(RelationshipCommand::attach_new_dependent(
+                        context.principal_registration_id,
+                        current.registration_id(),
+                        context.set_relationship_values.clone(),
+                    ));
+                }
+                (Some(previous), None) => {
+                    commands.push(RelationshipCommand::remove_dependent(
+                        context.principal_registration_id,
+                        previous.registration_id(),
+                        context.required,
+                        context.clear_relationship_values.clone(),
+                    ));
+                }
+                (None, None) => {}
+            },
+        }
+    }
+
+    Ok(commands)
 }
 
 #[allow(dead_code)]
@@ -1321,6 +1431,20 @@ fn relationship_conflict_error(message: impl Into<String>) -> OrmError {
     OrmError::compile(message)
 }
 
+#[allow(dead_code)]
+fn required_relationship_identity(
+    identity: Option<&crate::RelationshipTrackedIdentity>,
+    operation: &str,
+) -> Result<usize, OrmError> {
+    identity
+        .map(crate::RelationshipTrackedIdentity::registration_id)
+        .ok_or_else(|| {
+            relationship_conflict_error(format!(
+                "relationship {operation} mutation requires a tracked related entity identity",
+            ))
+        })
+}
+
 unsafe fn sync_current_snapshot_from_wrapper<E: Clone + Send + Sync + 'static>(
     snapshots: &mut Box<dyn Any + Send + Sync>,
     inner_address: usize,
@@ -1391,13 +1515,20 @@ impl<T> Drop for Tracked<T> {
 #[cfg(test)]
 mod tests {
     use super::{
-        EntityState, ReconciledRelationshipOperationKind, RelationshipCommand, Tracked,
-        TrackedEntityRegistration, TrackingRegistry, save_changes_operation_plan,
+        EntityState, ReconciledRelationshipOperationKind, RelationshipCommand,
+        RelationshipCommandBatchContext, Tracked, TrackedEntityRegistration, TrackingRegistry,
+        relationship_commands_from_batch, save_changes_operation_plan,
     };
     use crate::{EntityPersist, EntityPersistMode};
+    use crate::{
+        RelationshipCollectionIdentityChange, RelationshipMutationBatch,
+        RelationshipMutationIdentityChange, RelationshipNavigationIdentityChange,
+        RelationshipTrackedIdentity,
+    };
     use sql_orm_core::{
-        ColumnValue, Entity, EntityMetadata, ForeignKeyMetadata, OrmError, OrmErrorKind,
-        PrimaryKeyMetadata, ReferentialAction, SqlValue,
+        ColumnValue, Entity, EntityMetadata, ForeignKeyMetadata, NavigationKind,
+        NavigationMetadata, OrmError, OrmErrorKind, PrimaryKeyMetadata, ReferentialAction,
+        SqlValue,
     };
     use std::sync::Arc;
 
@@ -1471,6 +1602,39 @@ mod tests {
         foreign_keys: &ORDER_ITEM_FOREIGN_KEYS,
         navigations: &[],
     };
+
+    static ORDER_ITEMS_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
+        "items",
+        NavigationKind::HasMany,
+        "OrderItem",
+        "sales",
+        "order_items",
+        &["id"],
+        &["order_id"],
+        Some("fk_order_items_orders"),
+    );
+
+    static ORDER_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
+        "order",
+        NavigationKind::BelongsTo,
+        "Order",
+        "sales",
+        "orders",
+        &["order_id"],
+        &["id"],
+        Some("fk_order_items_orders"),
+    );
+
+    static COMPOSITE_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
+        "composite",
+        NavigationKind::HasMany,
+        "Composite",
+        "sales",
+        "composite",
+        &["tenant_id", "id"],
+        &["tenant_id", "order_id"],
+        Some("fk_composite_orders"),
+    );
 
     static CATEGORY_FOREIGN_KEYS: [ForeignKeyMetadata; 1] = [ForeignKeyMetadata::new(
         "fk_categories_parent",
@@ -2720,6 +2884,163 @@ mod tests {
             operation.relationship_values(),
             &[relation_value(SqlValue::I64(1))]
         );
+    }
+
+    #[test]
+    fn relationship_batch_collection_changes_convert_to_commands_without_sql() {
+        let context = RelationshipCommandBatchContext::new(
+            7,
+            vec![relation_value(SqlValue::I64(7))],
+            vec![relation_value(SqlValue::Null)],
+            false,
+        );
+        let batch = RelationshipMutationBatch::new(
+            &ORDER_ITEMS_NAVIGATION,
+            vec![
+                RelationshipMutationIdentityChange::Collection(
+                    RelationshipCollectionIdentityChange::Added(Some(
+                        RelationshipTrackedIdentity {
+                            registration_id: 11,
+                        },
+                    )),
+                ),
+                RelationshipMutationIdentityChange::Collection(
+                    RelationshipCollectionIdentityChange::Removed(Some(
+                        RelationshipTrackedIdentity {
+                            registration_id: 12,
+                        },
+                    )),
+                ),
+            ],
+        );
+
+        let commands = relationship_commands_from_batch(&batch, &context).unwrap();
+
+        assert_eq!(commands.len(), 2);
+        assert_eq!(
+            commands[0].kind,
+            super::RelationshipCommandKind::AttachNew {
+                principal_registration_id: 7,
+                dependent_registration_id: 11
+            }
+        );
+        assert_eq!(
+            commands[0].relationship_values,
+            vec![relation_value(SqlValue::I64(7))]
+        );
+        assert_eq!(
+            commands[1].kind,
+            super::RelationshipCommandKind::Remove {
+                principal_registration_id: 7,
+                dependent_registration_id: 12,
+                required: false,
+            }
+        );
+        assert_eq!(
+            commands[1].relationship_values,
+            vec![relation_value(SqlValue::Null)]
+        );
+    }
+
+    #[test]
+    fn relationship_batch_navigation_set_converts_to_move_attach_and_remove_commands() {
+        let context = RelationshipCommandBatchContext::new(
+            20,
+            vec![relation_value(SqlValue::I64(20))],
+            vec![relation_value(SqlValue::Null)],
+            true,
+        );
+        let batch = RelationshipMutationBatch::new(
+            &ORDER_NAVIGATION,
+            vec![
+                RelationshipMutationIdentityChange::Navigation(
+                    RelationshipNavigationIdentityChange::Set {
+                        previous: Some(RelationshipTrackedIdentity {
+                            registration_id: 10,
+                        }),
+                        current: Some(RelationshipTrackedIdentity {
+                            registration_id: 21,
+                        }),
+                    },
+                ),
+                RelationshipMutationIdentityChange::Navigation(
+                    RelationshipNavigationIdentityChange::Set {
+                        previous: None,
+                        current: Some(RelationshipTrackedIdentity {
+                            registration_id: 22,
+                        }),
+                    },
+                ),
+                RelationshipMutationIdentityChange::Navigation(
+                    RelationshipNavigationIdentityChange::Set {
+                        previous: Some(RelationshipTrackedIdentity {
+                            registration_id: 23,
+                        }),
+                        current: None,
+                    },
+                ),
+            ],
+        );
+
+        let commands = relationship_commands_from_batch(&batch, &context).unwrap();
+
+        assert_eq!(commands.len(), 3);
+        assert_eq!(
+            commands[0].kind,
+            super::RelationshipCommandKind::Move {
+                from_principal_registration_id: Some(10),
+                to_principal_registration_id: 20,
+                dependent_registration_id: 21
+            }
+        );
+        assert_eq!(
+            commands[1].kind,
+            super::RelationshipCommandKind::AttachNew {
+                principal_registration_id: 20,
+                dependent_registration_id: 22
+            }
+        );
+        assert_eq!(
+            commands[2].kind,
+            super::RelationshipCommandKind::Remove {
+                principal_registration_id: 20,
+                dependent_registration_id: 23,
+                required: true,
+            }
+        );
+    }
+
+    #[test]
+    fn relationship_batch_conversion_rejects_untracked_and_composite_relationships() {
+        let context = RelationshipCommandBatchContext::new(
+            7,
+            vec![relation_value(SqlValue::I64(7))],
+            vec![relation_value(SqlValue::Null)],
+            false,
+        );
+        let untracked_batch = RelationshipMutationBatch::new(
+            &ORDER_ITEMS_NAVIGATION,
+            vec![RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Added(None),
+            )],
+        );
+        let error = relationship_commands_from_batch(&untracked_batch, &context).unwrap_err();
+
+        assert!(error.message().contains("requires a tracked"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+
+        let composite_batch = RelationshipMutationBatch::new(
+            &COMPOSITE_NAVIGATION,
+            vec![RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Added(Some(RelationshipTrackedIdentity {
+                    registration_id: 11,
+                })),
+            )],
+        );
+        let error = relationship_commands_from_batch(&composite_batch, &context).unwrap_err();
+
+        assert!(error.message().contains("simple foreign keys"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
     }
 
     #[test]
