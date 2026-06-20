@@ -576,6 +576,78 @@ Stage 21 completed the stable cut by moving pending work ownership to the
 context registry while keeping a live pointer only for synchronizing attached
 wrappers.
 
+## Live Wrapper Pointer Decision
+
+The registry must remain the source of truth for persistence. `save_changes()`,
+identity lookup, duplicate detection, reattach, detached pending work and
+relationship reconciliation must read registry-owned entries, not wrapper
+lifetimes.
+
+However, the current public ergonomics still allow direct mutation through
+`DerefMut`:
+
+```rust
+tracked.name = "updated".to_string();
+tracked.current_mut().name = "updated".to_string();
+```
+
+With that API shape, mutation happens first inside the wrapper value. The
+registry cannot observe the write at the moment it occurs unless it either:
+
+- stores a live handle back to the wrapper and synchronizes before registry
+  reads, as the current implementation does, or
+- replaces direct mutable access with registry-owned mutation APIs.
+
+Therefore the explicit decision for the current line is:
+
+- keep the live wrapper pointer as an internal synchronization mechanism while
+  `DerefMut` remains a supported mutation surface,
+- keep the pointer out of identity and persistence semantics,
+- clear the pointer on drop, detach and consume,
+- keep registry-owned snapshots as the durable source for pending work,
+- do not add multiple live handles while mutation is wrapper-backed,
+- do not expose the pointer through public diagnostics or APIs.
+
+This is not a license to reintroduce wrapper-lifetime persistence. The pointer
+exists only to copy the latest attached wrapper value into the registry-owned
+current snapshot before operations that need canonical state.
+
+### Conditions For Removing The Pointer
+
+Removing `inner_address`, `wrapper_attached`, `sync_current_from_wrapper` and
+`set_wrapper_state` requires replacing wrapper-backed mutation with a
+registry-backed write model.
+
+A future implementation may choose one of these designs:
+
+- **Closure mutation API**: `tracked.update(|value| { ... })` obtains the
+  registry entry mutably, applies the closure to the registry-owned current
+  snapshot, marks state and refreshes the wrapper view afterward.
+- **Explicit field/update API**: generated methods or changesets update
+  registry-owned current values without exposing `&mut T`.
+- **Interior shared current**: wrapper and registry share one owned current
+  cell with borrow tracking strong enough to prevent multiple mutable handles.
+
+The following migration rules are mandatory:
+
+- `DerefMut` cannot keep returning a mutable reference to wrapper-owned state if
+  the pointer is removed.
+- Any replacement must preserve no-op update detection, `mark_unchanged()`,
+  `remove_tracked(...)`, `detach`, `clear_tracker`, reattach and
+  `into_current()` semantics.
+- Any replacement must define what happens to existing code that assigns
+  fields directly through `tracked.field = value`.
+- Multiple live handles may only be reconsidered after mutation is
+  registry-owned and borrow/alias rules are explicit.
+- The migration must include focused tests proving that dropped wrappers,
+  reattached wrappers, Active Record interop and graph relationship commands
+  read the same canonical current value.
+
+Until such a migration exists, removing the live pointer would either lose
+mutations made through `DerefMut` or require unsound aliasing. The supported
+contract is registry-owned persistence with a temporary live synchronization
+pointer, not a fully pointer-free registry.
+
 ## Ownership Model
 
 The registry becomes the owner of tracked entries.
