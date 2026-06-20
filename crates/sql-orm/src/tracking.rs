@@ -218,6 +218,7 @@ pub struct ReconciledRelationshipOperation {
 pub enum ReconciledRelationshipOperationKind {
     Insert,
     Update,
+    Delete,
 }
 
 #[allow(dead_code)]
@@ -1209,6 +1210,11 @@ impl TrackingRegistry {
                     let dependent_state = state.entries[dependent_index].state;
 
                     if dependent_state == EntityState::Deleted {
+                        plan.push_or_merge(ReconciledRelationshipOperation {
+                            registration_id: *dependent_registration_id,
+                            kind: ReconciledRelationshipOperationKind::Delete,
+                            relationship_values: Vec::new(),
+                        })?;
                         continue;
                     }
 
@@ -3430,7 +3436,11 @@ mod tests {
             )])
             .unwrap();
 
-        assert!(plan.operations().is_empty());
+        assert_eq!(plan.operations().len(), 1);
+        assert_eq!(
+            plan.operations()[0].kind(),
+            ReconciledRelationshipOperationKind::Delete
+        );
         assert_eq!(dependent.state(), EntityState::Deleted);
     }
 

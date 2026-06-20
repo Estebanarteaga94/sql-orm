@@ -1220,6 +1220,29 @@ impl<E: Entity> DbSet<E> {
                     tracked.sync_persisted(persisted);
                     saved += 1;
                 }
+                ReconciledRelationshipOperationKind::Delete => {
+                    if tracked.state() != crate::EntityState::Deleted {
+                        return Err(OrmError::compile(format!(
+                            "reconciled relationship delete for entity `{}` requires a Deleted tracked entry",
+                            E::metadata().rust_name
+                        )));
+                    }
+
+                    let current: E = tracked.current_clone();
+                    let key = current.primary_key_value()?;
+                    let deleted = self
+                        .delete_tracked_by_sql_value(key, current.concurrency_token()?)
+                        .await?;
+
+                    if !deleted {
+                        return Err(OrmError::concurrency(
+                            "save_changes could not delete a tracked entity for the current primary key",
+                        ));
+                    }
+
+                    self.tracking_registry.unregister(tracked.registration_id());
+                    saved += 1;
+                }
             }
         }
 
@@ -5257,6 +5280,37 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn save_reconciled_relationship_operations_routes_delete_through_dbset_values() {
+        let dbset = DbSet::<ExplicitLoadChild>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(ExplicitLoadChild);
+        tracked
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(11))
+            .unwrap();
+        tracked.mark_deleted();
+        let registration_id = registry.registrations()[0].entry_id;
+        let plan = RelationshipReconciliationPlan::from_operations_for_test(vec![
+            ReconciledRelationshipOperation::for_test(
+                registration_id,
+                ReconciledRelationshipOperationKind::Delete,
+                Vec::new(),
+            ),
+        ]);
+
+        let error = dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+        assert_eq!(tracked.state(), crate::EntityState::Deleted);
+        assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[tokio::test]
     async fn save_reconciled_relationship_operations_rejects_state_mismatch_before_sql() {
         let dbset = DbSet::<ExplicitLoadChild>::disconnected();
         let registry = dbset.tracking_registry();
@@ -5536,6 +5590,57 @@ mod tests {
         assert_eq!(error.kind(), OrmErrorKind::Compile);
         assert_eq!(child.state(), crate::EntityState::Unchanged);
         assert_eq!(child_dbset.tracking_registry().entry_count(), 2);
+    }
+
+    #[tokio::test]
+    async fn has_many_relationship_collection_routes_explicit_deleted_dependent() {
+        let root_dbset = DbSet::<HasManyRelationshipRoot>::disconnected();
+        let registry = root_dbset.tracking_registry();
+        let child_dbset = DbSet::<ExplicitLoadChild> {
+            connection: None,
+            tracking_registry: registry.clone(),
+            _entity: PhantomData,
+        };
+        let mut child = Tracked::from_loaded(ExplicitLoadChild);
+        child
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(11))
+            .unwrap();
+        let child_identity = RelationshipTrackedIdentity::from_tracked(&child).unwrap();
+        child.mark_deleted();
+        let mut root = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 7,
+            navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+            changes: vec![RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Removed(Some(child_identity)),
+            )],
+        });
+        root.attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+
+        let commands = root_dbset
+            .collect_has_many_relationship_commands(&[
+                &HAS_MANY_RELATIONSHIP_ROOT_METADATA,
+                &EXPLICIT_LOAD_CHILD_METADATA,
+            ])
+            .unwrap();
+        let plan = registry.reconcile_relationship_commands(&commands).unwrap();
+
+        assert_eq!(plan.operations().len(), 1);
+        assert_eq!(
+            plan.operations()[0].kind(),
+            ReconciledRelationshipOperationKind::Delete
+        );
+
+        let error = child_dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+        assert_eq!(child.state(), crate::EntityState::Deleted);
     }
 
     #[test]
