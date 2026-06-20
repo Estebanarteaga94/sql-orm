@@ -4,7 +4,10 @@ use crate::soft_delete_runtime::{
     SoftDeleteOperation, SoftDeleteProvider, SoftDeleteRequestValues, SoftDeleteValues,
     apply_soft_delete_values,
 };
-use crate::tracking::{ReconciledRelationshipOperationKind, RelationshipReconciliationPlan};
+use crate::tracking::{
+    ReconciledRelationshipOperationKind, RelationshipCommandBatchContext,
+    RelationshipReconciliationPlan, relationship_commands_from_batch,
+};
 use crate::{AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, AuditValues};
 use crate::{
     IncludeCollection, RawCommand, RawQuery, RelationshipMutationSource, SoftDeleteEntity,
@@ -19,8 +22,8 @@ use std::sync::{
 
 use crate::{EntityPersist, EntityPrimaryKey};
 use sql_orm_core::{
-    Changeset, ColumnValue, Entity, EntityMetadata, FromRow, Insertable, NavigationKind, OrmError,
-    SqlTypeMapping, SqlValue,
+    Changeset, ColumnValue, Entity, EntityMetadata, FromRow, Insertable, NavigationKind,
+    NavigationMetadata, OrmError, SqlTypeMapping, SqlValue,
 };
 use sql_orm_query::{
     ColumnRef, DeleteQuery, Expr, InsertQuery, Predicate, SelectQuery, TableRef, UpdateQuery,
@@ -1125,8 +1128,8 @@ impl<E: Entity> DbSet<E> {
         Ok(saved)
     }
 
-    #[allow(dead_code)]
-    pub(crate) async fn save_reconciled_relationship_operations(
+    #[doc(hidden)]
+    pub async fn save_reconciled_relationship_operations(
         &self,
         plan: &RelationshipReconciliationPlan,
     ) -> Result<usize, OrmError>
@@ -1224,6 +1227,48 @@ impl<E: Entity> DbSet<E> {
     }
 
     #[doc(hidden)]
+    pub fn collect_has_many_relationship_commands(
+        &self,
+        context_entities: &[&'static EntityMetadata],
+    ) -> Result<Vec<crate::RelationshipCommand>, OrmError>
+    where
+        E: Clone + EntityPrimaryKey + RelationshipMutationSource + Send + Sync + 'static,
+    {
+        let mut commands = Vec::new();
+
+        for tracked in self.tracking_registry.tracked_for::<E>() {
+            let current = tracked.current_clone();
+            let batches = current.relationship_change_batches();
+            if batches
+                .iter()
+                .any(|batch| batch.navigation().kind == NavigationKind::HasMany)
+                && tracked.state() == crate::EntityState::Added
+            {
+                return Err(OrmError::compile(format!(
+                    "save_changes cannot persist has_many relationship mutations for Added principal `{}` before its primary key is persisted",
+                    E::metadata().rust_name
+                )));
+            }
+
+            for batch in batches {
+                if batch.navigation().kind != NavigationKind::HasMany {
+                    continue;
+                }
+
+                let context = has_many_relationship_command_context::<E>(
+                    tracked.registration_id(),
+                    &current,
+                    batch.navigation(),
+                    context_entities,
+                )?;
+                commands.extend(relationship_commands_from_batch(&batch, &context)?);
+            }
+        }
+
+        Ok(commands)
+    }
+
+    #[doc(hidden)]
     pub fn reject_pending_relationship_changes(&self) -> Result<(), OrmError>
     where
         E: Clone + RelationshipMutationSource + Send + Sync + 'static,
@@ -1233,6 +1278,28 @@ impl<E: Entity> DbSet<E> {
             if !current.relationship_change_batches().is_empty() {
                 return Err(OrmError::compile(format!(
                     "save_changes cannot persist relationship wrapper mutations for entity `{}` yet because relationship command collection is not connected to execution",
+                    E::metadata().rust_name
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    #[doc(hidden)]
+    pub fn reject_pending_unsupported_relationship_changes(&self) -> Result<(), OrmError>
+    where
+        E: Clone + RelationshipMutationSource + Send + Sync + 'static,
+    {
+        for tracked in self.tracking_registry.tracked_for::<E>() {
+            let current = tracked.current_clone();
+            if current
+                .relationship_change_batches()
+                .iter()
+                .any(|batch| batch.navigation().kind != NavigationKind::HasMany)
+            {
+                return Err(OrmError::compile(format!(
+                    "save_changes cannot persist non-has_many relationship wrapper mutations for entity `{}` yet",
                     E::metadata().rust_name
                 )));
             }
@@ -1640,6 +1707,77 @@ fn merge_relationship_values(
     }
 
     Ok(entity_values)
+}
+
+fn has_many_relationship_command_context<E>(
+    principal_registration_id: usize,
+    principal: &E,
+    navigation: &NavigationMetadata,
+    context_entities: &[&'static EntityMetadata],
+) -> Result<RelationshipCommandBatchContext, OrmError>
+where
+    E: EntityPrimaryKey,
+{
+    if navigation.kind != NavigationKind::HasMany {
+        return Err(OrmError::compile(
+            "has_many relationship command context requires a has_many navigation",
+        ));
+    }
+
+    if navigation.local_columns.len() != 1 || navigation.target_columns.len() != 1 {
+        return Err(OrmError::compile(
+            "has_many relationship command context currently supports only simple foreign keys",
+        ));
+    }
+
+    let target_metadata = context_entities
+        .iter()
+        .copied()
+        .find(|metadata| {
+            metadata.schema == navigation.target_schema
+                && metadata.table == navigation.target_table
+                && metadata.rust_name == navigation.target_rust_name
+        })
+        .ok_or_else(|| {
+            OrmError::compile(format!(
+                "has_many relationship `{}` targets entity `{}` which is not part of this DbContext",
+                navigation.rust_field, navigation.target_rust_name
+            ))
+        })?;
+
+    if let Some(foreign_key_name) = navigation.foreign_key_name {
+        let foreign_key = target_metadata.foreign_key(foreign_key_name).ok_or_else(|| {
+            OrmError::compile(format!(
+                "has_many relationship `{}` references foreign key `{}` missing from target entity `{}`",
+                navigation.rust_field, foreign_key_name, target_metadata.rust_name
+            ))
+        })?;
+
+        if foreign_key.columns != navigation.target_columns
+            || foreign_key.referenced_columns != navigation.local_columns
+        {
+            return Err(OrmError::compile(format!(
+                "has_many relationship `{}` foreign key metadata does not match navigation columns",
+                navigation.rust_field
+            )));
+        }
+    }
+
+    let target_column_name = navigation.target_columns[0];
+    let target_column = target_metadata.column(target_column_name).ok_or_else(|| {
+        OrmError::compile(format!(
+            "has_many relationship `{}` target column `{}` was not found on `{}`",
+            navigation.rust_field, target_column_name, target_metadata.rust_name
+        ))
+    })?;
+    let principal_key = principal.primary_key_value()?;
+
+    Ok(RelationshipCommandBatchContext::for_principal(
+        principal_registration_id,
+        vec![ColumnValue::new(target_column.column_name, principal_key)],
+        vec![ColumnValue::new(target_column.column_name, SqlValue::Null)],
+        !target_column.nullable,
+    ))
 }
 
 impl<E: Entity> DbSet<E> {
@@ -2164,7 +2302,9 @@ mod tests {
     use crate::{
         AuditEntity, AuditOperation, AuditProvider, AuditRequestValues, EntityPersist,
         EntityPersistMode, EntityPrimaryKey, IncludeCollection, IncludeNavigation,
-        RelationshipMutationSource, SoftDeleteContext, SoftDeleteEntity, SoftDeleteOperation,
+        RelationshipCollectionIdentityChange, RelationshipMutationIdentityChange,
+        RelationshipMutationSource, RelationshipNavigationIdentityChange,
+        RelationshipTrackedIdentity, SoftDeleteContext, SoftDeleteEntity, SoftDeleteOperation,
         SoftDeleteProvider, SoftDeleteRequestValues, TenantScopedEntity, Tracked,
     };
     use sql_orm_core::{
@@ -2179,6 +2319,7 @@ mod tests {
     use sql_orm_query::{
         ColumnRef, DeleteQuery, Expr, InsertQuery, Predicate, SelectQuery, TableRef, UpdateQuery,
     };
+    use std::marker::PhantomData;
 
     #[derive(Debug, Clone)]
     struct TestEntity;
@@ -2196,6 +2337,12 @@ mod tests {
     }
     #[derive(Clone)]
     struct ExplicitLoadChild;
+    #[derive(Clone)]
+    struct HasManyRelationshipRoot {
+        id: i64,
+        navigation: &'static NavigationMetadata,
+        changes: Vec<RelationshipMutationIdentityChange>,
+    }
     #[derive(Clone)]
     struct RelationshipGuardEntity {
         pending_relationship_changes: usize,
@@ -2401,6 +2548,32 @@ mod tests {
         foreign_keys: &[],
         navigations: &EXPLICIT_LOAD_NAVIGATIONS,
     };
+
+    static HAS_MANY_RELATIONSHIP_ROOT_METADATA: EntityMetadata = EntityMetadata {
+        rust_name: "HasManyRelationshipRoot",
+        schema: "dbo",
+        table: "explicit_load_roots",
+        renamed_from: None,
+        columns: &EXPLICIT_LOAD_ROOT_COLUMNS,
+        primary_key: PrimaryKeyMetadata {
+            name: None,
+            columns: &["id"],
+        },
+        indexes: &[],
+        foreign_keys: &[],
+        navigations: &EXPLICIT_LOAD_NAVIGATIONS,
+    };
+
+    static UNSUPPORTED_BELONGS_TO_NAVIGATION: NavigationMetadata = NavigationMetadata::new(
+        "parent",
+        NavigationKind::BelongsTo,
+        "ExplicitLoadRoot",
+        "dbo",
+        "explicit_load_roots",
+        &["root_id"],
+        &["id"],
+        Some("fk_explicit_load_children_root"),
+    );
 
     static EXPLICIT_LOAD_CHILD_METADATA: EntityMetadata = EntityMetadata {
         rust_name: "ExplicitLoadChild",
@@ -3002,6 +3175,12 @@ mod tests {
         }
     }
 
+    impl Entity for HasManyRelationshipRoot {
+        fn metadata() -> &'static EntityMetadata {
+            &HAS_MANY_RELATIONSHIP_ROOT_METADATA
+        }
+    }
+
     impl Entity for RelationshipGuardEntity {
         fn metadata() -> &'static EntityMetadata {
             &RELATIONSHIP_GUARD_ENTITY_METADATA
@@ -3327,6 +3506,75 @@ mod tests {
     impl FromRow for ExplicitLoadChild {
         fn from_row<R: Row>(_row: &R) -> Result<Self, OrmError> {
             Ok(Self)
+        }
+    }
+
+    impl EntityPrimaryKey for HasManyRelationshipRoot {
+        fn primary_key_value(&self) -> Result<SqlValue, OrmError> {
+            Ok(SqlValue::I64(self.id))
+        }
+    }
+
+    impl EntityPersist for HasManyRelationshipRoot {
+        fn persist_mode(&self) -> Result<EntityPersistMode, OrmError> {
+            Ok(EntityPersistMode::Update(SqlValue::I64(self.id)))
+        }
+
+        fn insert_values(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn update_changes(&self) -> Vec<ColumnValue> {
+            Vec::new()
+        }
+
+        fn concurrency_token(&self) -> Result<Option<SqlValue>, OrmError> {
+            Ok(None)
+        }
+
+        fn sync_persisted(&mut self, persisted: Self) {
+            *self = persisted;
+        }
+    }
+
+    impl FromRow for HasManyRelationshipRoot {
+        fn from_row<R: Row>(_row: &R) -> Result<Self, OrmError> {
+            Ok(Self {
+                id: 7,
+                navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+                changes: Vec::new(),
+            })
+        }
+    }
+
+    impl AuditEntity for HasManyRelationshipRoot {
+        fn audit_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl SoftDeleteEntity for HasManyRelationshipRoot {
+        fn soft_delete_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl TenantScopedEntity for HasManyRelationshipRoot {
+        fn tenant_policy() -> Option<EntityPolicyMetadata> {
+            None
+        }
+    }
+
+    impl RelationshipMutationSource for HasManyRelationshipRoot {
+        fn relationship_change_batches(&self) -> Vec<crate::RelationshipMutationBatch> {
+            if self.changes.is_empty() {
+                return Vec::new();
+            }
+
+            vec![crate::RelationshipMutationBatch::new(
+                self.navigation,
+                self.changes.clone(),
+            )]
         }
     }
 
@@ -4737,6 +4985,123 @@ mod tests {
         );
         assert_eq!(tracked.state(), crate::EntityState::Unchanged);
         assert_eq!(registry.entry_count(), 1);
+    }
+
+    #[tokio::test]
+    async fn has_many_relationship_commands_are_reconciled_and_dispatched_by_dependent_type() {
+        let root_dbset = DbSet::<HasManyRelationshipRoot>::disconnected();
+        let registry = root_dbset.tracking_registry();
+        let child_dbset = DbSet::<ExplicitLoadChild> {
+            connection: None,
+            tracking_registry: registry.clone(),
+            _entity: PhantomData,
+        };
+        let child = child_dbset.add_tracked(ExplicitLoadChild);
+        let child_identity = RelationshipTrackedIdentity::from_tracked(&child).unwrap();
+        let mut root = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 7,
+            navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+            changes: vec![RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Added(Some(child_identity)),
+            )],
+        });
+        root.attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+
+        let commands = root_dbset
+            .collect_has_many_relationship_commands(&[
+                &HAS_MANY_RELATIONSHIP_ROOT_METADATA,
+                &EXPLICIT_LOAD_CHILD_METADATA,
+            ])
+            .unwrap();
+        let plan = registry.reconcile_relationship_commands(&commands).unwrap();
+
+        assert_eq!(plan.operations().len(), 1);
+        assert_eq!(
+            plan.operations()[0].kind(),
+            ReconciledRelationshipOperationKind::Insert
+        );
+        assert_eq!(
+            plan.operations()[0].relationship_values(),
+            &[ColumnValue::new("root_id", SqlValue::I64(7))]
+        );
+
+        let error = child_dbset
+            .save_reconciled_relationship_operations(&plan)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            error.message(),
+            "DbSet requires an initialized shared connection"
+        );
+        assert_eq!(child.state(), crate::EntityState::Added);
+    }
+
+    #[test]
+    fn has_many_relationship_collection_rejects_required_removal_before_sql() {
+        let root_dbset = DbSet::<HasManyRelationshipRoot>::disconnected();
+        let registry = root_dbset.tracking_registry();
+        let child_dbset = DbSet::<ExplicitLoadChild> {
+            connection: None,
+            tracking_registry: registry.clone(),
+            _entity: PhantomData,
+        };
+        let mut child = Tracked::from_loaded(ExplicitLoadChild);
+        child
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(11))
+            .unwrap();
+        let child_identity = RelationshipTrackedIdentity::from_tracked(&child).unwrap();
+        let mut root = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 7,
+            navigation: &EXPLICIT_LOAD_NAVIGATIONS[0],
+            changes: vec![RelationshipMutationIdentityChange::Collection(
+                RelationshipCollectionIdentityChange::Removed(Some(child_identity)),
+            )],
+        });
+        root.attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+
+        let commands = root_dbset
+            .collect_has_many_relationship_commands(&[
+                &HAS_MANY_RELATIONSHIP_ROOT_METADATA,
+                &EXPLICIT_LOAD_CHILD_METADATA,
+            ])
+            .unwrap();
+        let error = registry
+            .reconcile_relationship_commands(&commands)
+            .unwrap_err();
+
+        assert!(error.message().contains("required relationship"));
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+        assert_eq!(child.state(), crate::EntityState::Unchanged);
+        assert_eq!(child_dbset.tracking_registry().entry_count(), 2);
+    }
+
+    #[test]
+    fn unsupported_relationship_guard_still_rejects_non_has_many_batches() {
+        let dbset = DbSet::<HasManyRelationshipRoot>::disconnected();
+        let registry = dbset.tracking_registry();
+        let mut tracked = Tracked::from_loaded(HasManyRelationshipRoot {
+            id: 7,
+            navigation: &UNSUPPORTED_BELONGS_TO_NAVIGATION,
+            changes: vec![RelationshipMutationIdentityChange::Navigation(
+                RelationshipNavigationIdentityChange::Set {
+                    previous: None,
+                    current: None,
+                },
+            )],
+        });
+        tracked
+            .attach_registry_loaded(registry.clone(), SqlValue::I64(7))
+            .unwrap();
+
+        let error = dbset
+            .reject_pending_unsupported_relationship_changes()
+            .unwrap_err();
+
+        assert_eq!(error.kind(), OrmErrorKind::Compile);
+        assert!(error.message().contains("non-has_many"));
     }
 
     #[test]

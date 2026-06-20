@@ -1072,7 +1072,8 @@ impl TrackingRegistry {
     }
 
     #[allow(dead_code)]
-    pub(crate) fn reconcile_relationship_commands(
+    #[doc(hidden)]
+    pub fn reconcile_relationship_commands(
         &self,
         commands: &[RelationshipCommand],
     ) -> Result<RelationshipReconciliationPlan, OrmError> {

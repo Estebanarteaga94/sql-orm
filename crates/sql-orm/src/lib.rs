@@ -70,7 +70,8 @@ pub use sql_orm_tiberius::{MssqlPool, MssqlPoolBuilder, MssqlPooledConnection};
 pub use tracking::{EntityState, Tracked};
 #[doc(hidden)]
 pub use tracking::{
-    SaveChangesOperationPlan, TrackedEntityRegistration, TrackingRegistry, TrackingRegistryHandle,
+    RelationshipCommand, RelationshipReconciliationPlan, SaveChangesOperationPlan,
+    TrackedEntityRegistration, TrackingRegistry, TrackingRegistryHandle,
     save_changes_operation_plan,
 };
 

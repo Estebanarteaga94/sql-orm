@@ -1559,6 +1559,37 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
         })
         .collect::<Result<Vec<_>>>()?;
 
+    let collect_relationship_steps = fields
+        .iter()
+        .map(|field| {
+            let field_ident = field
+                .ident
+                .as_ref()
+                .ok_or_else(|| Error::new_spanned(field, "DbContext requiere campos nombrados"))?;
+            Ok(quote! {
+                relationship_commands.extend(
+                    self.#field_ident.collect_has_many_relationship_commands(context_entities)?
+                );
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let save_relationship_steps = fields
+        .iter()
+        .enumerate()
+        .map(|(field_index, field)| {
+            let field_ident = field
+                .ident
+                .as_ref()
+                .ok_or_else(|| Error::new_spanned(field, "DbContext requiere campos nombrados"))?;
+            Ok(quote! {
+                #field_index => {
+                    saved += self.#field_ident.save_reconciled_relationship_operations(&relationship_plan).await?;
+                }
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
     let relationship_guard_steps = fields
         .iter()
         .map(|field| {
@@ -1567,7 +1598,7 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                 .as_ref()
                 .ok_or_else(|| Error::new_spanned(field, "DbContext requiere campos nombrados"))?;
             Ok(quote! {
-                self.#field_ident.reject_pending_relationship_changes()?;
+                self.#field_ident.reject_pending_unsupported_relationship_changes()?;
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1849,9 +1880,25 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                 #(#save_changes_bounds,)*
             {
                 let mut saved = 0usize;
-                let save_plan = ::sql_orm::save_changes_operation_plan(&[
+                let context_entities = &[
                     #(#save_plan_entity_metadata),*
-                ])?;
+                ];
+                let save_plan = ::sql_orm::save_changes_operation_plan(context_entities)?;
+
+                let mut relationship_commands = ::std::vec::Vec::new();
+                #(#collect_relationship_steps)*
+                let relationship_plan =
+                    <Self as ::sql_orm::DbContext>::tracking_registry(self)
+                        .reconcile_relationship_commands(&relationship_commands)?;
+
+                for entity_index in save_plan.added_order() {
+                    match *entity_index {
+                        #(#save_relationship_steps)*
+                        _ => {}
+                    }
+                }
+
+                self.__sql_orm_reject_pending_relationship_changes()?;
 
                 for entity_index in save_plan.added_order() {
                     match *entity_index {
@@ -1900,8 +1947,6 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
             where
                 #(#save_changes_bounds,)*
             {
-                self.__sql_orm_reject_pending_relationship_changes()?;
-
                 let shared_connection =
                     <Self as ::sql_orm::DbContext>::shared_connection(self);
 
