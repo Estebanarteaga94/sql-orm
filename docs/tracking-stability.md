@@ -231,14 +231,15 @@ runtime behavior.
 
 ## Primary Key Scope
 
-Before stabilization, the project must choose one of two contracts:
+The current stable tracking cut keeps runtime tracking limited to simple
+primary keys with explicit `Compile` errors for composite-key routes. That
+limit is a supported exclusion, not undefined behavior.
 
-- support composite primary keys in tracking and cover them with tests,
-- or keep tracking limited to simple primary keys with a stable, explicit
-  runtime error and documentation that no route silently misbehaves.
-
-The first stable cut may choose the second option, but it must be framed as a
-supported limit, not as experimental uncertainty.
+The future composite-key contract is defined in `docs/tracking-unit-of-work.md`.
+Any implementation must use ordered key values derived from
+`EntityMetadata.primary_key.columns`, named-key lookup input, predicates over
+all key columns, full duplicate identity comparison and runtime SQL Server
+coverage before removing the current guards.
 
 ## Active Record Interaction
 
