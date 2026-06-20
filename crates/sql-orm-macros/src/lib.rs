@@ -1238,6 +1238,16 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
             }
         })
         .collect::<Vec<_>>();
+    let clear_relationship_changes = navigations
+        .iter()
+        .map(|navigation| {
+            let field_ident =
+                Ident::new(&navigation.rust_field.value(), navigation.rust_field.span());
+            quote! {
+                let _ = self.#field_ident.take_relationship_change_batch();
+            }
+        })
+        .collect::<Vec<_>>();
     let relationship_change_batches = navigations
         .iter()
         .map(|navigation| {
@@ -1410,6 +1420,10 @@ fn derive_entity_impl(input: DeriveInput) -> Result<TokenStream2> {
 
             fn pending_relationship_change_count(&self) -> usize {
                 0usize #(#relationship_change_counts)*
+            }
+
+            fn clear_relationship_changes(&mut self) {
+                #(#clear_relationship_changes)*
             }
         }
         #(#include_navigation_impls)*
@@ -1609,6 +1623,19 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                 #field_index => {
                     saved += self.#field_ident.save_reconciled_relationship_operations(&relationship_plan).await?;
                 }
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+
+    let clear_relationship_steps = fields
+        .iter()
+        .map(|field| {
+            let field_ident = field
+                .ident
+                .as_ref()
+                .ok_or_else(|| Error::new_spanned(field, "DbContext requiere campos nombrados"))?;
+            Ok(quote! {
+                self.#field_ident.clear_tracked_relationship_changes();
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -1921,6 +1948,7 @@ fn derive_db_context_impl(input: DeriveInput) -> Result<TokenStream2> {
                         _ => {}
                     }
                 }
+                #(#clear_relationship_steps)*
 
                 self.__sql_orm_reject_pending_relationship_changes()?;
 

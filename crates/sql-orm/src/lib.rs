@@ -163,6 +163,8 @@ pub trait RelationshipMutationSource: core::Entity {
         Vec::new()
     }
 
+    fn clear_relationship_changes(&mut self) {}
+
     fn pending_relationship_change_count(&self) -> usize {
         self.relationship_change_batches()
             .iter()

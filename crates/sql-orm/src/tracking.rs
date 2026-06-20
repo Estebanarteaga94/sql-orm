@@ -1146,9 +1146,10 @@ impl TrackingRegistry {
                             ));
                         }
                         EntityState::Unchanged | EntityState::Modified => {
-                            return Err(relationship_conflict_error(
-                                "attaching a new dependent requires an Added tracked entity",
-                            ));
+                            return Err(relationship_conflict_error(format!(
+                                "attaching a new dependent requires an Added tracked entity; registration `{}` is {:?}",
+                                dependent_registration_id, dependent_state
+                            )));
                         }
                     }
                 }
@@ -1476,6 +1477,25 @@ impl<E: Clone + Send + Sync + 'static> RegisteredTracked<E> {
             .set_snapshots(self.registration_id, snapshot.clone(), snapshot);
         self.tracking_registry
             .set_state(self.registration_id, EntityState::Unchanged);
+    }
+
+    pub(crate) fn replace_current_snapshot(&self, current: E) {
+        if self
+            .tracking_registry
+            .is_wrapper_attached(self.registration_id)
+        {
+            unsafe {
+                let inner = self.inner_address as *mut TrackedInner<E>;
+                (*inner).current = current.clone();
+            }
+        }
+
+        let original = self
+            .tracking_registry
+            .original_snapshot_of::<E>(self.registration_id)
+            .unwrap_or_else(|| current.clone());
+        self.tracking_registry
+            .set_snapshots(self.registration_id, original, current);
     }
 }
 

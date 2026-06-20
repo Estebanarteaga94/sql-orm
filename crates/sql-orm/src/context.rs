@@ -1399,6 +1399,21 @@ impl<E: Entity> DbSet<E> {
         Ok(())
     }
 
+    #[doc(hidden)]
+    pub fn clear_tracked_relationship_changes(&self)
+    where
+        E: Clone + RelationshipMutationSource + Send + Sync + 'static,
+    {
+        for tracked in self.tracking_registry.tracked_for::<E>() {
+            let mut current = tracked.current_clone();
+            if current.pending_relationship_change_count() == 0 {
+                continue;
+            }
+            current.clear_relationship_changes();
+            tracked.replace_current_snapshot(current);
+        }
+    }
+
     /// Inserts a new row and materializes the inserted entity.
     ///
     /// The insert path applies tenant insert fill/validation and audit runtime

@@ -96,7 +96,7 @@ impl FromRow for OptionalGraphPostRow {
 }
 
 #[tokio::test]
-async fn public_save_changes_persists_graph_fk_move() -> Result<(), OrmError> {
+async fn public_save_changes_persists_graph_dependent_insert_and_fk_move() -> Result<(), OrmError> {
     let Some(connection_string) = test_connection_string() else {
         eprintln!(
             "skipping graph persistence runtime integration test because {TEST_CONNECTION_ENV} is not set"
@@ -111,7 +111,7 @@ async fn public_save_changes_persists_graph_fk_move() -> Result<(), OrmError> {
     let result = async {
         let db = GraphRuntimeDb::connect(&connection_string).await?;
 
-        let user = db.users.add_tracked(GraphUser {
+        let mut user = db.users.add_tracked(GraphUser {
             id: 0,
             name: "Ana".to_string(),
             posts: Collection::empty(),
@@ -126,6 +126,8 @@ async fn public_save_changes_persists_graph_fk_move() -> Result<(), OrmError> {
             title: "Inserted through graph".to_string(),
             user: Navigation::empty(),
         });
+        user.posts.push_tracked_related(&post)?;
+        assert_eq!(post.state(), EntityState::Added);
 
         assert_eq!(db.save_changes().await?, 1);
         assert!(post.id > 0);
